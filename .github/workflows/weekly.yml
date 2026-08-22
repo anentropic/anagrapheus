@@ -1,0 +1,78 @@
+
+name: Weekly compatibility check
+
+on:
+  schedule:
+    - cron: '0 7 * * 1'  # Every Monday at 07:00 UTC
+  workflow_dispatch:
+concurrency:
+  group: weekly-compat
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  compat:
+    name: Latest deps compatibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+          python-version: "3.11"
+
+      - name: Sync latest compatible dependencies
+        run: uv sync --upgrade --dev
+
+      - name: Install prek
+        run: uv tool install prek
+
+      - name: Run quality gates
+        id: quality
+        continue-on-error: true
+        run: prek run --all-files
+
+      - name: Tests
+        id: tests
+        continue-on-error: true
+        run: uv run pytest
+
+      - name: Cache pruning
+        if: always()
+        run: uv cache prune --ci
+
+      - name: Open PR for @copilot to fix
+        if: steps.quality.outcome == 'failure' || steps.tests.outcome == 'failure'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BRANCH="deps/weekly-compat-$(date +%Y-%m-%d)"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          if ! git diff --quiet uv.lock; then
+            git add uv.lock
+            git commit -m "chore: update uv.lock for weekly compatibility check"
+          fi
+          git push --force origin "$BRANCH"
+          gh pr create \
+            --base main \
+            --head "$BRANCH" \
+            --title "chore: weekly dependency compatibility failure ($(date +%Y-%m-%d))" \
+            --body "## Weekly compatibility check failed
+
+          The scheduled [weekly compatibility run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) found that the latest compatible dependency versions break this project.
+
+          @copilot please investigate the CI failures and fix any incompatibilities — check for breaking changes in recently released dependency versions.
+
+          **Failed run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            || echo "PR already exists for branch $BRANCH, skipping creation"

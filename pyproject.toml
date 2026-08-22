@@ -1,0 +1,62 @@
+[project]
+name = "anagrapheus"
+version = "0.1.0"
+description = "Event-sourced timeline, belief store, and identity layer for long-running agents."
+readme = "README.md"
+authors = [
+    { name = "Anentropic", email = "ego@anentropic.com" }
+]
+requires-python = ">=3.11"
+dependencies = []
+
+[build-system]
+requires = ["uv_build>=0.9.18,<1.0.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "basedpyright>=1.38.0",
+    "ipython>=9.10.0",
+    "pdbpp>=0.12.0.post1",
+    "pytest>=8.0.0",
+    "pytest-cov>=6.0.0",
+    "ruff>=0.15.1",
+]
+docs = [
+    "mkdocs>=1.6.0",
+    "mkdocs-material>=9.7.0",
+    "mkdocstrings[python]>=0.26.0",
+    "mkdocs-gen-files>=0.5.0",
+    "mkdocs-literate-nav>=0.6.0",
+    "mkdocs-section-index>=0.3.0",
+]
+
+[tool.pyright]
+# The minimum supported version, not the dev version: an explicit pythonVersion
+# overrides the running interpreter, so setting it to the dev version lets newer
+# stdlib and typing APIs type-check clean on *every* CI leg -- including the
+# minimum-version leg whose job is to catch them -- and fail at runtime instead.
+# Kept in step with requires-python and ruff's target-version below.
+pythonVersion = "3.11"
+typeCheckingMode = "strict"
+include = ["src", "tests"]
+reportPrivateUsage = false
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "TCH", "D"]
+ignore = [
+    "D1",    # don't require docstrings everywhere
+    "D202",  # allow blank line after docstring (common in tests)
+    "D203",  # conflicts with D211 (no blank line before class docstring)
+    "D212",  # conflicts with D213 (multiline summary on second line)
+    "D401",  # imperative mood is awkward for dunder methods
+    "D413",  # blank line after last section not required
+]
+
+[tool.pytest.ini_options]
+addopts = "-v"
