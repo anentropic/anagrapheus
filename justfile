@@ -10,7 +10,7 @@ setup-agent-cli agent="claude":
         opencode) gsd_name="opencode"; skills_name="opencode" ;; \
         *) echo "Invalid agent '${selected_agent}'. Expected 'claude' or 'opencode'."; exit 1 ;; \
     esac; \
-    npx get-shit-done-cc --"${gsd_name}" --local; \
+    npx @opengsd/gsd-core --"${gsd_name}" --local; \
     npx skills add abatilo/vimrc/plugins/abatilo-core/skills/diataxis-documentation -a "${skills_name}" -y; \
     npx skills add blader/humanizer -a "${skills_name}" -y
 
