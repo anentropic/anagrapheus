@@ -1,0 +1,44 @@
+
+name: PR Coverage Report
+
+on:
+  pull_request:
+concurrency:
+  group: pr-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  coverage:
+    name: Report test coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Sync dependencies
+        run: uv sync --locked --dev
+
+      - name: Run tests with coverage
+        run: uv run pytest --cov=src/anagrapheus --cov-report=xml --cov-report=term
+
+      - name: Post coverage comment
+        uses: MishaKav/pytest-coverage-comment@v1.1.51
+        with:
+          pytest-coverage-path: coverage.xml
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cache pruning
+        if: always()
+        run: uv cache prune --ci
