@@ -20,8 +20,7 @@ if TYPE_CHECKING:
     from contextlib import AbstractContextManager
     from uuid import UUID
 
-    from pydantic import JsonValue
-
+    from anagrapheus.timeline._canonical import Json
     from anagrapheus.timeline.envelope import PendingEvent, StoredEvent
 
 __all__ = ["EventStore", "PinScratchStore", "ScratchRow", "TransactionalStore"]
@@ -78,7 +77,7 @@ class ScratchRow(NamedTuple):
     unit_id: UUID
     pin_key: str
     kind: str
-    result: JsonValue
+    result: Json
     attempts: int
 
 

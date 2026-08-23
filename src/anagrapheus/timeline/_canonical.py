@@ -14,12 +14,17 @@ import unicodedata
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from pydantic import JsonValue
+    from collections.abc import Mapping, Sequence
 
-__all__ = ["canonical_json", "sha256_hex"]
+__all__ = ["Json", "canonical_json", "sha256_hex"]
+
+# JSON-serializable data, typed covariantly: pydantic's JsonValue unions invariant
+# dict/list, which rejects concrete returns like dict[str, int] at the pin seam.
+# A lint aid, not a validator — json.dumps is the runtime arbiter.
+type Json = Mapping[str, Json] | Sequence[Json] | str | int | float | bool | None
 
 
-def _normalize(value: JsonValue) -> JsonValue:
+def _normalize(value: Json) -> Json:
     if isinstance(value, str):
         return unicodedata.normalize("NFC", value)
     if isinstance(value, dict):
@@ -29,7 +34,7 @@ def _normalize(value: JsonValue) -> JsonValue:
     return value
 
 
-def canonical_json(value: JsonValue) -> str:
+def canonical_json(value: Json) -> str:
     """Serialize to canonical form: sorted keys, no whitespace, NFC strings."""
     return json.dumps(
         _normalize(value),
@@ -39,6 +44,6 @@ def canonical_json(value: JsonValue) -> str:
     )
 
 
-def sha256_hex(value: JsonValue) -> str:
+def sha256_hex(value: Json) -> str:
     """Return the SHA-256 hex digest of the canonical serialization."""
     return hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()

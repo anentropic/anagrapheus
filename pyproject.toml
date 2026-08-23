@@ -51,6 +51,14 @@ target-version = "py314"
 line-length = 100
 src = ["src"]
 
+[tool.ruff.lint.flake8-type-checking]
+# pydantic resolves field annotations at model build; imports its models use must
+# stay runtime even when they look annotation-only.
+runtime-evaluated-base-classes = [
+    "pydantic.BaseModel",
+    "anagrapheus.timeline.envelope.DomainEvent",
+]
+
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "TCH", "D"]
 ignore = [
