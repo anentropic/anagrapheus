@@ -109,4 +109,3 @@ class EventTypeRegistry:
         if not versions:
             raise UnknownEventType(f"no versions registered for ({namespace!r}, {type!r})")
         return max(versions)
-

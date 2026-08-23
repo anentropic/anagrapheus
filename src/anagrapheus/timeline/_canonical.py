@@ -11,8 +11,10 @@ from __future__ import annotations
 import hashlib
 import json
 import unicodedata
+from typing import TYPE_CHECKING
 
-from pydantic import JsonValue
+if TYPE_CHECKING:
+    from pydantic import JsonValue
 
 __all__ = ["canonical_json", "sha256_hex"]
 
