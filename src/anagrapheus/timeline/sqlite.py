@@ -52,7 +52,7 @@ class SQLiteEventStore:
         self._conn.execute("PRAGMA synchronous = NORMAL")
         self._conn.execute("PRAGMA foreign_keys = ON")
         migrate(self._conn)
-        self._in_txn = False
+        self._txn_depth = 0
 
     def close(self) -> None:
         """Close the underlying connection."""
@@ -61,24 +61,36 @@ class SQLiteEventStore:
     @contextmanager
     def transaction(self) -> Generator[sqlite3.Connection]:
         """
-        One explicit transaction; nested entry joins the outer transaction.
+        One explicit transaction; nested entry becomes a savepoint.
 
-        Folds that keep their state in this same file receive this connection as
-        their ``txn``, so projection writes and the watermark commit move together.
+        A nested scope that fails rolls back only its own writes, so an operation
+        like ``append`` keeps its atomicity guarantee even when a caller catches its
+        failure inside an outer transaction. Folds that keep their state in this same
+        file receive this connection as their ``txn``, so projection writes and the
+        watermark commit move together.
         """
-        if self._in_txn:
-            yield self._conn
-            return
-        self._conn.execute("BEGIN IMMEDIATE")
-        self._in_txn = True
+        depth = self._txn_depth
+        savepoint = f"anagrapheus_sp_{depth}" if depth else None
+        if savepoint is None:
+            self._conn.execute("BEGIN IMMEDIATE")
+        else:
+            self._conn.execute(f"SAVEPOINT {savepoint}")
+        self._txn_depth = depth + 1
         try:
             yield self._conn
         except BaseException:
-            self._conn.execute("ROLLBACK")
+            if savepoint is None:
+                self._conn.execute("ROLLBACK")
+            else:
+                self._conn.execute(f"ROLLBACK TO {savepoint}")
+                self._conn.execute(f"RELEASE {savepoint}")
             raise
         finally:
-            self._in_txn = False
-        self._conn.execute("COMMIT")
+            self._txn_depth = depth
+        if savepoint is None:
+            self._conn.execute("COMMIT")
+        else:
+            self._conn.execute(f"RELEASE {savepoint}")
 
     # -- EventStore ------------------------------------------------------------
 

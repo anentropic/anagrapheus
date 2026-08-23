@@ -49,6 +49,11 @@ class ProjectionFold(Protocol):
         ...
 
 
+def _validate_batch_size(batch_size: int) -> None:
+    if batch_size < 1:
+        raise ValueError(f"batch_size must be >= 1, got {batch_size}")
+
+
 class Projector:
     """Dispatches the stream to registered folds, watermark-guarded, in batches."""
 
@@ -72,6 +77,7 @@ class Projector:
         This is boot replay: called at startup it brings every projection current,
         having replayed only what each one had not yet seen.
         """
+        _validate_batch_size(batch_size)
         result: dict[str, int] = {}
         for fold in self._folds:
             if fold.clock != "sync":
@@ -91,8 +97,17 @@ class Projector:
         fold = next((f for f in self._folds if f.name == name), None)
         if fold is None:
             raise KeyError(f"no fold named {name!r}")
-        reset()
-        self._store.commit_watermark(name, 0)
+        _validate_batch_size(batch_size)
+        # Watermark to zero before (or atomically with) dropping state: a crash in
+        # between must leave a replay, never an empty projection with a high
+        # watermark that catch-up would skip past.
+        if isinstance(self._store, TransactionalStore):
+            with self._store.transaction():
+                self._store.commit_watermark(name, 0)
+                reset()
+        else:
+            self._store.commit_watermark(name, 0)
+            reset()
         return self._run(fold, batch_size=batch_size)
 
     def _run(self, fold: ProjectionFold, *, batch_size: int) -> int:

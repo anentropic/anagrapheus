@@ -99,3 +99,18 @@ def test_atomicity_under_midbatch_failure(store: SQLiteEventStore, types: EventT
         store.append([good, duplicate_id])
     assert store.last_seq() == 0
     assert list(store.read()) == []
+
+
+def test_nested_failure_rolls_back_only_its_savepoint(
+    store: SQLiteEventStore, types: EventTypeRegistry
+):
+    """A caught nested failure must not let the outer commit persist partial writes."""
+    store.append([types.pending(StepTaken(n=1))])
+    good = types.pending(StepTaken(n=2))
+    with store.transaction():
+        store.commit_watermark("outer", 1)
+        with pytest.raises(sqlite3.IntegrityError):
+            store.append([good, good.model_copy()])  # partial insert, then UNIQUE fails
+        # outer scope continues after catching the nested failure
+    assert store.last_seq() == 1  # the nested append left nothing behind
+    assert store.read_watermark("outer") == 1  # the outer work committed

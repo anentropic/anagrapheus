@@ -182,3 +182,35 @@ def test_fold_replay_invariance(
 
     assert interrupted == rebuilt == sum(values)
     store.close()
+
+
+def test_batch_size_must_be_positive(tmp_path: Path):
+    _, store, reader = make_stack(tmp_path / "t.db")
+    projector = Projector(store, reader, [MemoryLog()])
+    with pytest.raises(ValueError, match="batch_size"):
+        projector.catch_up(batch_size=0)
+    with pytest.raises(ValueError, match="batch_size"):
+        projector.rebuild("memory_log", reset=lambda: None, batch_size=-1)
+
+
+def test_rebuild_zeroes_watermark_atomically_with_reset(tmp_path: Path):
+    """If reset raises, the watermark must not stay high over dropped state."""
+    types, store, reader = make_stack(tmp_path / "t.db")
+    store.append([types.pending(StepTaken(n=1))])
+    fold = SqlSum()
+    projector = Projector(store, reader, [fold])
+    projector.catch_up()
+    assert store.read_watermark("sql_sum") == 1
+
+    def failing_reset() -> None:
+        with store.transaction() as conn:
+            conn.execute("DROP TABLE IF EXISTS sums")
+        raise RuntimeError("crash mid-rebuild")
+
+    with pytest.raises(RuntimeError):
+        projector.rebuild("sql_sum", reset=failing_reset)
+    # transactional store: state drop and watermark-zero rolled back together,
+    # OR both applied; either way catch-up cannot skip history.
+    watermark = store.read_watermark("sql_sum")
+    total = SqlSum.total(store)
+    assert (watermark, total) == (1, 1) or watermark == 0
