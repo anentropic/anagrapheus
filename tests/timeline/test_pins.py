@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import given
+from hypothesis import assume, given
 from hypothesis import strategies as st
 
 from anagrapheus.timeline.pins import (
@@ -207,6 +207,7 @@ def test_pin_key_scheme_bump_rekeys(material: dict[str, JsonValue]):
 
 @given(material=materials, extra=st.text(min_size=1, max_size=10))
 def test_pin_key_material_change_rekeys(material: dict[str, JsonValue], extra: str):
+    assume(material.get(extra) != "\x00sentinel")  # otherwise changed == material
     changed: dict[str, JsonValue] = {**material, extra: "\x00sentinel"}
     assert pin_key("k", material) != pin_key("k", changed)
 

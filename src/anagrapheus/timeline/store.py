@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from anagrapheus.timeline._canonical import Json
     from anagrapheus.timeline.envelope import PendingEvent, StoredEvent
 
-__all__ = ["EventStore", "PinScratchStore", "ScratchRow", "TransactionalStore"]
+__all__ = ["EventStore", "LedgerStore", "PinScratchStore", "ScratchRow", "TransactionalStore"]
 
 
 class EventStore(Protocol):
@@ -108,3 +108,12 @@ class PinScratchStore(Protocol):
     def scratch_clear(self, unit_id: UUID) -> None:
         """Drop every pin in a unit of work."""
         ...
+
+
+class LedgerStore(EventStore, PinScratchStore, TransactionalStore, Protocol):
+    """
+    Everything a :class:`~anagrapheus.timeline.pins.PinLedger` needs from storage.
+
+    A composite of the three capabilities — events, scratch, transactions — so any
+    conforming adapter slots in under strict typing, not only the SQLite one.
+    """

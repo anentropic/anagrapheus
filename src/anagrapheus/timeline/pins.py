@@ -8,9 +8,11 @@ runs it is replay.
 
 The whole design is in the key: hash only what consumes the entropy, never the
 interpretation. ``resolve`` takes the effect and its interpretation together and
-returns only the interpreted outcome — the caller never sees the raw draw, so a
-threshold cannot be fitted to a number after it is known. That closes the fishing
-failure structurally rather than by discipline.
+returns only the interpreted outcome. What that guarantees: entropy is consumed once
+per key, and re-reading a result never requires re-drawing it — an interpretation
+change reuses the pinned raw. What it does not guarantee: ``interpret`` is
+caller-supplied code that receives the raw value, so a caller determined to leak it
+can. The discipline is made auditable at the call site, not impossible.
 
 What counts as "the same call" — the canonicalization policy that builds the key
 material — is the application's to own. This module owns the mechanism.
@@ -34,7 +36,7 @@ if TYPE_CHECKING:
 
     from anagrapheus.timeline.envelope import PendingEvent
     from anagrapheus.timeline.registry import EventTypeRegistry
-    from anagrapheus.timeline.sqlite import SQLiteEventStore
+    from anagrapheus.timeline.store import LedgerStore
 
 __all__ = [
     "DiscardedPin",
@@ -136,7 +138,7 @@ class PinLedger:
 
     def __init__(
         self,
-        store: SQLiteEventStore,
+        store: LedgerStore,
         registry: EventTypeRegistry,
         *,
         unit_id: UUID | None = None,
@@ -158,9 +160,9 @@ class PinLedger:
         """
         Reuse the pinned raw result for ``key``, or run the effect exactly once.
 
-        The raw result never escapes: it is drawn (or fetched from the scratch) and
-        interpreted inside this call. A retry with the same key reuses; a materially
-        different call is a different key and draws fresh.
+        The raw result is drawn (or fetched from the scratch) and handed only to the
+        ``interpret`` passed in with the draw. A retry with the same key reuses; a
+        materially different call is a different key and draws fresh.
         """
         existing = self._store.scratch_get(self.unit_id, key)
         if existing is not None:

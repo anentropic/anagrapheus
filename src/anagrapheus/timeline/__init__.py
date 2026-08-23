@@ -32,6 +32,7 @@ from anagrapheus.timeline.replay import Divergence, PinMiss, ReplayPins
 from anagrapheus.timeline.sqlite import SQLiteEventStore
 from anagrapheus.timeline.store import (
     EventStore,
+    LedgerStore,
     PinScratchStore,
     ScratchRow,
     TransactionalStore,
@@ -51,6 +52,7 @@ __all__ = [
     "EventStore",
     "EventTypeRegistry",
     "Json",
+    "LedgerStore",
     "PendingEvent",
     "PinLedger",
     "PinMiss",

@@ -48,6 +48,12 @@ Decided — and it ships **used**, not unused: the pin ledger emits library even
 (`PinPromoted`, `PinsAbandoned`, `ReplayDiverged`) from day one, under the reserved
 `"anagrapheus"` namespace. The registry key is `(namespace, type, schema_version)`.
 
+One honesty note on the resolver seam: interpretation is passed in together with
+the draw, so re-reading a result never re-draws it — but `interpret` is
+caller-supplied code that receives the raw value, so keeping the raw out of caller
+hands is auditable discipline at the call site, not a structural impossibility. The
+upstream design's stronger claim assumes a trusted resolver, which a library cannot.
+
 Applications that would rather promote pins into their own vocabulary supply a
 `promote_as` factory (and the mirroring `extract` on replay) — §8's "the library
 ships the shape, the application owns the name," applied to the one place this
