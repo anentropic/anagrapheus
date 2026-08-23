@@ -7,7 +7,8 @@ Event-sourced timeline, belief store, and identity layer for long-running agents
 > designed in
 > [`narrative-vm/_design/agent-core/`](https://github.com/anentropic/narrative-vm/tree/main/_design/agent-core)
 > — the event-sourced timeline (*archeion*), the belief store (*doxastica*),
-> the identity layer, and the seams between them.
+> the identity layer, and the seams between them. Design notes specific to this
+> repository live in [`_design/`](_design/).
 
 ## Installation
 
