@@ -168,3 +168,85 @@ def test_extract_mirrors_promote_as(tmp_path: Path, types: EventTypeRegistry):
         ),
     )
     assert replay.resolve(key, kind="rng", effect=lambda: 99, interpret=lambda n: n) == 17
+
+
+def test_strict_raises_on_every_miss(types: EventTypeRegistry):
+    """Catching one PinMiss must not turn later misses into silent live draws."""
+    replay = ReplayPins({}, on_miss="strict")
+    for which in ("a", "b"):
+        with pytest.raises(PinMiss):
+            replay.resolve(
+                pin_key("rng", {"which": which}),
+                kind="rng",
+                effect=lambda: 1,
+                interpret=lambda n: n,
+            )
+    assert replay.divergence is not None
+    assert replay.divergence.missed_key == pin_key("rng", {"which": "a"})  # first miss kept
+
+
+def test_record_mode_pins_fresh_draws(types: EventTypeRegistry):
+    """The same missing key resolved twice must not consume entropy twice."""
+    replay = ReplayPins({}, on_miss="record")
+    calls: list[int] = []
+
+    def effect() -> int:
+        calls.append(1)
+        return len(calls)
+
+    key = pin_key("rng", {"die": "d20"})
+    first = replay.resolve(key, kind="rng", effect=effect, interpret=lambda n: n)
+    second = replay.resolve(key, kind="rng", effect=effect, interpret=lambda n: n)
+    assert (first, second) == (1, 1)
+    assert len(calls) == 1
+
+
+def test_unit_id_with_extract_is_rejected(types: EventTypeRegistry):
+    import uuid
+
+    with pytest.raises(ValueError, match="extract"):
+        ReplayPins.from_events([], types, unit_id=uuid.uuid7(), extract=lambda stored, event: None)
+
+
+def test_announce_appends_replay_diverged(tmp_path: Path, types: EventTypeRegistry):
+    from anagrapheus.timeline.pins import ReplayDiverged
+    from anagrapheus.timeline.registry import EventKey
+
+    store = SQLiteEventStore(tmp_path / "t.db")
+    unit = PinLedger(store, types)
+    replay = ReplayPins.from_events(
+        store.read(),
+        types,
+        on_miss="record",
+        announce=ReplayPins.announce_to(store, types, unit_id=unit.unit_id),
+    )
+    replay.resolve(pin_key("rng", {"a": 1}), kind="rng", effect=lambda: 1, interpret=lambda n: n)
+    replay.resolve(pin_key("rng", {"a": 2}), kind="rng", effect=lambda: 2, interpret=lambda n: n)
+
+    diverged = [e for e in store.read() if e.envelope.type == "ReplayDiverged"]
+    assert len(diverged) == 1  # first miss only — announced once
+    decoded = types.decode(EventKey("anagrapheus", "ReplayDiverged", 1), diverged[0].payload)
+    assert isinstance(decoded, ReplayDiverged)
+    assert decoded.unit_id == unit.unit_id
+
+
+def test_fixture_events_get_upcast(tmp_path: Path, types: EventTypeRegistry):
+    """A v1 fixture keeps working after PinPromoted gains a schema version."""
+    from anagrapheus.timeline.pins import PinPromoted
+    from anagrapheus.timeline.registry import EventKey
+    from anagrapheus.timeline.upcast import UpcastRegistry
+
+    fixture = tmp_path / "unit.jsonl"
+    record_ledger(fixture, types)
+
+    class PinPromotedV2(PinPromoted):
+        note: str = ""
+
+    types.register(EventKey("anagrapheus", "PinPromoted", 2), PinPromotedV2)
+    upcasts = UpcastRegistry()
+    upcasts.register("anagrapheus", "PinPromoted", 1, lambda p: {**p, "note": "upcast"})
+
+    replay = ReplayPins.from_events(load_ledger(fixture), types, upcasts=upcasts)
+    roll, verdict = scripted_unit(replay)
+    assert (roll, verdict) == (17, True)
+    assert replay.divergence is None
