@@ -10,15 +10,16 @@ a stale shape.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING
+
+from pydantic import JsonValue
 
 from anagrapheus.timeline.errors import DuplicateEventType, UpcastGap
 from anagrapheus.timeline.registry import EventKey
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
-
-    from pydantic import JsonValue
+    from collections.abc import Iterator
 
     from anagrapheus.timeline.envelope import DomainEvent, StoredEvent
     from anagrapheus.timeline.registry import EventTypeRegistry
@@ -26,7 +27,7 @@ if TYPE_CHECKING:
 
 __all__ = ["EventReader", "Upcast", "UpcastRegistry"]
 
-type Upcast = "Callable[[dict[str, JsonValue]], dict[str, JsonValue]]"
+type Upcast = Callable[[dict[str, JsonValue]], dict[str, JsonValue]]
 
 
 class UpcastRegistry:
