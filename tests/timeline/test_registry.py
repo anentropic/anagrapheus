@@ -78,3 +78,16 @@ def test_causation_and_correlation_pass_through():
     pending = registry.pending(StepTaken(n=1), causation_id=cause, correlation_id=corr)
     assert pending.envelope.causation_id == cause
     assert pending.envelope.correlation_id == corr
+
+
+def test_reserved_namespace_rejected_publicly():
+    from anagrapheus.timeline.pins import register_builtin_events
+    from anagrapheus.timeline.registry import RESERVED_NAMESPACE
+
+    registry = EventTypeRegistry()
+    with pytest.raises(ValueError, match="reserved"):
+        registry.register(EventKey(RESERVED_NAMESPACE, "Sneaky", 1), StepTaken)
+    with pytest.raises(ValueError, match="reserved"):
+        registry.event(RESERVED_NAMESPACE, "Sneaky")(OtherEvent)
+    register_builtin_events(registry)  # the internal path still works
+    assert registry.latest_version(RESERVED_NAMESPACE, "PinPromoted") == 1

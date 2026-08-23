@@ -11,10 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import unicodedata
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+from collections.abc import Mapping, Sequence
 
 __all__ = ["Json", "canonical_json", "sha256_hex"]
 
@@ -27,9 +24,17 @@ type Json = Mapping[str, Json] | Sequence[Json] | str | int | float | bool | Non
 def _normalize(value: Json) -> Json:
     if isinstance(value, str):
         return unicodedata.normalize("NFC", value)
-    if isinstance(value, dict):
-        return {unicodedata.normalize("NFC", k): _normalize(v) for k, v in value.items()}
-    if isinstance(value, list):
+    if isinstance(value, Mapping):
+        normalized: dict[str, Json] = {}
+        for key, item in value.items():
+            nfc_key = unicodedata.normalize("NFC", key)
+            if nfc_key in normalized:
+                # Two distinct input keys collapsing to one would make the surviving
+                # value insertion-order-dependent — a silent pin-key collision.
+                raise ValueError(f"duplicate key after NFC normalization: {nfc_key!r}")
+            normalized[nfc_key] = _normalize(item)
+        return normalized
+    if isinstance(value, Sequence) and not isinstance(value, (bytes, bytearray)):
         return [_normalize(v) for v in value]
     return value
 
@@ -41,6 +46,7 @@ def canonical_json(value: Json) -> str:
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=False,
+        allow_nan=False,
     )
 
 

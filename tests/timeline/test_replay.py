@@ -242,7 +242,7 @@ def test_fixture_events_get_upcast(tmp_path: Path, types: EventTypeRegistry):
     class PinPromotedV2(PinPromoted):
         note: str = ""
 
-    types.register(EventKey("anagrapheus", "PinPromoted", 2), PinPromotedV2)
+    types._register(EventKey("anagrapheus", "PinPromoted", 2), PinPromotedV2)
     upcasts = UpcastRegistry()
     upcasts.register("anagrapheus", "PinPromoted", 1, lambda p: {**p, "note": "upcast"})
 

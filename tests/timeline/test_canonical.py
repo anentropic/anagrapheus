@@ -2,6 +2,8 @@
 
 import unicodedata
 
+import pytest
+
 from anagrapheus.timeline._canonical import canonical_json, sha256_hex
 
 
@@ -30,3 +32,28 @@ def test_non_ascii_not_escaped():
 
 def test_value_difference_changes_hash():
     assert sha256_hex({"a": 1}) != sha256_hex({"a": 2})
+
+
+def test_tuples_and_abstract_mappings_normalize():
+    import unicodedata as ud
+    from types import MappingProxyType
+
+    decomposed = ud.normalize("NFD", "é")
+    assert canonical_json({"t": (decomposed, 1)}) == canonical_json({"t": ["é", 1]})
+    assert canonical_json(MappingProxyType({"a": 1})) == '{"a":1}'
+
+
+def test_nfc_key_collision_rejected():
+    import unicodedata as ud
+
+    composed = "é"
+    decomposed = ud.normalize("NFD", composed)
+    with pytest.raises(ValueError, match="duplicate key"):
+        canonical_json({composed: 1, decomposed: 2})
+
+
+def test_nan_and_infinity_rejected():
+    with pytest.raises(ValueError):
+        canonical_json({"x": float("nan")})
+    with pytest.raises(ValueError):
+        canonical_json({"x": float("inf")})

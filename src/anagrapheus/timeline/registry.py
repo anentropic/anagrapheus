@@ -46,7 +46,21 @@ class EventTypeRegistry:
         self._keys: dict[type[DomainEvent], EventKey] = {}
 
     def register(self, key: EventKey, model: type[DomainEvent]) -> None:
-        """Register a payload model under a key. Duplicates raise immediately."""
+        """
+        Register a payload model under a key. Duplicates raise immediately.
+
+        The ``"anagrapheus"`` namespace is reserved for this library's own events —
+        rejecting it here is what makes the reservation collision-proof rather than
+        advisory.
+        """
+        if key.namespace == RESERVED_NAMESPACE:
+            raise ValueError(
+                f"namespace {RESERVED_NAMESPACE!r} is reserved for library events; "
+                "applications register under their own namespace"
+            )
+        self._register(key, model)
+
+    def _register(self, key: EventKey, model: type[DomainEvent]) -> None:
         if key in self._models:
             raise DuplicateEventType(f"event key already registered: {key}")
         if model in self._keys:

@@ -119,9 +119,9 @@ class ReplayDiverged(DomainEvent):
 
 def register_builtin_events(registry: EventTypeRegistry) -> None:
     """Register this library's own events under the reserved namespace."""
-    registry.register(EventKey(RESERVED_NAMESPACE, "PinPromoted", 1), PinPromoted)
-    registry.register(EventKey(RESERVED_NAMESPACE, "PinsAbandoned", 1), PinsAbandoned)
-    registry.register(EventKey(RESERVED_NAMESPACE, "ReplayDiverged", 1), ReplayDiverged)
+    registry._register(EventKey(RESERVED_NAMESPACE, "PinPromoted", 1), PinPromoted)  # noqa: SLF001
+    registry._register(EventKey(RESERVED_NAMESPACE, "PinsAbandoned", 1), PinsAbandoned)  # noqa: SLF001
+    registry._register(EventKey(RESERVED_NAMESPACE, "ReplayDiverged", 1), ReplayDiverged)  # noqa: SLF001
 
 
 class PinLedger:
