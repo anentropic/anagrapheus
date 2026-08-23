@@ -13,17 +13,18 @@ substitute store slots in with no call-site changes.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, NamedTuple, Protocol
+from typing import TYPE_CHECKING, NamedTuple, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
+    from contextlib import AbstractContextManager
     from uuid import UUID
 
     from pydantic import JsonValue
 
     from anagrapheus.timeline.envelope import PendingEvent, StoredEvent
 
-__all__ = ["EventStore", "PinScratchStore", "ScratchRow"]
+__all__ = ["EventStore", "PinScratchStore", "ScratchRow", "TransactionalStore"]
 
 
 class EventStore(Protocol):
@@ -53,6 +54,21 @@ class EventStore(Protocol):
 
     def commit_watermark(self, projection: str, seq: int) -> None:
         """Record that a projection has folded through ``seq``."""
+        ...
+
+
+@runtime_checkable
+class TransactionalStore(Protocol):
+    """
+    Optional capability: a store whose folds can share its transactions.
+
+    When the projection's state lives in the same database as the stream, the
+    projector applies each batch and commits the watermark inside one of these
+    transactions, so they move together.
+    """
+
+    def transaction(self) -> AbstractContextManager[object]:
+        """One explicit transaction; nested entry joins the outer one."""
         ...
 
 
