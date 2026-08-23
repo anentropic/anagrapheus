@@ -6,8 +6,10 @@ readme = "README.md"
 authors = [
     { name = "Anentropic", email = "ego@anentropic.com" }
 ]
-requires-python = ">=3.11"
-dependencies = []
+requires-python = ">=3.14"
+dependencies = [
+    "pydantic>=2.11,<3",
+]
 
 [build-system]
 requires = ["uv_build>=0.9.18,<1.0.0"]
@@ -21,6 +23,8 @@ dev = [
     "pytest>=8.0.0",
     "pytest-cov>=6.0.0",
     "ruff>=0.15.1",
+    "hypothesis>=6.130",
+    "pydantic-ai-slim>=1.0",
 ]
 docs = [
     "mkdocs>=1.6.0",
@@ -37,13 +41,13 @@ docs = [
 # stdlib and typing APIs type-check clean on *every* CI leg -- including the
 # minimum-version leg whose job is to catch them -- and fail at runtime instead.
 # Kept in step with requires-python and ruff's target-version below.
-pythonVersion = "3.11"
+pythonVersion = "3.14"
 typeCheckingMode = "strict"
 include = ["src", "tests"]
 reportPrivateUsage = false
 
 [tool.ruff]
-target-version = "py311"
+target-version = "py314"
 line-length = 100
 src = ["src"]
 

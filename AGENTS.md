@@ -7,7 +7,10 @@ This document provides context for AI assistants (like Claude Code) working on t
 - **Source**: `src/anagrapheus/` - All package code
 - **Tests**: `tests/` - Pytest test suite with fixtures in conftest.py
 - **Build**: uv + pyproject.toml, uv_build backend
-- **Python**: >=3.11, strict type checking enabled
+- **Python**: >=3.14, strict type checking enabled
+- **Subpackages**: `anagrapheus.timeline` (event log, folds, pins, replay); later
+  `anagrapheus.identity`, `.beliefs`, `.provider`, `.chronicle`. See `_design/` for
+  the design notes governing layout and testing.
 
 ## Quality Gates (Mandatory)
 
