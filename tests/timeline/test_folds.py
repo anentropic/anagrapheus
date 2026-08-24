@@ -1,4 +1,4 @@
-"""Fold dispatch: watermark-guarded catch-up, crash resume, rebuild, and invariance."""
+"""Fold dispatch: position-guarded catch-up, crash resume, rebuild, and invariance."""
 
 import sqlite3
 from typing import TYPE_CHECKING, Literal
@@ -79,7 +79,7 @@ def test_catch_up_from_zero(tmp_path: Path):
     assert SqlSum.total(store) == 6
 
 
-def test_catch_up_resumes_above_watermark(tmp_path: Path):
+def test_catch_up_resumes_above_position(tmp_path: Path):
     types, store, reader = make_stack(tmp_path / "t.db")
     fold = MemoryLog()
     projector = Projector(store, reader, [fold])
@@ -102,7 +102,7 @@ def test_crash_between_batches_never_double_counts(tmp_path: Path):
     projector = Projector(store, reader, [SqlSum()])
     projector.catch_up(batch_size=2)  # completes fully; now simulate partial work
 
-    # rewind the world: new store handle on the same file, resume from watermark
+    # rewind the world: new store handle on the same file, resume from position
     store.close()
     store2 = SQLiteEventStore(tmp_path / "t.db")
     reader2 = EventReader(store2, UpcastRegistry(), make_types())
@@ -160,16 +160,16 @@ def test_fold_replay_invariance(
     projector = Projector(store, reader, [fold])
 
     # interrupted run: fold a limited number of batches, then "crash" and resume
-    watermark = store.read_watermark(fold.name)
+    position = store.read_position(fold.name)
     for _ in range(interrupt_after):
-        batch = list(reader.read_raw(since_seq=watermark, limit=batch_size))
+        batch = list(reader.read_raw(since_seq=position, limit=batch_size))
         if not batch:
             break
         with store.transaction() as txn:
             for event in batch:
                 fold.apply(event, txn)
-            watermark = batch[-1].seq
-            store.commit_watermark(fold.name, watermark)
+            position = batch[-1].seq
+            store.commit_position(fold.name, position)
     projector.catch_up(batch_size=batch_size)
     interrupted = SqlSum.total(store)
 
@@ -193,14 +193,14 @@ def test_batch_size_must_be_positive(tmp_path: Path):
         projector.rebuild("memory_log", reset=lambda: None, batch_size=-1)
 
 
-def test_rebuild_zeroes_watermark_atomically_with_reset(tmp_path: Path):
-    """If reset raises, the watermark must not stay high over dropped state."""
+def test_rebuild_zeroes_position_atomically_with_reset(tmp_path: Path):
+    """If reset raises, the position must not stay high over dropped state."""
     types, store, reader = make_stack(tmp_path / "t.db")
     store.append([types.pending(StepTaken(n=1))])
     fold = SqlSum()
     projector = Projector(store, reader, [fold])
     projector.catch_up()
-    assert store.read_watermark("sql_sum") == 1
+    assert store.read_position("sql_sum") == 1
 
     def failing_reset() -> None:
         with store.transaction() as conn:
@@ -209,15 +209,15 @@ def test_rebuild_zeroes_watermark_atomically_with_reset(tmp_path: Path):
 
     with pytest.raises(RuntimeError):
         projector.rebuild("sql_sum", reset=failing_reset, reset_in_transaction=True)
-    # same-file state declared in-transaction: state drop and watermark-zero roll
+    # same-file state declared in-transaction: state drop and position-zero roll
     # back together, OR both apply; either way catch-up cannot skip history.
-    watermark = store.read_watermark("sql_sum")
+    position = store.read_position("sql_sum")
     total = SqlSum.total(store)
-    assert (watermark, total) == (1, 1) or watermark == 0
+    assert (position, total) == (1, 1) or position == 0
 
 
-def test_default_rebuild_zeroes_watermark_before_reset(tmp_path: Path):
-    """External-state posture: a crash after the watermark commit replays, never skips."""
+def test_default_rebuild_zeroes_position_before_reset(tmp_path: Path):
+    """External-state posture: a crash after the position commit replays, never skips."""
     types, store, reader = make_stack(tmp_path / "t.db")
     store.append([types.pending(StepTaken(n=1))])
     fold = MemoryLog()
@@ -225,9 +225,9 @@ def test_default_rebuild_zeroes_watermark_before_reset(tmp_path: Path):
     projector.catch_up()
 
     def failing_reset() -> None:
-        assert store.read_watermark("memory_log") == 0  # already committed
+        assert store.read_position("memory_log") == 0  # already committed
         raise RuntimeError("crash during external reset")
 
     with pytest.raises(RuntimeError):
         projector.rebuild("memory_log", reset=failing_reset)
-    assert store.read_watermark("memory_log") == 0  # recovery replays
+    assert store.read_position("memory_log") == 0  # recovery replays

@@ -29,7 +29,7 @@ class SchemaTooNew(TimelineError):
 # user_version bump. `sqlite3.Connection.executescript` is deliberately avoided: its
 # transaction semantics would break per-migration atomicity.
 MIGRATIONS: Final[tuple[tuple[str, ...], ...]] = (
-    # v1 — initial schema: events, watermarks, pin_scratch.
+    # v1 — initial schema: events, positions, pin_scratch.
     (
         """
         CREATE TABLE events (
@@ -46,7 +46,7 @@ MIGRATIONS: Final[tuple[tuple[str, ...], ...]] = (
         """,
         "CREATE INDEX ix_events_correlation ON events (correlation_id)",
         """
-        CREATE TABLE watermarks (
+        CREATE TABLE projection_positions (
             projection  TEXT    PRIMARY KEY,
             seq         INTEGER NOT NULL,
             updated_at  TEXT    NOT NULL

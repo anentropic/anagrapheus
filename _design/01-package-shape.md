@@ -81,7 +81,7 @@ read models are reached through projection query methods.
 ## 6. Infra-schema migrations: `PRAGMA user_version`
 
 Event **payload** evolution is upcast-on-read and never touches the tables. The
-tables themselves (`events`, `watermarks`, `pin_scratch`) migrate via an ordered DDL
+tables themselves (`events`, `projection_positions`, `pin_scratch`) migrate via an ordered DDL
 list applied transactionally at connect, tracked in `PRAGMA user_version` — a
 consumer's file upgrades transparently on open; a fresh file runs the whole list.
 Downgrade is unsupported: opening a file whose `user_version` exceeds the library's
@@ -99,3 +99,13 @@ The pin scratch shares the events file rather than a sidecar, because promote an
 abandon must move rows scratch→events atomically, which is a single transaction in
 one file and an ATTACH dance across two. "Scratch is never canon" is enforced
 structurally: `EventStore.read()` only ever queries `events`.
+
+## 8. "Position", not "watermark"
+
+The upstream design docs say **watermark** for a projection's durable record of the
+last `seq` it folded. We use **position** instead (`read_position`/`commit_position`
+on the port; the `projection_positions` table): "watermark" collides with the
+stream-processing meaning (event-time progress markers, a different concept), while
+"position" is the established event-sourcing subscription term and Kafka's consumer
+term for exactly this. Same mechanism as the upstream docs; different, more
+conventional name.

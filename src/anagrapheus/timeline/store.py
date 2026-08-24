@@ -48,11 +48,11 @@ class EventStore(Protocol):
         """Return the highest assigned ``seq``, or 0 for an empty stream."""
         ...
 
-    def read_watermark(self, projection: str) -> int:
+    def read_position(self, projection: str) -> int:
         """Return the last ``seq`` a projection has folded, or 0 if never run."""
         ...
 
-    def commit_watermark(self, projection: str, seq: int) -> None:
+    def commit_position(self, projection: str, seq: int) -> None:
         """Record that a projection has folded through ``seq``."""
         ...
 
@@ -63,7 +63,7 @@ class TransactionalStore(Protocol):
     Optional capability: a store whose folds can share its transactions.
 
     When the projection's state lives in the same database as the stream, the
-    projector applies each batch and commits the watermark inside one of these
+    projector applies each batch and commits the position inside one of these
     transactions, so they move together.
     """
 

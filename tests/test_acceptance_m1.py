@@ -1,7 +1,7 @@
 """
 Milestone-1 acceptance: the whole timeline layer, end to end, one story.
 
-Append -> fold -> crash -> boot replay above the watermark -> pin -> retry-reuse ->
+Append -> fold -> crash -> boot replay above the position -> pin -> retry-reuse ->
 promote -> abandon-summary -> generation-replay (identical, then perturbed and
 announced divergent) -> rebuild equals incremental.
 """
@@ -102,7 +102,7 @@ def test_milestone_1_end_to_end(tmp_path: Path):
     assert projector.catch_up() == {"step_count": 3}
     assert StepCount.value(store) == 3
 
-    # 3. Crash-sim: reopen the file, append more, resume above the watermark.
+    # 3. Crash-sim: reopen the file, append more, resume above the position.
     store.close()
     store = SQLiteEventStore(path)
     reader = EventReader(store, UpcastRegistry(), types)

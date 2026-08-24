@@ -67,7 +67,7 @@ class SQLiteEventStore:
         like ``append`` keeps its atomicity guarantee even when a caller catches its
         failure inside an outer transaction. Folds that keep their state in this same
         file receive this connection as their ``txn``, so projection writes and the
-        watermark commit move together.
+        position commit move together.
         """
         depth = self._txn_depth
         savepoint = f"anagrapheus_sp_{depth}" if depth else None
@@ -142,17 +142,17 @@ class SQLiteEventStore:
         row = conn.execute("SELECT COALESCE(MAX(seq), 0) FROM events").fetchone()
         return int(row[0])
 
-    def read_watermark(self, projection: str) -> int:
+    def read_position(self, projection: str) -> int:
         """Return the last folded ``seq`` for a projection, or 0."""
         row = self._conn.execute(
-            "SELECT seq FROM watermarks WHERE projection = ?", (projection,)
+            "SELECT seq FROM projection_positions WHERE projection = ?", (projection,)
         ).fetchone()
         return int(row["seq"]) if row is not None else 0
 
-    def commit_watermark(self, projection: str, seq: int) -> None:
+    def commit_position(self, projection: str, seq: int) -> None:
         """Record a projection's progress; joins an open transaction if one exists."""
         self._conn.execute(
-            "INSERT INTO watermarks (projection, seq, updated_at) VALUES (?, ?, ?)"
+            "INSERT INTO projection_positions (projection, seq, updated_at) VALUES (?, ?, ?)"
             " ON CONFLICT (projection) DO UPDATE SET seq = excluded.seq,"
             " updated_at = excluded.updated_at",
             (projection, seq, _now_iso()),

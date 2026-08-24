@@ -70,25 +70,25 @@ def test_empty_batch_is_a_noop(store: SQLiteEventStore):
     assert store.last_seq() == 0
 
 
-def test_watermarks(store: SQLiteEventStore):
-    assert store.read_watermark("counts") == 0
-    store.commit_watermark("counts", 7)
-    assert store.read_watermark("counts") == 7
-    store.commit_watermark("counts", 9)
-    assert store.read_watermark("counts") == 9
-    assert store.read_watermark("other") == 0
+def test_positions(store: SQLiteEventStore):
+    assert store.read_position("counts") == 0
+    store.commit_position("counts", 7)
+    assert store.read_position("counts") == 7
+    store.commit_position("counts", 9)
+    assert store.read_position("counts") == 9
+    assert store.read_position("other") == 0
 
 
 def test_persistence_across_reopen(tmp_path: Path, types: EventTypeRegistry):
     path = tmp_path / "timeline.db"
     first = SQLiteEventStore(path)
     first.append([types.pending(StepTaken(n=1))])
-    first.commit_watermark("counts", 1)
+    first.commit_position("counts", 1)
     first.close()
 
     second = SQLiteEventStore(path)
     assert second.last_seq() == 1
-    assert second.read_watermark("counts") == 1
+    assert second.read_position("counts") == 1
     assert [e.payload for e in second.read()] == [{"n": 1}]
 
 
@@ -108,9 +108,9 @@ def test_nested_failure_rolls_back_only_its_savepoint(
     store.append([types.pending(StepTaken(n=1))])
     good = types.pending(StepTaken(n=2))
     with store.transaction():
-        store.commit_watermark("outer", 1)
+        store.commit_position("outer", 1)
         with pytest.raises(sqlite3.IntegrityError):
             store.append([good, good.model_copy()])  # partial insert, then UNIQUE fails
         # outer scope continues after catching the nested failure
     assert store.last_seq() == 1  # the nested append left nothing behind
-    assert store.read_watermark("outer") == 1  # the outer work committed
+    assert store.read_position("outer") == 1  # the outer work committed
