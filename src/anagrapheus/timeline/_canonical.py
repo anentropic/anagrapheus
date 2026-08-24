@@ -17,7 +17,8 @@ from typing import cast
 __all__ = ["Json", "canonical_json", "concrete_json", "sha256_hex"]
 
 # JSON-serializable data, typed covariantly: pydantic's JsonValue unions invariant
-# dict/list, which rejects concrete returns like dict[str, int] at the pin seam.
+# dict/list, which rejects concrete returns like dict[str, int] in resolver
+# signatures.
 # A lint aid, not a validator — json.dumps is the runtime arbiter.
 type Json = Mapping[str, Json] | Sequence[Json] | str | int | float | bool | None
 

@@ -67,7 +67,7 @@ def pin_key(kind: str, material: Mapping[str, Json], *, scheme: int = 1) -> PinK
 
 class PinResolver(Protocol):
     """
-    The seam agent code draws entropy through.
+    The interface through which agent code performs nondeterministic effects.
 
     Both the live ledger and replay implement it, so a unit of work is written once
     and runs identically live, under retry, and under replay.

@@ -15,7 +15,7 @@ from anagrapheus.timeline.pins import (
     pin_key,
     register_builtin_events,
 )
-from anagrapheus.timeline.registry import EventKey, EventTypeRegistry
+from anagrapheus.timeline.registry import RESERVED_NAMESPACE, EventKey, EventTypeRegistry
 from anagrapheus.timeline.sqlite import SQLiteEventStore
 
 if TYPE_CHECKING:
@@ -99,8 +99,8 @@ def test_commit_promotes_and_clears_atomically(store: SQLiteEventStore, types: E
     assert store.scratch_list(ledger.unit_id) == []
 
     (stored,) = list(store.read())
-    assert stored.envelope.namespace == "anagrapheus"
-    promoted = types.decode(EventKey("anagrapheus", "PinPromoted", 1), stored.payload)
+    assert stored.envelope.namespace == RESERVED_NAMESPACE
+    promoted = types.decode(EventKey(RESERVED_NAMESPACE, "PinPromoted", 1), stored.payload)
     assert isinstance(promoted, PinPromoted)
     assert promoted.key == key
     assert promoted.result == {"status": 200}
@@ -124,7 +124,7 @@ def test_abandon_leaves_one_summary(store: SQLiteEventStore, types: EventTypeReg
     assert store.scratch_list(ledger.unit_id) == []
 
     (stored,) = list(store.read())
-    summary = types.decode(EventKey("anagrapheus", "PinsAbandoned", 1), stored.payload)
+    summary = types.decode(EventKey(RESERVED_NAMESPACE, "PinsAbandoned", 1), stored.payload)
     assert isinstance(summary, PinsAbandoned)
     assert summary.reason == "validation failed"
     assert [(d.kind, d.attempts) for d in summary.discarded] == [("rng", 2), ("rng", 2)]

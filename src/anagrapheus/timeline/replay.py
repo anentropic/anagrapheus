@@ -58,8 +58,8 @@ class ReplayPins:
     """
     A resolver that answers from promoted pins instead of running effects.
 
-    Implements the same ``PinResolver`` seam as the live ledger, so a unit of work is
-    written once and replays without modification. ``on_miss`` picks the posture:
+    Implements the same ``PinResolver`` interface as the live ledger, so a unit of
+    work is written once and replays without modification. ``on_miss`` picks the posture:
     ``"strict"`` raises :class:`PinMiss`; ``"record"`` marks the divergence at the
     first miss and falls through to the effect — the run continues, announced as new.
     """

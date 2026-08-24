@@ -210,7 +210,7 @@ def test_unit_id_with_extract_is_rejected(types: EventTypeRegistry):
 
 def test_announce_appends_replay_diverged(tmp_path: Path, types: EventTypeRegistry):
     from anagrapheus.timeline.pins import ReplayDiverged
-    from anagrapheus.timeline.registry import EventKey
+    from anagrapheus.timeline.registry import RESERVED_NAMESPACE, EventKey
 
     store = SQLiteEventStore(tmp_path / "t.db")
     unit = PinLedger(store, types)
@@ -225,7 +225,7 @@ def test_announce_appends_replay_diverged(tmp_path: Path, types: EventTypeRegist
 
     diverged = [e for e in store.read() if e.envelope.type == "ReplayDiverged"]
     assert len(diverged) == 1  # first miss only — announced once
-    decoded = types.decode(EventKey("anagrapheus", "ReplayDiverged", 1), diverged[0].payload)
+    decoded = types.decode(EventKey(RESERVED_NAMESPACE, "ReplayDiverged", 1), diverged[0].payload)
     assert isinstance(decoded, ReplayDiverged)
     assert decoded.unit_id == unit.unit_id
 
@@ -233,7 +233,7 @@ def test_announce_appends_replay_diverged(tmp_path: Path, types: EventTypeRegist
 def test_fixture_events_get_upcast(tmp_path: Path, types: EventTypeRegistry):
     """A v1 fixture keeps working after PinPromoted gains a schema version."""
     from anagrapheus.timeline.pins import PinPromoted
-    from anagrapheus.timeline.registry import EventKey
+    from anagrapheus.timeline.registry import RESERVED_NAMESPACE, EventKey
     from anagrapheus.timeline.upcast import UpcastRegistry
 
     fixture = tmp_path / "unit.jsonl"
@@ -242,9 +242,9 @@ def test_fixture_events_get_upcast(tmp_path: Path, types: EventTypeRegistry):
     class PinPromotedV2(PinPromoted, frozen=True):
         note: str = ""
 
-    types._register(EventKey("anagrapheus", "PinPromoted", 2), PinPromotedV2)
+    types._register(EventKey(RESERVED_NAMESPACE, "PinPromoted", 2), PinPromotedV2)
     upcasts = UpcastRegistry()
-    upcasts.register("anagrapheus", "PinPromoted", 1, lambda p: {**p, "note": "upcast"})
+    upcasts.register(RESERVED_NAMESPACE, "PinPromoted", 1, lambda p: {**p, "note": "upcast"})
 
     replay = ReplayPins.from_events(load_ledger(fixture), types, upcasts=upcasts)
     roll, verdict = scripted_unit(replay)

@@ -1,7 +1,8 @@
 """
 The storage ports.
 
-``EventStore`` is the seam the whole layer stands on: append is atomic and
+``EventStore`` is the port the rest of the layer is built against: append is
+atomic and
 persist-first, reads filter on ``seq`` only — query semantics over event *content*
 never cross this port; that is the projections' job. ``PinScratchStore`` is kept as a
 separate protocol so ``EventStore`` stays exactly the catalogued port.

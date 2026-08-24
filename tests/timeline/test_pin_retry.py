@@ -1,5 +1,5 @@
 """
-Tier 1: the pin ledger at the provider seam, driven by a pydantic-ai fake.
+Tier 1: the pin ledger at the provider boundary, driven by a pydantic-ai fake.
 
 The effect here is a FunctionModel-backed model call. The fake is scripted to return a
 DIFFERENT answer on every invocation — so if reuse ever loses to re-drawing, the

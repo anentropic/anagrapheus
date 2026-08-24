@@ -28,7 +28,7 @@ from anagrapheus.timeline import (
     register_builtin_events,
 )
 from anagrapheus.timeline.errors import ConcurrencyError
-from anagrapheus.timeline.registry import EventKey
+from anagrapheus.timeline.registry import RESERVED_NAMESPACE, EventKey
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -136,7 +136,7 @@ def test_milestone_1_end_to_end(tmp_path: Path):
     assert store.scratch_list(doomed.unit_id) == []
     summaries = [e for e in store.read() if e.envelope.type == "PinsAbandoned"]
     assert len(summaries) == 1
-    decoded = types.decode(EventKey("anagrapheus", "PinsAbandoned", 1), summaries[0].payload)
+    decoded = types.decode(EventKey(RESERVED_NAMESPACE, "PinsAbandoned", 1), summaries[0].payload)
     assert isinstance(decoded, PinsAbandoned)
     assert [d.attempts for d in decoded.discarded] == [1]
 
