@@ -1,0 +1,111 @@
+# Package shape
+
+**Created 2026-08-23.** The layout, floor, and storage decisions for anagrapheus, and
+where they diverge from the upstream design corpus. Companion to
+[note 00](00-testing-without-a-model.md); spec authority remains
+[`agent-core` doc 00](https://github.com/anentropic/narrative-vm/blob/main/_design/agent-core/00-agent-core-architecture.md).
+
+---
+
+## 1. anagrapheus is the stack, standalone
+
+The upstream corpus left the stack's name open (doc 00 §10 Q1) and placed the timeline
+core — codenamed **archeion** — inside the narrative-vm monorepo until a second
+consumer appeared (doc 30 §6's standing policy, which wins on packaging). Both are
+superseded here by a deliberate packaging decision: **anagrapheus is the stack's name
+and its standalone home.** The divergence is recorded rather than argued; folding a
+package back into a monorepo is mechanical, so the cost of being wrong is small and
+asymmetric in our favour.
+
+"archeion" survives as the design-doc codename for what lives at
+`anagrapheus.timeline`.
+
+## 2. Layout: descriptive subpackages
+
+```
+anagrapheus.timeline    # the event log, folds, pins, replay  (doc 00 §3–§4)
+anagrapheus.identity    # later: entity shapes + registry fold (§5)
+anagrapheus.beliefs     # later: belief-id minting registry over doxastica (§6)
+anagrapheus.provider    # later, optional extra: pinned pydantic-ai adapter
+anagrapheus.chronicle   # later, behind a decision gate (§10 Q3)
+```
+
+Nothing in `timeline/` imports upward; later subpackages import it, never the
+reverse.
+
+## 3. Python floor: >=3.14
+
+doxastica (the shipped belief store this stack consumes) requires >=3.14, so anything
+depending on it cannot support less. Raising the floor also gives stdlib
+`uuid.uuid7()` — no third-party uuid dependency for the envelope. CI runs one version
+until 3.15 exists.
+
+## 4. The envelope ships a `namespace` field, used
+
+Doc 00 §8 calls the envelope freeze-content: a namespace field is cheap before the
+freeze and expensive after, "decide before freezing, even if the field ships unused."
+Decided — and it ships **used**, not unused: the pin ledger emits library events
+(`PinPromoted`, `PinsAbandoned`, `ReplayDiverged`) from day one, under the reserved
+`"anagrapheus"` namespace. The registry key is `(namespace, type, schema_version)`.
+
+One honesty note on the resolver seam: interpretation is passed in together with
+the draw, so re-reading a result never re-draws it — but `interpret` is
+caller-supplied code that receives the raw value, so keeping the raw out of caller
+hands is auditable discipline at the call site, not a structural impossibility. The
+upstream design's stronger claim assumes a trusted resolver, which a library cannot.
+
+Applications that would rather promote pins into their own vocabulary supply a
+`promote_as` factory (and the mirroring `extract` on replay) — §8's "the library
+ships the shape, the application owns the name," applied to the one place this
+library emits events.
+
+The envelope carries no `class` field. Doc 30's envelope line includes one (NVM's
+event-classification vocabulary); doc 00 omits it and leaves classification ownership
+open (§8 tail). We follow doc 00; the question stays open.
+
+## 5. Storage: stdlib sqlite3, no ORM; the ports are the repository
+
+The adapter is ~10 SQL statements over an append-only schema with explicit
+transaction control. An ORM would add a heavy dependency to map mutable objects onto
+a store designed never to mutate, and would interpose a session/unit-of-work between
+`append` and its persist-first guarantee. The charter's dependency line stays
+"pydantic only."
+
+What the repository pattern is usually asked for — SQL confined to one module,
+storage swappable, callers coded against an interface — is delivered by the
+`EventStore` and `PinScratchStore` Protocols, with `sqlite.py` the only module
+containing SQL. The DDD Repository proper (a collection-of-aggregates illusion)
+stays declined per doc 00 §3a: there is no collection of aggregates, only a stream;
+read models are reached through projection query methods.
+
+## 6. Infra-schema migrations: `PRAGMA user_version`
+
+Event **payload** evolution is upcast-on-read and never touches the tables. The
+tables themselves (`events`, `projection_positions`, `pin_scratch`) migrate via an ordered DDL
+list applied transactionally at connect, tracked in `PRAGMA user_version` — a
+consumer's file upgrades transparently on open; a fresh file runs the whole list.
+Downgrade is unsupported: opening a file whose `user_version` exceeds the library's
+latest refuses loudly.
+
+Guarded by a fresh==migrated schema-equivalence test and per-version fixture
+databases, so old-file upgrades are exercised forever. No migration library: the
+consumers are library users opening a file, not operators running a CLI, so the
+runner must live inside `connect()` regardless — at which point a dependency would
+just wrap what three functions do.
+
+## 7. One database file
+
+The pin scratch shares the events file rather than a sidecar, because promote and
+abandon must move rows scratch→events atomically, which is a single transaction in
+one file and an ATTACH dance across two. "Scratch is never canon" is enforced
+structurally: `EventStore.read()` only ever queries `events`.
+
+## 8. "Position", not "watermark"
+
+The upstream design docs say **watermark** for a projection's durable record of the
+last `seq` it folded. We use **position** instead (`read_position`/`commit_position`
+on the port; the `projection_positions` table): "watermark" collides with the
+stream-processing meaning (event-time progress markers, a different concept), while
+"position" is the established event-sourcing subscription term and Kafka's consumer
+term for exactly this. Same mechanism as the upstream docs; different, more
+conventional name.
