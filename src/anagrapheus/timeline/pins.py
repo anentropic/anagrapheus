@@ -26,7 +26,7 @@ from uuid import UUID
 
 from pydantic import JsonValue
 
-from anagrapheus.timeline._canonical import Json, sha256_hex
+from anagrapheus.timeline._canonical import Json, concrete_json, sha256_hex
 from anagrapheus.timeline.envelope import DomainEvent
 from anagrapheus.timeline.registry import RESERVED_NAMESPACE, EventKey
 from anagrapheus.timeline.store import ScratchRow
@@ -171,7 +171,11 @@ class PinLedger:
             # the same draw this effect would have produced.
             raw = cast("R", existing.result)
         else:
-            raw = effect()
+            # Concretize BEFORE both persistence and the first interpretation, so
+            # interpret sees the identical shape on first resolve, retry, and
+            # replay — a tuple is a list everywhere, and an unserializable result
+            # fails here rather than after it has been half-consumed.
+            raw = cast("R", concrete_json(effect()))
             self._store.scratch_put(
                 ScratchRow(unit_id=self.unit_id, pin_key=key, kind=kind, result=raw, attempts=1)
             )

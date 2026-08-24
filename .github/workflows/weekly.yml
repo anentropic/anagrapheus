@@ -28,7 +28,7 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: "pyproject.toml"
-          python-version: "3.11"
+          python-version: "3.14"
 
       - name: Sync latest compatible dependencies
         run: uv sync --upgrade --dev

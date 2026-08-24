@@ -86,22 +86,41 @@ class Projector:
             result[fold.name] = self._run(fold, batch_size=batch_size)
         return result
 
-    def rebuild(self, name: str, *, reset: Callable[[], None], batch_size: int = 1000) -> int:
+    def rebuild(
+        self,
+        name: str,
+        *,
+        reset: Callable[[], None],
+        batch_size: int = 1000,
+        reset_in_transaction: bool = False,
+    ) -> int:
         """
         Drop and re-fold one projection from the start of the stream.
 
         ``reset`` disposes the projection's state; the watermark returns to zero and
         the full stream replays. Fold-replay as an operation — this is why a backend
         swap is "stand up the adapter, replay the log".
+
+        Whether ``reset`` participates in the store's transaction is the caller's
+        explicit declaration, because the projector cannot see where the state
+        lives. Pass ``reset_in_transaction=True`` ONLY when the state is in the
+        transactional store's own database — then the watermark zero and the state
+        drop commit together, atomically. The default commits the watermark to zero
+        first, in its own step, then resets: for external state (a file, another
+        service) a crash between the two leaves a replay over stale state, which
+        the fold contract already requires ``apply`` to tolerate — never a cleared
+        projection under a high watermark that catch-up would skip past.
         """
         fold = next((f for f in self._folds if f.name == name), None)
         if fold is None:
             raise KeyError(f"no fold named {name!r}")
         _validate_batch_size(batch_size)
-        # Watermark to zero before (or atomically with) dropping state: a crash in
-        # between must leave a replay, never an empty projection with a high
-        # watermark that catch-up would skip past.
-        if isinstance(self._store, TransactionalStore):
+        if reset_in_transaction:
+            if not isinstance(self._store, TransactionalStore):
+                raise TypeError(
+                    "reset_in_transaction=True requires a TransactionalStore; "
+                    f"{type(self._store).__name__} is not one"
+                )
             with self._store.transaction():
                 self._store.commit_watermark(name, 0)
                 reset()

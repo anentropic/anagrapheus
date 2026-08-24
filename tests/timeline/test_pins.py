@@ -214,3 +214,44 @@ def test_pin_key_material_change_rekeys(material: dict[str, JsonValue], extra: s
 
 def test_pin_key_kind_separates():
     assert pin_key("rng", {"a": 1}) != pin_key("fetch", {"a": 1})
+
+
+def test_results_are_json_concrete_before_first_interpretation(
+    store: SQLiteEventStore, types: EventTypeRegistry
+):
+    """Interpret sees the same shape on first resolve, retry, and replay."""
+    from types import MappingProxyType
+    from typing import Any, cast
+
+    ledger = PinLedger(store, types)
+    key = pin_key("fetch", {"u": 1})
+    shapes: list[type] = []
+
+    def note(raw: object) -> object:
+        shapes.append(type(raw))
+        return raw
+
+    effect = cast("Any", lambda: (1, 2, 3))  # a tuple: JSON-concretized to a list
+    first = ledger.resolve(key, kind="fetch", effect=effect, interpret=note)
+    again = ledger.resolve(key, kind="fetch", effect=effect, interpret=note)
+    assert first == again == [1, 2, 3]
+    assert shapes == [list, list]
+
+    proxy_effect = cast("Any", lambda: MappingProxyType({"a": 1}))
+    assert ledger.resolve(
+        pin_key("fetch", {"u": 2}), kind="fetch", effect=proxy_effect, interpret=lambda r: r
+    ) == {"a": 1}
+
+
+def test_unserializable_result_fails_before_persisting(
+    store: SQLiteEventStore, types: EventTypeRegistry
+):
+    from typing import Any, cast
+
+    ledger = PinLedger(store, types)
+    key = pin_key("fetch", {"u": 3})
+    with pytest.raises(TypeError, match="not JSON-serializable"):
+        ledger.resolve(
+            key, kind="fetch", effect=cast("Any", lambda: object()), interpret=lambda r: r
+        )
+    assert store.scratch_list(ledger.unit_id) == []  # nothing half-persisted

@@ -250,3 +250,8 @@ def test_fixture_events_get_upcast(tmp_path: Path, types: EventTypeRegistry):
     roll, verdict = scripted_unit(replay)
     assert (roll, verdict) == (17, True)
     assert replay.divergence is None
+
+
+def test_invalid_on_miss_rejected_at_construction():
+    with pytest.raises(ValueError, match="on_miss"):
+        ReplayPins({}, on_miss="strcit")  # type: ignore[arg-type]  # the typo is the test

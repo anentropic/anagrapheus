@@ -7,7 +7,7 @@ This document provides guidance for developers working on anagrapheus.
 ### Prerequisites
 
 - [uv](https://docs.astral.sh/uv/) - Modern Python package and project manager
-- Python 3.11 or later
+- Python 3.14 or later
 
 ### Initial Setup
 
@@ -216,7 +216,7 @@ When hooks are installed (`prek install`), they run automatically before each co
 
 If your IDE shows type errors but `basedpyright` passes:
 
-1. Ensure your IDE uses Python 3.11+
+1. Ensure your IDE uses Python 3.14+
 2. Check that your IDE is using basedpyright, not mypy or pylance
 3. Verify venv is activated properly
 

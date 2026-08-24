@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Literal, Self, cast
 
 from pydantic import BaseModel, ConfigDict
 
-from anagrapheus.timeline._canonical import Json
+from anagrapheus.timeline._canonical import Json, concrete_json
 from anagrapheus.timeline.envelope import DomainEvent, StoredEvent
 from anagrapheus.timeline.errors import TimelineError
 from anagrapheus.timeline.pins import PinKey, PinPromoted, ReplayDiverged
@@ -73,6 +73,10 @@ class ReplayPins:
         on_miss: Literal["strict", "record"] = "strict",
         announce: Callable[[Divergence], None] | None = None,
     ) -> None:
+        if on_miss not in ("strict", "record"):
+            # Literal annotations are not enforced at runtime; a typo must not
+            # silently weaken strict replay into live draws.
+            raise ValueError(f"on_miss must be 'strict' or 'record', got {on_miss!r}")
         self._pins = pins
         self._on_miss: Literal["strict", "record"] = on_miss
         self._announce = announce
@@ -182,6 +186,6 @@ class ReplayPins:
             self._divergence = miss
             if self._announce is not None:
                 self._announce(miss)
-        raw = effect()
+        raw = cast("R", concrete_json(effect()))
         self._pins[key] = cast("Json", raw)
         return interpret(raw)

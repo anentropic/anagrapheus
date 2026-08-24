@@ -208,9 +208,26 @@ def test_rebuild_zeroes_watermark_atomically_with_reset(tmp_path: Path):
         raise RuntimeError("crash mid-rebuild")
 
     with pytest.raises(RuntimeError):
-        projector.rebuild("sql_sum", reset=failing_reset)
-    # transactional store: state drop and watermark-zero rolled back together,
-    # OR both applied; either way catch-up cannot skip history.
+        projector.rebuild("sql_sum", reset=failing_reset, reset_in_transaction=True)
+    # same-file state declared in-transaction: state drop and watermark-zero roll
+    # back together, OR both apply; either way catch-up cannot skip history.
     watermark = store.read_watermark("sql_sum")
     total = SqlSum.total(store)
     assert (watermark, total) == (1, 1) or watermark == 0
+
+
+def test_default_rebuild_zeroes_watermark_before_reset(tmp_path: Path):
+    """External-state posture: a crash after the watermark commit replays, never skips."""
+    types, store, reader = make_stack(tmp_path / "t.db")
+    store.append([types.pending(StepTaken(n=1))])
+    fold = MemoryLog()
+    projector = Projector(store, reader, [fold])
+    projector.catch_up()
+
+    def failing_reset() -> None:
+        assert store.read_watermark("memory_log") == 0  # already committed
+        raise RuntimeError("crash during external reset")
+
+    with pytest.raises(RuntimeError):
+        projector.rebuild("memory_log", reset=failing_reset)
+    assert store.read_watermark("memory_log") == 0  # recovery replays
