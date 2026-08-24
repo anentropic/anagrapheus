@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-class StepTaken(DomainEvent):
+class StepTaken(DomainEvent, frozen=True):
     n: int
 
 

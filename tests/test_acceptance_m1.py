@@ -36,7 +36,7 @@ if TYPE_CHECKING:
     from anagrapheus.timeline import PinResolver
 
 
-class StepTaken(DomainEvent):
+class StepTaken(DomainEvent, frozen=True):
     n: int
 
 

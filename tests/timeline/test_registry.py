@@ -7,11 +7,11 @@ from anagrapheus.timeline.errors import DuplicateEventType, UnknownEventType
 from anagrapheus.timeline.registry import EventKey, EventTypeRegistry
 
 
-class StepTaken(DomainEvent):
+class StepTaken(DomainEvent, frozen=True):
     n: int
 
 
-class OtherEvent(DomainEvent):
+class OtherEvent(DomainEvent, frozen=True):
     label: str
 
 
@@ -30,7 +30,7 @@ def test_decorator_registration():
     registry = EventTypeRegistry()
 
     @registry.event("demo", "Other")
-    class Local(DomainEvent):
+    class Local(DomainEvent, frozen=True):
         pass
 
     assert registry.key_for(Local) == EventKey("demo", "Other", 1)

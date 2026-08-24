@@ -144,7 +144,7 @@ def test_unit_id_narrowing(tmp_path: Path, types: EventTypeRegistry):
 
 
 def test_extract_mirrors_promote_as(tmp_path: Path, types: EventTypeRegistry):
-    class DiceRolled(DomainEvent):
+    class DiceRolled(DomainEvent, frozen=True):
         pin: str
         roll: int
 
@@ -239,7 +239,7 @@ def test_fixture_events_get_upcast(tmp_path: Path, types: EventTypeRegistry):
     fixture = tmp_path / "unit.jsonl"
     record_ledger(fixture, types)
 
-    class PinPromotedV2(PinPromoted):
+    class PinPromotedV2(PinPromoted, frozen=True):
         note: str = ""
 
     types._register(EventKey("anagrapheus", "PinPromoted", 2), PinPromotedV2)

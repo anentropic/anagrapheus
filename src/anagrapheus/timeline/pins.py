@@ -85,7 +85,7 @@ class PinResolver(Protocol):
         ...
 
 
-class PinPromoted(DomainEvent):
+class PinPromoted(DomainEvent, frozen=True):
     """A committed pin, promoted into the log as an ordinary event."""
 
     unit_id: UUID
@@ -95,7 +95,7 @@ class PinPromoted(DomainEvent):
     attempts: int
 
 
-class DiscardedPin(DomainEvent):
+class DiscardedPin(DomainEvent, frozen=True):
     """One abandoned pin's audit line inside :class:`PinsAbandoned`."""
 
     key: str
@@ -103,7 +103,7 @@ class DiscardedPin(DomainEvent):
     attempts: int
 
 
-class PinsAbandoned(DomainEvent):
+class PinsAbandoned(DomainEvent, frozen=True):
     """The single summary event an abandoned unit of work leaves behind."""
 
     unit_id: UUID
@@ -111,7 +111,7 @@ class PinsAbandoned(DomainEvent):
     discarded: list[DiscardedPin]
 
 
-class ReplayDiverged(DomainEvent):
+class ReplayDiverged(DomainEvent, frozen=True):
     """A generation-replay met a key with no pinned result: the run is announced new."""
 
     unit_id: UUID

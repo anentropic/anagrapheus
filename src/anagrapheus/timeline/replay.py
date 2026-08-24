@@ -13,7 +13,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Literal, Self, cast
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from anagrapheus.timeline._canonical import Json, concrete_json
 from anagrapheus.timeline.envelope import DomainEvent, StoredEvent
@@ -35,10 +35,8 @@ __all__ = ["Divergence", "PinMiss", "ReplayPins"]
 type ExtractFn = Callable[[StoredEvent, DomainEvent], tuple[PinKey, Json] | None]
 
 
-class Divergence(BaseModel):
+class Divergence(BaseModel, frozen=True):
     """Where a replay stopped being a replay: the first key with no pinned result."""
-
-    model_config = ConfigDict(frozen=True)
 
     missed_key: str
     kind: str

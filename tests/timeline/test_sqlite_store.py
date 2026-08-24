@@ -14,7 +14,7 @@ from anagrapheus.timeline.registry import EventTypeRegistry
 from anagrapheus.timeline.sqlite import SQLiteEventStore
 
 
-class StepTaken(DomainEvent):
+class StepTaken(DomainEvent, frozen=True):
     n: int
 
 

@@ -152,7 +152,7 @@ def test_scratch_survives_crash(tmp_path: Path, types: EventTypeRegistry):
 def test_promote_as_maps_into_app_vocabulary(store: SQLiteEventStore, types: EventTypeRegistry):
     from anagrapheus.timeline.envelope import DomainEvent
 
-    class DiceRolled(DomainEvent):
+    class DiceRolled(DomainEvent, frozen=True):
         roll: int
 
     types.event("demo", "DiceRolled")(DiceRolled)

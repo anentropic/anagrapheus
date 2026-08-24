@@ -16,11 +16,11 @@ if TYPE_CHECKING:
     from pydantic import JsonValue
 
 
-class StepV1(DomainEvent):
+class StepV1(DomainEvent, frozen=True):
     n: int
 
 
-class StepV3(DomainEvent):
+class StepV3(DomainEvent, frozen=True):
     n: int
     label: str
     source: str
