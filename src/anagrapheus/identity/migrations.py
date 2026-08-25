@@ -47,6 +47,9 @@ MIGRATIONS: Final[tuple[tuple[str, ...], ...]] = (
             PRIMARY KEY (seq, entity_id)
         ) STRICT
         """,
+        # history() filters on entity_id and orders by seq; the primary key leads with
+        # seq, so without this every audit lookup scans the whole decision table.
+        "CREATE INDEX ix_identity_decisions_entity ON identity_decisions (entity_id, seq)",
         """
         CREATE TABLE identity_rekeys (
             seq          INTEGER NOT NULL,

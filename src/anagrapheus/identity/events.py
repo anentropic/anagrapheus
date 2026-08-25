@@ -159,4 +159,13 @@ class Split(DomainEvent, frozen=True):
             raise ValueError("a split's new entities must all differ from the original")
         if len(ids) != len(set(ids)):
             raise ValueError("a split's new entities must be distinct")
+        forms = [
+            normalize_surface_form(form)
+            for assignment in self.into
+            for form in assignment.surface_forms
+        ]
+        if len(forms) != len(set(forms)):
+            # A split exists to disambiguate; sending one form to two of its products
+            # asks for the opposite, and would resolve by assignment order.
+            raise ValueError("a split must not assign one surface form to two entities")
         return self

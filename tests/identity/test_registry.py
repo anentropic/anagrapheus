@@ -211,3 +211,25 @@ def test_re_aliasing_replaces_the_stance(rig: Rig):
 
     assert rig.registry.resolve("maybe").candidates[0].stance is Stance.CERTAIN
     assert len(rig.registry.surface_forms(entity_id)) == 2
+
+
+def test_re_applying_a_split_keeps_the_stance_it_moved(rig: Rig):
+    """The fold claims idempotency; a re-applied split must not downgrade a stance."""
+    original, event = establish(rig.types, "acme", provenance="import")
+    rig.commit(event, alias(rig.types, original, "acme-uk", Stance.CERTAIN))
+    carved = uuid.uuid7()
+    at = rig.commit(split(rig.types, original, [(carved, ["acme-uk"])]))
+
+    rig.store.commit_position("anagrapheus.identity", at - 1)
+    rig.projector.catch_up()
+
+    assert rig.registry.resolve("acme-uk").candidates[0].stance is Stance.CERTAIN
+
+
+def test_a_split_may_not_give_one_form_to_two_entities(rig: Rig):
+    """Contradictory input: a split disambiguates, so one form cannot go to both."""
+    original, event = establish(rig.types, "acme", provenance="import")
+    rig.commit(event, alias(rig.types, original, "acme-uk", Stance.BELIEVED))
+
+    with pytest.raises(ValueError, match="one surface form to two entities"):
+        split(rig.types, original, [(uuid.uuid7(), ["acme-uk"]), (uuid.uuid7(), ["acme-uk"])])

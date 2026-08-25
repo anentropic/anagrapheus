@@ -68,15 +68,20 @@ class SQLiteIdentityStore:
     def split(self, event: Split, seq: int) -> None:
         origin = self.entity(event.original)
         provenance = origin.provenance if origin is not None else ""
+        # Snapshot the source's forms before any of them move. Reading each one inside
+        # the loop would make the outcome depend on assignment order, and on a
+        # re-applied batch — which the fold contract permits — the rows have already
+        # moved, so every stance would silently fall back to the hedged default.
+        source = {row.surface_form: row.stance for row in self.aliases(event.original)}
         for assignment in event.into:
             self._put_entity(assignment.entity_id, seq, provenance)
             for form in assignment.surface_forms:
                 normalized = normalize_surface_form(form)
-                moved = self._conn.execute(
-                    "SELECT stance FROM identity_aliases WHERE entity_id = ? AND surface_form = ?",
-                    (str(event.original), normalized),
-                ).fetchone()
-                stance = Stance(moved["stance"]) if moved is not None else Stance.SUSPECTED
+                stance = source.get(normalized)
+                if stance is None:
+                    # Nothing to move: either the form was never on the original, or
+                    # this batch already ran and the target holds it.
+                    stance = self._alias_stance(assignment.entity_id, normalized)
                 self._conn.execute(
                     "DELETE FROM identity_aliases WHERE entity_id = ? AND surface_form = ?",
                     (str(event.original), normalized),
@@ -171,6 +176,14 @@ class SQLiteIdentityStore:
             stance=Stance(row["stance"]),
             seq=row["seq"],
         )
+
+    def _alias_stance(self, entity_id: UUID, surface_form: str) -> Stance:
+        """The stance already recorded for a form on an entity, else the hedged default."""
+        row = self._conn.execute(
+            "SELECT stance FROM identity_aliases WHERE entity_id = ? AND surface_form = ?",
+            (str(entity_id), surface_form),
+        ).fetchone()
+        return Stance.SUSPECTED if row is None else Stance(row["stance"])
 
     def _put_entity(self, entity_id: UUID, seq: int, provenance: str) -> None:
         # ON CONFLICT rather than a plain insert: the fold contract allows the last
