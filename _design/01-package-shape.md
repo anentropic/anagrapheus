@@ -78,14 +78,25 @@ containing SQL. The DDD Repository proper (a collection-of-aggregates illusion)
 stays declined per doc 00 §3a: there is no collection of aggregates, only a stream;
 read models are reached through projection query methods.
 
-## 6. Infra-schema migrations: `PRAGMA user_version`
+## 6. Infra-schema migrations: per-component versions
 
 Event **payload** evolution is upcast-on-read and never touches the tables. The
-tables themselves (`events`, `projection_positions`, `pin_scratch`) migrate via an ordered DDL
-list applied transactionally at connect, tracked in `PRAGMA user_version` — a
-consumer's file upgrades transparently on open; a fresh file runs the whole list.
-Downgrade is unsupported: opening a file whose `user_version` exceeds the library's
+tables themselves migrate via an ordered DDL list applied transactionally at connect —
+a consumer's file upgrades transparently on open; a fresh file runs the whole list.
+Downgrade is unsupported: a component whose recorded version exceeds the library's
 latest refuses loudly.
+
+Versions are tracked **per component** in a `schema_versions(component, version)`
+table, not in `PRAGMA user_version`. Subpackages share one database file (§7) but
+evolve on their own cadences: `timeline` owns `events`, `projection_positions` and
+`pin_scratch`; `identity` owns the identity registry's tables. `user_version` is a
+single integer per file and cannot express that, so it goes unused rather than
+becoming one component's private property. Each subpackage passes its own name and
+its own list to the same runner and never appears in another's.
+
+*Amended 2026-08-25 (M2). Milestone 1 shipped `PRAGMA user_version`; the identity
+layer needed a second independent list in the same file. The change was free —
+nothing was released — and would not have been later.*
 
 Guarded by a fresh==migrated schema-equivalence test and per-version fixture
 databases, so old-file upgrades are exercised forever. No migration library: the
