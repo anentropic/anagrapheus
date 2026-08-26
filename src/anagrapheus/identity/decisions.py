@@ -74,6 +74,7 @@ def establish(
     provenance: str,
     entity_id: UUID | None = None,
     stance: str = UNGRADED,
+    material: Mapping[str, Json] | None = None,
     resolver: PinResolver | None = None,
     correlation_id: UUID | None = None,
 ) -> tuple[UUID, PendingEvent]:
@@ -84,10 +85,21 @@ def establish(
     external referent to match, so there is nothing to match against. Supply
     ``entity_id`` to use an id you already hold, or ``resolver`` to have it pinned —
     see :func:`mint_entity_id`.
+
+    **With a resolver, ``material`` is load-bearing.** It defaults to
+    ``{"surface_form": ..., "provenance": ...}``, and a pin key is reused for identical
+    material — so two genuinely distinct records that share a name *and* a source would
+    be minted as one entity, erasing the very ambiguity this layer exists to preserve.
+    Whenever that is possible, pass material carrying a discriminator that identifies
+    the record: the source system's own id, say. It must be **stable across runs** like
+    any pin material — a counter or a timestamp would replay to a different entity and
+    defeat the pinning.
     """
     if entity_id is None:
         entity_id = mint_entity_id(
-            {"surface_form": surface_form, "provenance": provenance},
+            material
+            if material is not None
+            else {"surface_form": surface_form, "provenance": provenance},
             resolver=resolver,
         )
     event = Established(
@@ -123,8 +135,10 @@ def merge(
     """
     Record that two ids name one referent.
 
-    The correction appends; nothing about the absorbed entity is erased, and undoing
-    this is another event rather than a deletion.
+    The correction appends: nothing is erased from the log, and undoing this is another
+    event rather than a deletion. In the *projection* the absorbed entity yields its
+    surface forms to the survivor — it names nothing once it has yielded — and
+    ``history()`` keeps the record of which entity originally recorded each of them.
     """
     event = Merged(kept=kept, absorbed=absorbed, source_event=source_event)
     return registry.pending(event, correlation_id=correlation_id)

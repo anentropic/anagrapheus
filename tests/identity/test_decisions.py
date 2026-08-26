@@ -159,3 +159,60 @@ def test_establish_threads_the_resolver_through(tmp_path: Path, types: EventType
     )
     assert replayed == entity_id
     assert Established.model_validate(event.payload).entity_id == entity_id
+
+
+def test_two_records_sharing_a_form_and_provenance_collide_by_default(
+    tmp_path: Path, types: EventTypeRegistry
+):
+    """
+    A discriminator separates records that share a name and a source.
+
+    The default pin material is (surface_form, provenance), so two genuinely distinct
+    records sharing both would be minted as one entity — erasing exactly the ambiguity
+    this layer exists to preserve.
+    """
+    store = SQLiteEventStore(tmp_path / "live.db")
+    try:
+        ledger = PinLedger(store, types)
+        first, _ = establish(types, "J. Smith", provenance="crm", resolver=ledger)
+        second, _ = establish(
+            types,
+            "J. Smith",
+            provenance="crm",
+            material={"record": "crm-4821"},
+            resolver=ledger,
+        )
+        third, _ = establish(
+            types,
+            "J. Smith",
+            provenance="crm",
+            material={"record": "crm-9107"},
+            resolver=ledger,
+        )
+    finally:
+        store.close()
+
+    assert second != third
+    assert first not in (second, third)
+
+
+def test_supplied_material_still_replays(tmp_path: Path, types: EventTypeRegistry):
+    """A discriminator has to be stable across runs, so it must replay like any pin."""
+    material = {"record": "crm-4821"}
+    store = SQLiteEventStore(tmp_path / "live.db")
+    try:
+        ledger = PinLedger(store, types)
+        live, _ = establish(types, "J. Smith", provenance="crm", material=material, resolver=ledger)
+        ledger.commit()
+        recorded = list(store.read())
+    finally:
+        store.close()
+
+    replayed, _ = establish(
+        types,
+        "J. Smith",
+        provenance="crm",
+        material=material,
+        resolver=ReplayPins.from_events(recorded, types, on_miss="strict"),
+    )
+    assert replayed == live

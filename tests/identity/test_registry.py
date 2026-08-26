@@ -234,3 +234,34 @@ def test_a_split_may_not_give_one_form_to_two_entities(rig: Rig):
 
     with pytest.raises(ValueError, match="one surface form to two entities"):
         split(rig.types, original, [(uuid.uuid7(), ["acme-uk"]), (uuid.uuid7(), ["acme-uk"])])
+
+
+def test_a_split_after_a_merge_moves_the_absorbed_entitys_form(rig: Rig):
+    """
+    A split must reach forms the survivor gained by merging.
+
+    A merge leaves the absorbed entity's alias rows behind and `resolve` canonicalizes
+    them at read time, so a later split of the survivor has to reach them too —
+    otherwise the form it was asked to disambiguate still matches two entities.
+    """
+    kept, e1 = establish(rig.types, "acme", provenance="crm")
+    absorbed, e2 = establish(rig.types, "acme-old", provenance="import")
+    rig.commit(e1, e2, alias(rig.types, absorbed, "acme-uk", "believed"))
+    rig.commit(merge(rig.types, kept=kept, absorbed=absorbed))
+    assert rig.registry.resolve("acme-uk").sole() == kept
+
+    carved = uuid.uuid7()
+    rig.commit(split(rig.types, kept, [(carved, ["acme-uk"])]))
+
+    assert rig.registry.resolve("acme-uk").sole() == carved
+
+
+def test_a_merge_gathers_the_absorbed_entitys_surface_forms(rig: Rig):
+    """After a merge the absorbed id names nothing; its forms belong to the survivor."""
+    kept, e1 = establish(rig.types, "acme", provenance="crm")
+    absorbed, e2 = establish(rig.types, "acme-old", provenance="import")
+    rig.commit(e1, e2, merge(rig.types, kept=kept, absorbed=absorbed))
+
+    forms = {row.surface_form for row in rig.registry.surface_forms(kept)}
+    assert forms == {"acme", "acme-old"}
+    assert rig.registry.surface_forms(absorbed) == []

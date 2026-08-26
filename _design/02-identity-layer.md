@@ -101,6 +101,15 @@ may not interpret, and several rows sharing a `from_entity` states exactly that.
 Identity states the consequence and performs no cascade. It does not know what a
 belief is.
 
+**A merge gathers the absorbed entity's surface forms onto the survivor** — added in
+review round 2. Leaving them under the absorbed id made the projection inconsistent
+with itself: `resolve()` canonicalized those forms onto the survivor while
+`surface_forms()` did not list them, and a later `Split` of the survivor could not
+reach them, so the form it was asked to disambiguate still matched two entities. The
+log is untouched and `history()` keeps the record of which entity recorded each form;
+only the projection consolidates. Where both entities held the same form, the
+survivor's own row wins — deterministic without ranking, which this layer cannot do.
+
 ## 6. Stance is a slot, not a scale — [ours]
 
 `Aliased` and `Established` carry a **`stance` token that this library never

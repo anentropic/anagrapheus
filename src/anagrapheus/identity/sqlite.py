@@ -62,6 +62,22 @@ class SQLiteIdentityStore:
             "UPDATE identity_entities SET merged_into = ?, merged_seq = ? WHERE entity_id = ?",
             (str(event.kept), seq, str(event.absorbed)),
         )
+        # The absorbed id names nothing once it has yielded, so its surface forms
+        # belong to the survivor. Leaving them where they were made the projection
+        # inconsistent with itself — `resolve` canonicalized them onto the survivor
+        # while `surface_forms` did not list them, and a later split of the survivor
+        # could not reach them to disambiguate. `identity_decisions` keeps the record
+        # of which entity originally recorded each form, so nothing is lost.
+        for row in self.aliases(event.absorbed):
+            if self._alias_row_exists(event.kept, row.surface_form):
+                # The survivor's own recording of its own name wins over a duplicate
+                # arriving from the absorbed entity. Deterministic without ranking,
+                # which this layer cannot do — the ladder belongs to the caller.
+                continue
+            self._put_alias(event.kept, row.surface_form, row.stance, row.seq)
+        self._conn.execute(
+            "DELETE FROM identity_aliases WHERE entity_id = ?", (str(event.absorbed),)
+        )
         self._rekey(seq, "merge", event.absorbed, event.kept)
         detail = {"kept": str(event.kept), "absorbed": str(event.absorbed)}
         self._decision(seq, event.absorbed, "absorbed", detail)
@@ -187,6 +203,13 @@ class SQLiteIdentityStore:
             stance=row["stance"],
             seq=row["seq"],
         )
+
+    def _alias_row_exists(self, entity_id: UUID, surface_form: str) -> bool:
+        row = self._conn.execute(
+            "SELECT 1 FROM identity_aliases WHERE entity_id = ? AND surface_form = ?",
+            (str(entity_id), surface_form),
+        ).fetchone()
+        return row is not None
 
     def _alias_stance(self, entity_id: UUID, surface_form: str) -> str:
         """
