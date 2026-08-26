@@ -18,7 +18,7 @@ from anagrapheus.identity.events import normalize_surface_form
 if TYPE_CHECKING:
     from uuid import UUID
 
-    from anagrapheus.identity.events import Stance
+    from anagrapheus.identity.ladder import Ladder
     from anagrapheus.identity.store import AliasRow, DecisionRow, IdentityStore, RekeyRow
 
 __all__ = ["Candidate", "IdentityRegistry", "Resolution"]
@@ -28,7 +28,7 @@ class Candidate(NamedTuple):
     """One entity a surface form might name, at the stance recorded for that form."""
 
     entity_id: UUID
-    stance: Stance
+    stance: str
     seq: int
 
 
@@ -59,10 +59,18 @@ class Resolution(NamedTuple):
 
 
 class IdentityRegistry:
-    """Queries over the folded identity decisions."""
+    """
+    Queries over the folded identity decisions.
 
-    def __init__(self, store: IdentityStore) -> None:
+    A ``ladder`` is the application's own ordinal vocabulary for alias stance. Supply
+    one and candidates come back strongest first, ranked in the query; omit it and they
+    come back in ``seq`` order, because this layer has no opinion about which of two
+    stance tokens is stronger.
+    """
+
+    def __init__(self, store: IdentityStore, *, ladder: Ladder | None = None) -> None:
         self._store = store
+        self._ladder = ladder
 
     def resolve(self, surface_form: str) -> Resolution:
         """
@@ -73,18 +81,18 @@ class IdentityRegistry:
         claim about the world, and this layer's contract is to record such claims, not
         to make them.
 
-        Candidates whose entities have since merged collapse into one, keeping the
-        strongest stance recorded for the form.
+        Candidates whose entities have since merged collapse into one. With a ladder
+        that keeps the strongest stance recorded for the form; without one it keeps the
+        earliest, since nothing here can rank two tokens.
         """
         normalized = normalize_surface_form(surface_form)
         best: dict[UUID, Candidate] = {}
-        for row in self._store.candidates(normalized):
+        # The store returns rows in the order the ranking asks for, so the first row
+        # seen for a canonical entity is already the one to keep.
+        for row in self._store.candidates(normalized, ladder=self._ladder):
             entity_id = self.canonical(row.entity_id)
-            current = best.get(entity_id)
-            if current is None or row.stance > current.stance:
-                best[entity_id] = Candidate(entity_id, row.stance, row.seq)
-        ordered = sorted(best.values(), key=lambda c: (-c.stance.rank, c.seq))
-        return Resolution(surface_form=normalized, candidates=tuple(ordered))
+            best.setdefault(entity_id, Candidate(entity_id, row.stance, row.seq))
+        return Resolution(surface_form=normalized, candidates=tuple(best.values()))
 
     def canonical(self, entity_id: UUID) -> UUID:
         """

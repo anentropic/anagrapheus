@@ -21,8 +21,8 @@ from anagrapheus.identity import (
     AmbiguousSurfaceForm,
     IdentityFold,
     IdentityRegistry,
+    Ladder,
     SQLiteIdentityStore,
-    Stance,
     alias,
     establish,
     merge,
@@ -45,6 +45,9 @@ from anagrapheus.timeline import register_builtin_events as register_pin_events
 if TYPE_CHECKING:
     from pathlib import Path
 
+# The consuming application's own stance vocabulary — here, R21's ladder.
+LADDER = Ladder(("doubted", "suspected", "believed", "certain"))
+
 
 def make_types() -> EventTypeRegistry:
     types = EventTypeRegistry()
@@ -59,7 +62,7 @@ def open_stack(path: Path, types: EventTypeRegistry):
     identity_store = SQLiteIdentityStore(store.connection)
     fold = IdentityFold(identity_store, types)
     projector = Projector(store, EventReader(store, UpcastRegistry(), types), [fold])
-    return store, identity_store, projector, IdentityRegistry(identity_store)
+    return store, identity_store, projector, IdentityRegistry(identity_store, ladder=LADDER)
 
 
 def test_milestone_2_acceptance(tmp_path: Path):
@@ -76,19 +79,19 @@ def test_milestone_2_acceptance(tmp_path: Path):
     store.append([e_a, e_b, e_acme])
 
     # a human (or a model) offers another name for the second contact, hedged
-    store.append([alias(types, contact_b, "A. Smith", Stance.SUSPECTED)])
+    store.append([alias(types, contact_b, "A. Smith", "suspected")])
     projector.catch_up()
 
     assert registry.resolve("alice@corp").sole() == contact_a
     assert registry.resolve("A. Smith").sole() == contact_b
 
     # -- the same form now points at two entities: ambiguous, and the layer says so --
-    store.append([alias(types, contact_a, "A. Smith", Stance.BELIEVED)])
+    store.append([alias(types, contact_a, "A. Smith", "believed")])
     projector.catch_up()
 
     ambiguous = registry.resolve("A. Smith")
     assert {c.entity_id for c in ambiguous.candidates} == {contact_a, contact_b}
-    assert [c.stance for c in ambiguous.candidates] == [Stance.BELIEVED, Stance.SUSPECTED]
+    assert [c.stance for c in ambiguous.candidates] == ["believed", "suspected"]
     with pytest.raises(AmbiguousSurfaceForm):
         ambiguous.sole()
 
@@ -111,7 +114,7 @@ def test_milestone_2_acceptance(tmp_path: Path):
     acme_uk = mint_entity_id({"surface_form": "Acme UK"}, resolver=ledger)
     store.append(
         [
-            alias(types, acme, "Acme UK", Stance.BELIEVED),
+            alias(types, acme, "Acme UK", "believed"),
             split(types, acme, [(acme_uk, ["Acme UK"])]),
         ]
     )

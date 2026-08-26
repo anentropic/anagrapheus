@@ -17,7 +17,8 @@ from typing import TYPE_CHECKING, NamedTuple, Protocol
 if TYPE_CHECKING:
     from uuid import UUID
 
-    from anagrapheus.identity.events import Aliased, Established, Merged, Split, Stance
+    from anagrapheus.identity.events import Aliased, Established, Merged, Split
+    from anagrapheus.identity.ladder import Ladder
 
 __all__ = ["AliasRow", "DecisionRow", "EntityRow", "IdentityStore", "RekeyRow"]
 
@@ -37,7 +38,7 @@ class AliasRow(NamedTuple):
 
     entity_id: UUID
     surface_form: str
-    stance: Stance
+    stance: str
     seq: int
 
 
@@ -94,8 +95,14 @@ class IdentityStore(Protocol):
         """Return an entity, or ``None`` if nothing established it."""
         ...
 
-    def candidates(self, surface_form: str) -> list[AliasRow]:
-        """Return every alias exactly matching a normalized surface form."""
+    def candidates(self, surface_form: str, *, ladder: Ladder | None = None) -> list[AliasRow]:
+        """
+        Return every alias exactly matching a normalized surface form.
+
+        With a ``ladder``, strongest stance first and ``seq`` breaking ties; without
+        one, ``seq`` order and no ranking — the layer has no opinion about which of
+        two tokens is stronger unless the application declares one.
+        """
         ...
 
     def aliases(self, entity_id: UUID) -> list[AliasRow]:

@@ -18,14 +18,8 @@ import uuid
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from anagrapheus.identity.events import (
-    Aliased,
-    Established,
-    Merged,
-    Split,
-    SplitAssignment,
-    Stance,
-)
+from anagrapheus.identity.events import Aliased, Established, Merged, Split, SplitAssignment
+from anagrapheus.identity.ladder import UNGRADED
 from anagrapheus.timeline.pins import pin_key
 
 if TYPE_CHECKING:
@@ -79,6 +73,7 @@ def establish(
     *,
     provenance: str,
     entity_id: UUID | None = None,
+    stance: str = UNGRADED,
     resolver: PinResolver | None = None,
     correlation_id: UUID | None = None,
 ) -> tuple[UUID, PendingEvent]:
@@ -99,6 +94,7 @@ def establish(
         entity_id=entity_id,
         first_surface_form=surface_form,
         provenance=provenance,
+        stance=stance,
     )
     return entity_id, registry.pending(event, correlation_id=correlation_id)
 
@@ -107,11 +103,11 @@ def alias(
     registry: EventTypeRegistry,
     entity_id: UUID,
     surface_form: str,
-    stance: Stance,
+    stance: str = UNGRADED,
     *,
     correlation_id: UUID | None = None,
 ) -> PendingEvent:
-    """Record another surface form for an entity, at a stance."""
+    """Record another surface form for an entity, at a stance from your vocabulary."""
     event = Aliased(entity_id=entity_id, surface_form=surface_form, stance=stance)
     return registry.pending(event, correlation_id=correlation_id)
 

@@ -18,13 +18,11 @@ registers its own types and binds them per role — see
 from __future__ import annotations
 
 import unicodedata
-from enum import Enum
-from functools import total_ordering
-from typing import Final
 from uuid import UUID
 
 from pydantic import model_validator
 
+from anagrapheus.identity.ladder import UNGRADED
 from anagrapheus.timeline.envelope import DomainEvent
 
 __all__ = [
@@ -33,40 +31,8 @@ __all__ = [
     "Merged",
     "Split",
     "SplitAssignment",
-    "Stance",
     "normalize_surface_form",
 ]
-
-# Weakest first. Position on this ladder is the only thing stance means.
-_LADDER: Final = ("doubted", "suspected", "believed", "certain")
-
-
-@total_ordering
-class Stance(Enum):
-    """
-    How firmly a surface form is held to name an entity: an ordinal enum.
-
-    ``certain > believed > suspected > doubted``, and **comparison is the only
-    operation** — there is deliberately no arithmetic over stance, so nothing can
-    average two of them into a third. Aligned with NVM's R21, which retired numeric
-    confidence for exactly this reason, but defined here rather than imported: the
-    identity layer must not depend on the belief layer that sits above it.
-    """
-
-    DOUBTED = "doubted"
-    SUSPECTED = "suspected"
-    BELIEVED = "believed"
-    CERTAIN = "certain"
-
-    @property
-    def rank(self) -> int:
-        """Position on the ladder, for comparison. Never a quantity."""
-        return _LADDER.index(self.value)
-
-    def __lt__(self, other: object) -> bool:
-        if not isinstance(other, Stance):
-            raise TypeError(f"stance compares only with stance, got {type(other).__name__}")
-        return self.rank < other.rank
 
 
 def normalize_surface_form(surface_form: str) -> str:
@@ -90,21 +56,35 @@ class Established(DomainEvent, frozen=True):
     external referent to match against, so resolution is not merely unnecessary here,
     it is meaningless.
 
-    ``provenance`` is opaque to this library — a string the application defines, whose
-    vocabulary is its own domain semantics.
+    ``provenance`` and ``stance`` are both opaque to this library — strings the
+    application defines, whose vocabularies are its own domain semantics.
+
+    ``stance`` defaults to :data:`~anagrapheus.identity.ladder.UNGRADED` rather than to
+    anything confident. For an *established* entity the system chose the name itself,
+    so a top grading would be true; for a *resolved* one the first form is a claim like
+    any other, and this layer cannot tell the two apart. Recording nothing is the only
+    honest default; an application that knows which case it is in says so.
     """
 
     entity_id: UUID
     first_surface_form: str
     provenance: str
+    stance: str = UNGRADED
 
 
 class Aliased(DomainEvent, frozen=True):
-    """Another surface form for an entity, at a stance."""
+    """
+    Another surface form for an entity, at a stance.
+
+    ``stance`` is an opaque token from the application's own vocabulary — the same
+    rule as ``provenance``, and for the same reason. To have this layer *rank* by it,
+    declare an :class:`~anagrapheus.identity.ladder.Ladder`; without one the token is
+    stored and returned but never compared.
+    """
 
     entity_id: UUID
     surface_form: str
-    stance: Stance
+    stance: str = UNGRADED
 
 
 class Merged(DomainEvent, frozen=True):

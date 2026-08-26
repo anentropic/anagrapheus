@@ -98,21 +98,65 @@ may not interpret, and several rows sharing a `from_entity` states exactly that.
 Identity states the consequence and performs no cascade. It does not know what a
 belief is.
 
-## 6. Stance: aligned with R21, not imported
+## 6. Stance is a slot, not a scale — [ours]
 
-`Aliased` carries a stance, and NVM's
-[R21](https://github.com/anentropic/narrative-vm/blob/main/_design/v2/16-nvm-decision-register.md)
-(RATIFIED) retired numeric confidence in favour of an ordinal enum,
-`certain > believed > suspected > doubted`, with **comparison as the only permitted
-operation**.
+`Aliased` and `Established` carry a **`stance` token that this library never
+interprets**, exactly like `provenance` and for exactly the same reason. Milestone 2
+first shipped a typed `Stance` enum mirroring
+[R21](https://github.com/anentropic/narrative-vm/blob/main/_design/v2/16-nvm-decision-register.md)'s
+ladder; that was wrong, and the argument that retired it is worth keeping.
 
-We use that ladder, defined locally rather than imported from doxastica: identity must
-not depend on the belief layer that sits above it. It is a plain `Enum` with
-`total_ordering` — deliberately not `IntEnum`, which would permit the arithmetic R21
-forbids. A test asserts that `Stance.CERTAIN + Stance.DOUBTED` raises.
+**Why not a library-owned ladder.** Two structurally identical fields sat one line
+apart under opposite rules: `provenance` opaque because R9's axes are NVM's domain
+semantics, `stance` typed despite R21's ladder being domain semantics by the same
+argument. The only reason for the difference was that doc 00 §5c writes the signature
+as `Aliased(entity_id, surface_form, stance)`, and the signature got implemented
+without being interrogated.
 
-**Open for P3:** reconcile against whatever doxastica actually exports. If the two
-ladders agree, the duplication is documentation; if they diverge, that is a finding.
+**Why not import doxastica's.** doxastica exports a `Stance` and there is no import
+cycle — it depends on pydantic alone and identity does not feed it. The reason is
+about what the type *is for*. doxastica's `BeliefState` has seven closed fields and
+`stance` is a required one: AGM revision cannot work without a grade, because the
+grade is what drives displacement. Grading is **intrinsic** to the abstraction
+doxastica implements. It is not intrinsic to "this referent is called X" — that
+proposition is complete without one. Importing would drag a belief store into
+anyone using the identity layer alone, to record an annotation that is optional.
+
+**Why not an integer rank.** Tempting, because a number sorts in SQL. Rejected on
+NVM's own grounds and one of our own:
+
+- doc 18 classifies confidence as its category **F** — *"a quantity used as if it had
+  semantics that nothing actually defines; the risk is arithmetic over numbers that
+  mean nothing."* An int with no library vocabulary reproduces that at the library
+  boundary: two consumers can disagree about the direction and granularity of the scale.
+- R21 separates *ranking advice* from *epistemic state* explicitly — "a pathway's
+  search score never becomes stance". Making the grade numeric **so that it can be
+  ranked in a query** is that merge.
+- R25 names the general pattern while retiring `BalanceConstraint.tolerance`: a
+  semantic judgment wearing a float.
+- **Ours:** ranks are position-dependent. Insert a rung between two existing ones and
+  every stored integer silently re-grades, with no upcast able to detect it. Tokens
+  do not have that failure mode — which is very likely why doxastica ranks by
+  `.value` internally but *serializes `.name`*.
+
+**What we ship instead.** A `Ladder` — the application's own tokens, weakest first,
+declared once and handed to `IdentityRegistry`. The layer orders by it in SQL (a
+`CASE` over bound rung parameters) without knowing what any rung means. With no
+ladder there is no ranking and candidates come back in `seq` order, which is the
+honest default: a layer that returns "candidates, not an answer" should not hand them
+back pre-ranked by a scale it invented. An unrecognised token — including
+`UNGRADED` — ranks below every rung rather than raising, because the log is the
+authority and may hold a vocabulary this process has never seen.
+
+An NVM-style consumer writes `Ladder(tuple(s.name for s in doxastica.Stance))` and
+gets R21's ladder back, with R21's assignment rule staying where it belongs: in the
+application.
+
+**Consequence for `Established`.** It no longer records its first surface form at
+`certain`; the default is `UNGRADED`, with an optional `stance` for a caller who
+knows better. This closes the open question the first draft of this note recorded:
+for an *established* entity a top grading would be true, for a *resolved* one the
+first form is a claim like any other, and this layer cannot tell the two apart.
 
 ## 7. Storage
 
@@ -137,10 +181,6 @@ corrected by appending a superseding event, per §5c.
   skips.
 - **Should `Split` be an upstream ruling?** §4 above invents a shape the corpus left
   open. It should either be ratified there or consciously left as ours.
-- **Is `first_surface_form` at `CERTAIN` right?** Establishing records the form at
-  `CERTAIN` because the system chose the name itself. For an *established* entity that
-  is trivially true; for a resolved one, the first form is a claim like any other and
-  arguably should carry a caller-supplied stance.
 - **Nothing enforces the establish/resolve split.** §5b says engine-created entities
   should be established and only externally-referring ones resolved. That is a
   discipline the library records but cannot check — `provenance` is where an

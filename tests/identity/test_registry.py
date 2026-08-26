@@ -8,9 +8,9 @@ from typing import TYPE_CHECKING
 import pytest
 
 from anagrapheus.identity import (
+    UNGRADED,
     AmbiguousSurfaceForm,
     MergeCycle,
-    Stance,
     UnknownEntity,
     alias,
     establish,
@@ -28,7 +28,8 @@ def test_established_entity_resolves_from_its_first_form(rig: Rig):
 
     resolution = rig.registry.resolve("alice@corp")
     assert resolution.sole() == entity_id
-    assert resolution.candidates[0].stance is Stance.CERTAIN
+    # Ungraded, not certain: see test_ladder for why establishing asserts nothing.
+    assert resolution.candidates[0].stance == UNGRADED
 
 
 def test_resolution_matches_exactly_never_fuzzily(rig: Rig):
@@ -50,7 +51,7 @@ def test_two_entities_on_one_form_stay_ambiguous(rig: Rig):
     """The layer records the collision; it does not pick a winner."""
     first, e1 = establish(rig.types, "J. Smith", provenance="import")
     second, e2 = establish(rig.types, "other", provenance="import")
-    rig.commit(e1, e2, alias(rig.types, second, "J. Smith", Stance.SUSPECTED))
+    rig.commit(e1, e2, alias(rig.types, second, "J. Smith", "suspected"))
 
     resolution = rig.registry.resolve("J. Smith")
     assert {c.entity_id for c in resolution.candidates} == {first, second}
@@ -64,8 +65,8 @@ def test_candidates_are_ordered_strongest_stance_first(rig: Rig):
     rig.commit(
         e1,
         e2,
-        alias(rig.types, weak, "shared", Stance.DOUBTED),
-        alias(rig.types, strong, "shared", Stance.BELIEVED),
+        alias(rig.types, weak, "shared", "doubted"),
+        alias(rig.types, strong, "shared", "believed"),
     )
 
     candidates = rig.registry.resolve("shared").candidates
@@ -75,7 +76,7 @@ def test_candidates_are_ordered_strongest_stance_first(rig: Rig):
 def test_merge_collapses_candidates_to_the_kept_entity(rig: Rig):
     kept, e1 = establish(rig.types, "alice@corp", provenance="signup")
     absorbed, e2 = establish(rig.types, "Alice Smith", provenance="import")
-    rig.commit(e1, e2, alias(rig.types, absorbed, "alice@corp", Stance.SUSPECTED))
+    rig.commit(e1, e2, alias(rig.types, absorbed, "alice@corp", "suspected"))
     assert len(rig.registry.resolve("alice@corp").candidates) == 2
 
     rig.commit(merge(rig.types, kept=kept, absorbed=absorbed))
@@ -122,7 +123,7 @@ def test_a_merge_cycle_raises_rather_than_hanging(rig: Rig):
 
 def test_history_records_every_decision_in_order(rig: Rig):
     entity_id, event = establish(rig.types, "alice@corp", provenance="signup")
-    rig.commit(event, alias(rig.types, entity_id, "Alice", Stance.BELIEVED))
+    rig.commit(event, alias(rig.types, entity_id, "Alice", "believed"))
 
     history = rig.registry.history(entity_id)
     assert [row.kind for row in history] == ["established", "aliased"]
@@ -150,7 +151,7 @@ def test_merge_emits_one_rekey_naming_its_target(rig: Rig):
 def test_split_emits_one_rekey_per_product(rig: Rig):
     """Several rows from one entity is how the layer states an ambiguous target."""
     original, event = establish(rig.types, "acme", provenance="import")
-    before = rig.commit(event, alias(rig.types, original, "acme-uk", Stance.BELIEVED))
+    before = rig.commit(event, alias(rig.types, original, "acme-uk", "believed"))
 
     left, right = uuid.uuid7(), uuid.uuid7()
     rig.commit(
@@ -165,7 +166,7 @@ def test_split_emits_one_rekey_per_product(rig: Rig):
 
 def test_split_moves_the_named_forms_and_leaves_the_rest(rig: Rig):
     original, event = establish(rig.types, "acme", provenance="import")
-    rig.commit(event, alias(rig.types, original, "acme-uk", Stance.BELIEVED))
+    rig.commit(event, alias(rig.types, original, "acme-uk", "believed"))
 
     carved = uuid.uuid7()
     rig.commit(split(rig.types, original, [(carved, ["acme-uk"])]))
@@ -176,12 +177,12 @@ def test_split_moves_the_named_forms_and_leaves_the_rest(rig: Rig):
 
 def test_split_carries_the_stance_of_the_form_it_moves(rig: Rig):
     original, event = establish(rig.types, "acme", provenance="import")
-    rig.commit(event, alias(rig.types, original, "acme-uk", Stance.DOUBTED))
+    rig.commit(event, alias(rig.types, original, "acme-uk", "doubted"))
 
     carved = uuid.uuid7()
     rig.commit(split(rig.types, original, [(carved, ["acme-uk"])]))
 
-    assert rig.registry.resolve("acme-uk").candidates[0].stance is Stance.DOUBTED
+    assert rig.registry.resolve("acme-uk").candidates[0].stance == "doubted"
 
 
 def test_split_leaves_the_original_canonical(rig: Rig):
@@ -206,30 +207,30 @@ def test_rekeys_since_is_position_bounded(rig: Rig):
 
 def test_re_aliasing_replaces_the_stance(rig: Rig):
     entity_id, event = establish(rig.types, "anchor", provenance="x")
-    rig.commit(event, alias(rig.types, entity_id, "maybe", Stance.DOUBTED))
-    rig.commit(alias(rig.types, entity_id, "maybe", Stance.CERTAIN))
+    rig.commit(event, alias(rig.types, entity_id, "maybe", "doubted"))
+    rig.commit(alias(rig.types, entity_id, "maybe", "certain"))
 
-    assert rig.registry.resolve("maybe").candidates[0].stance is Stance.CERTAIN
+    assert rig.registry.resolve("maybe").candidates[0].stance == "certain"
     assert len(rig.registry.surface_forms(entity_id)) == 2
 
 
 def test_re_applying_a_split_keeps_the_stance_it_moved(rig: Rig):
     """The fold claims idempotency; a re-applied split must not downgrade a stance."""
     original, event = establish(rig.types, "acme", provenance="import")
-    rig.commit(event, alias(rig.types, original, "acme-uk", Stance.CERTAIN))
+    rig.commit(event, alias(rig.types, original, "acme-uk", "certain"))
     carved = uuid.uuid7()
     at = rig.commit(split(rig.types, original, [(carved, ["acme-uk"])]))
 
     rig.store.commit_position("anagrapheus.identity", at - 1)
     rig.projector.catch_up()
 
-    assert rig.registry.resolve("acme-uk").candidates[0].stance is Stance.CERTAIN
+    assert rig.registry.resolve("acme-uk").candidates[0].stance == "certain"
 
 
 def test_a_split_may_not_give_one_form_to_two_entities(rig: Rig):
     """Contradictory input: a split disambiguates, so one form cannot go to both."""
     original, event = establish(rig.types, "acme", provenance="import")
-    rig.commit(event, alias(rig.types, original, "acme-uk", Stance.BELIEVED))
+    rig.commit(event, alias(rig.types, original, "acme-uk", "believed"))
 
     with pytest.raises(ValueError, match="one surface form to two entities"):
         split(rig.types, original, [(uuid.uuid7(), ["acme-uk"]), (uuid.uuid7(), ["acme-uk"])])

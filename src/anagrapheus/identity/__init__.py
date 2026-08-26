@@ -44,10 +44,10 @@ from anagrapheus.identity.events import (
     Merged,
     Split,
     SplitAssignment,
-    Stance,
     normalize_surface_form,
 )
 from anagrapheus.identity.fold import FOLD_NAME, IdentityFold
+from anagrapheus.identity.ladder import UNGRADED, Ladder
 from anagrapheus.identity.registry import Candidate, IdentityRegistry, Resolution
 from anagrapheus.identity.sqlite import SQLiteIdentityStore
 from anagrapheus.identity.store import AliasRow, DecisionRow, EntityRow, IdentityStore, RekeyRow
@@ -61,6 +61,7 @@ from anagrapheus.identity.vocabulary import (
 __all__ = [
     "ENTITY_PIN_KIND",
     "FOLD_NAME",
+    "UNGRADED",
     "AliasRow",
     "Aliased",
     "AmbiguousSurfaceForm",
@@ -74,6 +75,7 @@ __all__ = [
     "IdentityRole",
     "IdentityStore",
     "IdentityVocabulary",
+    "Ladder",
     "MergeCycle",
     "Merged",
     "RekeyRow",
@@ -82,7 +84,6 @@ __all__ = [
     "SQLiteIdentityStore",
     "Split",
     "SplitAssignment",
-    "Stance",
     "UnknownEntity",
     "alias",
     "establish",

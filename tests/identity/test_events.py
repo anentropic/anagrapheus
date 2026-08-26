@@ -10,32 +10,8 @@ from anagrapheus.identity import (
     Merged,
     Split,
     SplitAssignment,
-    Stance,
     normalize_surface_form,
 )
-
-
-def test_stance_is_ordinal():
-    assert Stance.CERTAIN > Stance.BELIEVED > Stance.SUSPECTED > Stance.DOUBTED
-    assert Stance.DOUBTED < Stance.CERTAIN
-    assert Stance.BELIEVED >= Stance.BELIEVED
-
-
-def test_stance_supports_no_arithmetic():
-    """R21: comparison is the only operation. Nothing averages two stances."""
-    with pytest.raises(TypeError):
-        _ = Stance.CERTAIN + Stance.DOUBTED  # type: ignore[operator]
-
-
-def test_stance_compares_only_with_stance():
-    with pytest.raises(TypeError, match="compares only with stance"):
-        _ = Stance.CERTAIN > "believed"  # type: ignore[operator]
-
-
-def test_stance_serializes_as_its_name():
-    event = SplitAssignment(entity_id=uuid.uuid7(), surface_forms=["a"])
-    assert event.model_dump(mode="json")["surface_forms"] == ["a"]
-    assert Stance.SUSPECTED.value == "suspected"
 
 
 def test_normalization_is_nfc_only():

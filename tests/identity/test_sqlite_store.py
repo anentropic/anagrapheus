@@ -8,7 +8,7 @@ from uuid import UUID
 
 import pytest
 
-from anagrapheus.identity import SQLiteIdentityStore, Stance, alias, establish
+from anagrapheus.identity import SQLiteIdentityStore, alias, establish
 from anagrapheus.identity.migrations import COMPONENT, LATEST_VERSION, MIGRATIONS
 from anagrapheus.timeline.migrations import COMPONENT as TIMELINE_COMPONENT
 from anagrapheus.timeline.migrations import SchemaTooNew, component_version, migrate
@@ -78,7 +78,7 @@ def test_a_newer_identity_component_refuses_to_open(tmp_path: Path):
 
 def test_reset_empties_the_projection_but_keeps_the_schema(rig: Rig):
     entity_id, event = establish(rig.types, "alice", provenance="signup")
-    rig.commit(event, alias(rig.types, entity_id, "Alice", Stance.BELIEVED))
+    rig.commit(event, alias(rig.types, entity_id, "Alice", "believed"))
     assert rig.identity_store.entity(entity_id) is not None
 
     rig.identity_store.reset()

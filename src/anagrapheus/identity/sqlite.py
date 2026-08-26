@@ -13,13 +13,15 @@ import sqlite3
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from anagrapheus.identity.events import Stance, normalize_surface_form
+from anagrapheus.identity.events import normalize_surface_form
+from anagrapheus.identity.ladder import UNGRADED
 from anagrapheus.identity.migrations import COMPONENT, MIGRATIONS
 from anagrapheus.identity.store import AliasRow, DecisionRow, EntityRow, RekeyRow
 from anagrapheus.timeline.migrations import migrate
 
 if TYPE_CHECKING:
     from anagrapheus.identity.events import Aliased, Established, Merged, Split
+    from anagrapheus.identity.ladder import Ladder
 
 __all__ = ["SQLiteIdentityStore"]
 
@@ -43,7 +45,7 @@ class SQLiteIdentityStore:
 
     def established(self, event: Established, seq: int) -> None:
         self._put_entity(event.entity_id, seq, event.provenance)
-        self._put_alias(event.entity_id, event.first_surface_form, Stance.CERTAIN, seq)
+        self._put_alias(event.entity_id, event.first_surface_form, event.stance, seq)
         self._decision(seq, event.entity_id, "established", {"form": event.first_surface_form})
 
     def aliased(self, event: Aliased, seq: int) -> None:
@@ -52,7 +54,7 @@ class SQLiteIdentityStore:
             seq,
             event.entity_id,
             "aliased",
-            {"form": event.surface_form, "stance": event.stance.value},
+            {"form": event.surface_form, "stance": event.stance},
         )
 
     def merged(self, event: Merged, seq: int) -> None:
@@ -71,7 +73,7 @@ class SQLiteIdentityStore:
         # Snapshot the source's forms before any of them move. Reading each one inside
         # the loop would make the outcome depend on assignment order, and on a
         # re-applied batch — which the fold contract permits — the rows have already
-        # moved, so every stance would silently fall back to the hedged default.
+        # moved, so every stance would silently fall back to ungraded.
         source = {row.surface_form: row.stance for row in self.aliases(event.original)}
         for assignment in event.into:
             self._put_entity(assignment.entity_id, seq, provenance)
@@ -118,10 +120,19 @@ class SQLiteIdentityStore:
             merged_seq=row["merged_seq"],
         )
 
-    def candidates(self, surface_form: str) -> list[AliasRow]:
+    def candidates(self, surface_form: str, *, ladder: Ladder | None = None) -> list[AliasRow]:
+        params: list[object] = [normalize_surface_form(surface_form)]
+        order = "seq"
+        if ladder is not None and ladder.rungs:
+            # Rung tokens are application data, so they are bound as parameters; only
+            # the rank literals are generated here. An unlisted token falls to -1 and
+            # sorts last, which is what Ladder.rank promises.
+            whens = " ".join(f"WHEN ? THEN {rank}" for rank in range(len(ladder.rungs)))
+            order = f"CASE stance {whens} ELSE -1 END DESC, seq"
+            params.extend(ladder.rungs)
         rows = self._conn.execute(
-            "SELECT * FROM identity_aliases WHERE surface_form = ? ORDER BY seq",
-            (normalize_surface_form(surface_form),),
+            f"SELECT * FROM identity_aliases WHERE surface_form = ? ORDER BY {order}",  # noqa: S608
+            params,
         ).fetchall()
         return [self._alias_row(row) for row in rows]
 
@@ -173,17 +184,22 @@ class SQLiteIdentityStore:
         return AliasRow(
             entity_id=UUID(row["entity_id"]),
             surface_form=row["surface_form"],
-            stance=Stance(row["stance"]),
+            stance=row["stance"],
             seq=row["seq"],
         )
 
-    def _alias_stance(self, entity_id: UUID, surface_form: str) -> Stance:
-        """The stance already recorded for a form on an entity, else the hedged default."""
+    def _alias_stance(self, entity_id: UUID, surface_form: str) -> str:
+        """
+        The stance already recorded for a form on an entity, else ungraded.
+
+        Ungraded rather than an invented grading: this layer has no vocabulary of its
+        own to guess in.
+        """
         row = self._conn.execute(
             "SELECT stance FROM identity_aliases WHERE entity_id = ? AND surface_form = ?",
             (str(entity_id), surface_form),
         ).fetchone()
-        return Stance.SUSPECTED if row is None else Stance(row["stance"])
+        return UNGRADED if row is None else str(row["stance"])
 
     def _put_entity(self, entity_id: UUID, seq: int, provenance: str) -> None:
         # ON CONFLICT rather than a plain insert: the fold contract allows the last
@@ -200,7 +216,7 @@ class SQLiteIdentityStore:
             (str(entity_id), seq, provenance),
         )
 
-    def _put_alias(self, entity_id: UUID, surface_form: str, stance: Stance, seq: int) -> None:
+    def _put_alias(self, entity_id: UUID, surface_form: str, stance: str, seq: int) -> None:
         self._conn.execute(
             """
             INSERT INTO identity_aliases (entity_id, surface_form, stance, seq)
@@ -208,7 +224,7 @@ class SQLiteIdentityStore:
             ON CONFLICT (entity_id, surface_form) DO UPDATE
                 SET stance = excluded.stance, seq = excluded.seq
             """,
-            (str(entity_id), normalize_surface_form(surface_form), stance.value, seq),
+            (str(entity_id), normalize_surface_form(surface_form), stance, seq),
         )
 
     def _rekey(self, seq: int, kind: str, from_entity: UUID, to_entity: UUID) -> None:

@@ -10,6 +10,7 @@ import pytest
 from anagrapheus.identity import (
     IdentityFold,
     IdentityRegistry,
+    Ladder,
     SQLiteIdentityStore,
     register_builtin_events,
 )
@@ -21,6 +22,10 @@ from anagrapheus.timeline import (
     SQLiteEventStore,
     UpcastRegistry,
 )
+
+# A test application's own stance vocabulary, weakest first. Nothing in the library
+# knows these tokens; the rig declares them exactly as a consumer would.
+NVM_LADDER = Ladder(("doubted", "suspected", "believed", "certain"))
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -57,7 +62,9 @@ class Rig:
         )
 
 
-def build_rig(path: Path, *, types: EventTypeRegistry | None = None) -> Rig:
+def build_rig(
+    path: Path, *, types: EventTypeRegistry | None = None, ladder: Ladder | None = NVM_LADDER
+) -> Rig:
     """Assemble a rig over ``path``; pass ``types`` to supply a custom vocabulary."""
     if types is None:
         types = EventTypeRegistry()
@@ -72,7 +79,7 @@ def build_rig(path: Path, *, types: EventTypeRegistry | None = None) -> Rig:
         identity_store=identity_store,
         fold=fold,
         projector=Projector(store, reader, [fold]),
-        registry=IdentityRegistry(identity_store),
+        registry=IdentityRegistry(identity_store, ladder=ladder),
     )
 
 

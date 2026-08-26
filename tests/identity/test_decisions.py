@@ -11,7 +11,6 @@ import pytest
 from anagrapheus.identity import (
     ENTITY_PIN_KIND,
     Established,
-    Stance,
     alias,
     establish,
     merge,
@@ -69,7 +68,7 @@ def test_decisions_carry_a_correlation_id(types: EventTypeRegistry):
 
 def test_alias_and_split_serialize_their_shapes(types: EventTypeRegistry):
     entity_id = UUID(int=1)
-    aliased = alias(types, entity_id, "Alice", Stance.SUSPECTED)
+    aliased = alias(types, entity_id, "Alice", "suspected")
     assert aliased.payload["stance"] == "suspected"
 
     carved = UUID(int=2)

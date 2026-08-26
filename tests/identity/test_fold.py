@@ -17,7 +17,6 @@ from anagrapheus.identity import (
     Merged,
     RoleBinding,
     Split,
-    Stance,
     alias,
     establish,
     merge,
@@ -76,7 +75,7 @@ def test_fold_ignores_events_outside_its_vocabulary(rig: Rig):
 def test_catch_up_resumes_above_the_position(rig: Rig):
     entity_id, event = establish(rig.types, "alice", provenance="signup")
     rig.commit(event)
-    rig.commit(alias(rig.types, entity_id, "Alice", Stance.BELIEVED))
+    rig.commit(alias(rig.types, entity_id, "Alice", "believed"))
     rig.projector.catch_up()  # nothing new: must not re-apply
 
     assert [row.kind for row in rig.registry.history(entity_id)] == ["established", "aliased"]
@@ -100,7 +99,7 @@ def test_rebuild_equals_incremental(rig: Rig):
     rig.commit(
         e1,
         e2,
-        alias(rig.types, second, "Alice S", Stance.SUSPECTED),
+        alias(rig.types, second, "Alice S", "suspected"),
         merge(rig.types, kept=first, absorbed=second),
     )
     incremental = snapshot(rig.store.connection)
@@ -135,7 +134,7 @@ def _script(ops: list[tuple[int, int, int]], types: EventTypeRegistry) -> list[P
             )
         elif kind == 1:
             target = entities[a % len(entities)]
-            events.append(alias(types, target, f"form-{b % 5}", Stance.BELIEVED))
+            events.append(alias(types, target, f"form-{b % 5}", "believed"))
         elif kind == 2:
             keep, drop = a % len(entities), b % len(entities)
             if keep == drop:

@@ -15,7 +15,6 @@ from anagrapheus.identity import (
     IdentityVocabulary,
     RoleBinding,
     SQLiteIdentityStore,
-    Stance,
     alias,
     establish,
     register_builtin_events,
@@ -129,7 +128,7 @@ def test_an_application_keeps_its_own_event_names(tmp_path: Path):
         projector.catch_up()
 
         assert registry.resolve("alice@corp").sole() == ref
-        assert registry.resolve("Alice").candidates[0].stance is Stance.BELIEVED
+        assert registry.resolve("Alice").candidates[0].stance == "believed"
         assert [row.kind for row in registry.history(ref)] == ["established", "aliased"]
     finally:
         store.close()
@@ -143,7 +142,7 @@ def test_the_two_vocabularies_fold_to_the_same_state(tmp_path: Path):
     ref = UUID(int=7)
     try:
         _, event = establish(default_rig.types, "alice@corp", provenance="genesis", entity_id=ref)
-        default_rig.commit(event, alias(default_rig.types, ref, "Alice", Stance.BELIEVED))
+        default_rig.commit(event, alias(default_rig.types, ref, "Alice", "believed"))
         expected = snapshot(default_rig.store.connection)
     finally:
         default_rig.store.close()
@@ -206,7 +205,7 @@ def _aliased(event: DomainEvent):
     return Aliased(
         entity_id=_field_uuid(event, "ref"),
         surface_form=_field_str(event, "label"),
-        stance=Stance(_field_str(event, "confidence")),
+        stance=_field_str(event, "confidence"),
     )
 
 
