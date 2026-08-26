@@ -14,7 +14,7 @@ business.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from anagrapheus.identity.events import Aliased, Established, Merged, Split
 from anagrapheus.identity.vocabulary import IdentityRole, IdentityVocabulary
@@ -50,11 +50,6 @@ class IdentityFold:
     def name(self) -> str:
         """The position key."""
         return self._name
-
-    @property
-    def clock(self) -> Literal["sync", "async"]:
-        """Identity must be current before anything reads it, so: synchronous."""
-        return "sync"
 
     def apply(self, event: StoredEvent, txn: object) -> None:
         """Fold one event, if the vocabulary recognises it as an identity decision."""

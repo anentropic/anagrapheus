@@ -120,3 +120,21 @@ stream-processing meaning (event-time progress markers, a different concept), wh
 "position" is the established event-sourcing subscription term and Kafka's consumer
 term for exactly this. Same mechanism as the upstream docs; different, more
 conventional name.
+
+## 9. Folds do not declare a schedule
+
+A `ProjectionFold` is `(name, apply)`. Milestone 1 also gave it a `clock` of
+`"sync"` or `"async"`, carrying NVM's
+[R6](https://github.com/anentropic/narrative-vm/blob/main/_design/v2/16-nvm-decision-register.md)
+(belief facts sync, portraits async) into the contract. Removed in M2.
+
+The distinction R6 draws is real — some projections must be current before the next
+turn resolves, others must not block it — but it is a property of **who calls
+`catch_up` and when**, not of the fold. Two `Projector`s over two fold lists, driven
+on two schedules, express it exactly; each fold already keeps an independent position,
+so they cannot interfere. A field could only ever *describe* the intent, never act on
+it: `catch_up` skipped anything non-sync and reported its stale position, so a fold
+declaring `"async"` silently never ran, and nothing in the library could run it.
+
+*Added 2026-08-26 (M2). The removal is a fix for that silent no-op, not a YAGNI trim —
+the requirement is ratified upstream and is met by composition.*

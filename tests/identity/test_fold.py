@@ -60,7 +60,6 @@ def snapshot(conn: sqlite3.Connection) -> dict[str, list[tuple[object, ...]]]:
 
 def test_fold_declares_the_protocol_shape(rig: Rig):
     assert rig.fold.name == FOLD_NAME
-    assert rig.fold.clock == "sync"
 
 
 def test_fold_ignores_events_outside_its_vocabulary(rig: Rig):
