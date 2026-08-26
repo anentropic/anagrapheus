@@ -79,8 +79,11 @@ Each assignment mints a new entity and names the forms that move to it; forms le
 unnamed stay with `original`, which **survives** the split. A split is not a merge —
 nothing yields to anything, so `canonical()` is unaffected for every id involved.
 
-Worth proposing upstream as a ruling. Until then this is anagrapheus's shape, not
-narrative-vm's.
+Worth taking upstream — but as a **design-doc edit to doc 00 §5c**, not a ruling.
+`_design/agent-core/README.md` is explicit that the directory mints no `R`-numbers,
+and the v2 register rules on NVM-owned mechanisms, which identity is not: NVM has the
+establish half and never needed the rest. Until that edit lands this is anagrapheus's
+shape, not narrative-vm's.
 
 ## 5. The re-key seam names every target — [ours]
 
@@ -179,8 +182,9 @@ corrected by appending a superseding event, per §5c.
   merge*. The merge machinery is inert under that usage, but §10 Q5's warning stands:
   a first consumer exercising only half an interface is weak evidence for the half it
   skips.
-- **Should `Split` be an upstream ruling?** §4 above invents a shape the corpus left
-  open. It should either be ratified there or consciously left as ours.
+- **Should doc 00 §5c take this `Split` shape?** §4 above fills a blank the corpus
+  left. Worth carrying upstream alongside two other things doc 00 lacks: §3's
+  pinned-minting hazard, and §5d's seam emitting one row per split product.
 - **Nothing enforces the establish/resolve split.** §5b says engine-created entities
   should be established and only externally-referring ones resolved. That is a
   discipline the library records but cannot check — `provenance` is where an

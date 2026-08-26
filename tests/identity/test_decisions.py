@@ -8,6 +8,7 @@ from uuid import UUID
 
 import pytest
 
+from anagrapheus import register_builtin_events
 from anagrapheus.identity import (
     ENTITY_PIN_KIND,
     Established,
@@ -15,16 +16,9 @@ from anagrapheus.identity import (
     establish,
     merge,
     mint_entity_id,
-    register_builtin_events,
     split,
 )
-from anagrapheus.timeline import (
-    EventTypeRegistry,
-    PinLedger,
-    ReplayPins,
-    SQLiteEventStore,
-)
-from anagrapheus.timeline import register_builtin_events as register_pin_events
+from anagrapheus.timeline import EventTypeRegistry, PinLedger, ReplayPins, SQLiteEventStore
 from anagrapheus.timeline.registry import RESERVED_NAMESPACE
 
 if TYPE_CHECKING:
@@ -37,7 +31,6 @@ if TYPE_CHECKING:
 def types() -> EventTypeRegistry:
     registry = EventTypeRegistry()
     register_builtin_events(registry)
-    register_pin_events(registry)
     return registry
 
 

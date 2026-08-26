@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from anagrapheus import register_builtin_events
 from anagrapheus.identity import (
     AmbiguousSurfaceForm,
     IdentityFold,
@@ -27,7 +28,6 @@ from anagrapheus.identity import (
     establish,
     merge,
     mint_entity_id,
-    register_builtin_events,
     split,
 )
 from anagrapheus.identity.fold import FOLD_NAME
@@ -40,7 +40,6 @@ from anagrapheus.timeline import (
     SQLiteEventStore,
     UpcastRegistry,
 )
-from anagrapheus.timeline import register_builtin_events as register_pin_events
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -51,8 +50,7 @@ LADDER = Ladder(("doubted", "suspected", "believed", "certain"))
 
 def make_types() -> EventTypeRegistry:
     types = EventTypeRegistry()
-    register_builtin_events(types)
-    register_pin_events(types)
+    register_builtin_events(types)  # every library event, in one call
     return types
 
 
