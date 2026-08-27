@@ -1,7 +1,7 @@
 """Fold dispatch: position-guarded catch-up, crash resume, rebuild, and invariance."""
 
 import sqlite3
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 import pytest
 from hypothesis import given, settings
@@ -31,7 +31,6 @@ class SqlSum:
     """A fold keeping its state in the store's own file: fully transactional."""
 
     name = "sql_sum"
-    clock: Literal["sync"] = "sync"
 
     def apply(self, event: StoredEvent, txn: object) -> None:
         assert isinstance(txn, sqlite3.Connection)
@@ -57,7 +56,6 @@ class MemoryLog:
         self.seen: list[int] = []
 
     name = "memory_log"
-    clock: Literal["sync"] = "sync"
 
     def apply(self, event: StoredEvent, txn: object) -> None:
         self.seen.append(event.seq)
@@ -231,3 +229,29 @@ def test_default_rebuild_zeroes_position_before_reset(tmp_path: Path):
     with pytest.raises(RuntimeError):
         projector.rebuild("memory_log", reset=failing_reset)
     assert store.read_position("memory_log") == 0  # recovery replays
+
+
+def test_two_projectors_split_the_schedule(tmp_path: Path):
+    """
+    The sync/async split, without a field on the fold.
+
+    NVM's R6 puts belief facts on the turn's critical path and portrait regeneration
+    off it. That is a property of who calls catch_up and when, not of the fold: two
+    projectors over two fold lists, each fold keeping its own position, and neither
+    interfering with the other.
+    """
+    types, store, reader = make_stack(tmp_path / "t.db")
+    store.append([types.pending(StepTaken(n=i)) for i in (1, 2, 3)])
+
+    critical, deferred = SqlSum(), MemoryLog()
+    on_the_turn = Projector(store, reader, [critical])
+    between_turns = Projector(store, reader, [deferred])
+
+    on_the_turn.catch_up()
+    assert SqlSum.total(store) == 6
+    assert deferred.seen == []  # not driven yet, and its position says so
+    assert store.read_position(deferred.name) == 0
+
+    between_turns.catch_up()
+    assert deferred.seen == [1, 2, 3]
+    assert store.read_position(critical.name) == store.read_position(deferred.name) == 3

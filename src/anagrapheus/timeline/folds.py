@@ -1,7 +1,7 @@
 """
 Projection folds: the uniform shape every read model is built from.
 
-A fold is ``(name, clock, apply(event, txn))`` — idempotent, or transactional against
+A fold is ``(name, apply(event, txn))`` — idempotent, or transactional against
 ``txn`` — and the projector keeps it position-guarded: boot replays above the
 position, so a crash between batches costs a re-fold of at most one batch, never a
 double-count. Fold-replay is an invariant (same log, same projections), and
@@ -10,7 +10,7 @@ double-count. Fold-replay is an invariant (same log, same projections), and
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal, Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from anagrapheus.timeline.store import TransactionalStore
 
@@ -30,11 +30,6 @@ class ProjectionFold(Protocol):
     @property
     def name(self) -> str:
         """The position key. Stable for the projection's lifetime."""
-        ...
-
-    @property
-    def clock(self) -> Literal["sync", "async"]:
-        """When the fold runs. Only ``"sync"`` is dispatched in milestone 1."""
         ...
 
     def apply(self, event: StoredEvent, txn: object) -> None:
@@ -76,15 +71,16 @@ class Projector:
 
         This is boot replay: called at startup it brings every projection current,
         having replayed only what each one had not yet seen.
+
+        *Every* registered fold runs. Projections that must not block the caller — a
+        prose summariser, a portrait regenerator — belong to a **second projector**
+        over their own fold list, driven on its own schedule; each fold keeps an
+        independent position, so the two never interfere. That split is the caller's
+        to make, and a fold that declared its own schedule could not be dispatched by
+        anything anyway.
         """
         _validate_batch_size(batch_size)
-        result: dict[str, int] = {}
-        for fold in self._folds:
-            if fold.clock != "sync":
-                result[fold.name] = self._store.read_position(fold.name)
-                continue
-            result[fold.name] = self._run(fold, batch_size=batch_size)
-        return result
+        return {fold.name: self._run(fold, batch_size=batch_size) for fold in self._folds}
 
     def rebuild(
         self,

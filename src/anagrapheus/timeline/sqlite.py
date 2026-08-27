@@ -18,7 +18,7 @@ from uuid import UUID
 
 from anagrapheus.timeline.envelope import Envelope, StoredEvent
 from anagrapheus.timeline.errors import ConcurrencyError
-from anagrapheus.timeline.migrations import migrate
+from anagrapheus.timeline.migrations import COMPONENT, MIGRATIONS, migrate
 from anagrapheus.timeline.store import ScratchRow
 
 if TYPE_CHECKING:
@@ -51,8 +51,20 @@ class SQLiteEventStore:
         self._conn.execute("PRAGMA journal_mode = WAL")
         self._conn.execute("PRAGMA synchronous = NORMAL")
         self._conn.execute("PRAGMA foreign_keys = ON")
-        migrate(self._conn)
+        migrate(self._conn, COMPONENT, MIGRATIONS)
         self._txn_depth = 0
+
+    @property
+    def connection(self) -> sqlite3.Connection:
+        """
+        The underlying connection, for other components sharing this database.
+
+        Exposed so a projection whose state lives in this same file — the identity
+        registry, for one — migrates its own tables and writes through the same
+        connection, which is what lets its state and its position commit together
+        inside :meth:`transaction`.
+        """
+        return self._conn
 
     def close(self) -> None:
         """Close the underlying connection."""

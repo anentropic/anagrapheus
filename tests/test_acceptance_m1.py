@@ -9,7 +9,7 @@ announced divergent) -> rebuild equals incremental.
 from __future__ import annotations
 
 import sqlite3
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -51,7 +51,6 @@ class StepCount:
     """Counts StepTaken events into the store's own file; ignores library events."""
 
     name = "step_count"
-    clock: Literal["sync"] = "sync"
 
     def apply(self, event: StoredEvent, txn: object) -> None:
         assert isinstance(txn, sqlite3.Connection)
