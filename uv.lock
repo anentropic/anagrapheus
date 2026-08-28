@@ -7,6 +7,7 @@ name = "anagrapheus"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "doxastica" },
     { name = "pydantic" },
 ]
 
@@ -31,7 +32,10 @@ docs = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "pydantic", specifier = ">=2.11,<3" }]
+requires-dist = [
+    { name = "doxastica", specifier = ">=0.2,<0.3" },
+    { name = "pydantic", specifier = ">=2.11,<3" },
+]
 
 [package.metadata.requires-dev]
 dev = [
@@ -308,6 +312,18 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/c6/7e/37732ea80eebc30e976e4cdab15c190bc42d96959a42e38ddf6f8c60468f/coverage-7.15.4-cp315-cp315t-win_amd64.whl", hash = "sha256:288bde2a2d7ab6b6c2d7252fcde8b524387f2d970bdba9658fc6f8bbcaef0f9b", size = 225895, upload-time = "2026-08-06T13:50:17.928Z" },
     { url = "https://files.pythonhosted.org/packages/c6/08/1e00f7923eaaba45fb3d51dd794125fc766304b1df264f3a9c6557bfb30e/coverage-7.15.4-cp315-cp315t-win_arm64.whl", hash = "sha256:68be5e1de60ff13c9095bbec0e5a7fa45b33b101752215b91345ea1f61c4a278", size = 225213, upload-time = "2026-08-06T13:50:19.981Z" },
     { url = "https://files.pythonhosted.org/packages/b4/d9/e70c286c979378f061d8266e279b686ab0b0b688e1fe0af864684f23a77d/coverage-7.15.4-py3-none-any.whl", hash = "sha256:964730a1e9de9c0cf11be6a1a3c79ce419c34882842abd256086ba4698705e84", size = 214332, upload-time = "2026-08-06T13:50:22.192Z" },
+]
+
+[[package]]
+name = "doxastica"
+version = "0.2.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pydantic" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a3/67/aa216dc6432ee0df460b9711ae8d6ade6167bd172d7541028e090deb5482/doxastica-0.2.0.tar.gz", hash = "sha256:e46dd7599baaf9a4cdfadafd9283425f89012ce56aab7134946c247a7581bc31", size = 35845, upload-time = "2026-07-05T17:30:57.758Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/bb/e3/9fe1ebb0048488fb5584f450e26e7da92cf3ccccbdeeb772ef670ffdd41c/doxastica-0.2.0-py3-none-any.whl", hash = "sha256:818f937f6483d64c554fea6a26a3b43bbf34bcb316cdf002735fefae4da706d8", size = 42253, upload-time = "2026-07-05T17:30:56.389Z" },
 ]
 
 [[package]]

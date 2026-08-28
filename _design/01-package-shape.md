@@ -68,8 +68,15 @@ open (§8 tail). We follow doc 00; the question stays open.
 The adapter is ~10 SQL statements over an append-only schema with explicit
 transaction control. An ORM would add a heavy dependency to map mutable objects onto
 a store designed never to mutate, and would interpose a session/unit-of-work between
-`append` and its persist-first guarantee. The charter's dependency line stays
-"pydantic only."
+`append` and its persist-first guarantee.
+
+*Amended 2026-08-27 (M3). This section used to end "the charter's dependency line stays
+pydantic only". That is retired: `anagrapheus.beliefs` takes a required dependency on
+doxastica, which is the belief store the stack exists to integrate with. The cost is
+one package — doxastica is itself pydantic-only and shares the >=3.14 floor — but the
+sentence was a commitment and is no longer true, and the argument against an ORM never
+needed it: an ORM is declined on what it would do to the write path, not on a count of
+dependencies.*
 
 What the repository pattern is usually asked for — SQL confined to one module,
 storage swappable, callers coded against an interface — is delivered by the
