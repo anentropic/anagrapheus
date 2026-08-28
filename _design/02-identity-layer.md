@@ -134,6 +134,15 @@ doxastica implements. It is not intrinsic to "this referent is called X" — tha
 proposition is complete without one. Importing would drag a belief store into
 anyone using the identity layer alone, to record an annotation that is optional.
 
+*Amended 2026-08-27 (M3): the second of those two reasons has expired.*
+[Note 03](03-belief-layer.md) makes doxastica a required dependency of the whole
+distribution, so importing `Stance` here would no longer drag anything anywhere — a
+consumer of the identity layer alone now carries the belief store regardless. The
+decision stands on the first reason, which is the load-bearing one and is unaffected:
+grading is intrinsic to a belief and not to a name. Recorded rather than quietly kept,
+because an argument that no longer holds is worse than no argument — a later reader
+would weigh two reasons where there is one.
+
 **Why not an integer rank.** Tempting, because a number sorts in SQL. Rejected on
 NVM's own grounds and one of our own:
 
