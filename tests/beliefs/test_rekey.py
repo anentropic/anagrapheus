@@ -6,7 +6,13 @@ import uuid
 
 import pytest
 
-from anagrapheus.beliefs import UnknownScheme, mint, plan_rekeys
+from anagrapheus.beliefs import (
+    BeliefError,
+    UnknownPredicate,
+    UnrenderableBelief,
+    mint,
+    plan_rekeys,
+)
 from anagrapheus.identity.store import RekeyRow
 
 from .conftest import Rig, build_predicates
@@ -150,7 +156,7 @@ def test_a_belief_this_registry_cannot_re_mint_is_reported_not_skipped(rig: Rig)
     rows = [RekeyRow(seq=9, kind="merge", from_entity=entity, to_entity=uuid.uuid7())]
 
     narrow = _registry_without_location()
-    with pytest.raises(UnknownScheme, match="cannot be re-minted"):
+    with pytest.raises(UnrenderableBelief, match="cannot be re-minted"):
         plan_rekeys(rows, rig.index, narrow)
 
     assert plan_rekeys(rows, rig.index, narrow, skip_unrenderable=True) == []
@@ -163,3 +169,86 @@ def _registry_without_location():
     from anagrapheus.beliefs import Predicate, PredicateKind, PredicateRegistry
 
     return PredicateRegistry([Predicate("knows", 2, PredicateKind.RELATIONAL)], namespace="crm")
+
+
+def test_a_chain_of_merges_in_one_batch_composes(rig: Rig):
+    """
+    A is absorbed into B, then B into C, and the caller asks once.
+
+    Planning each row against the index alone stops at B — the belief was never minted
+    on B, so nothing plans it onward — and the caller writes a belief keyed on an id
+    that the same batch already superseded. The cascade has to see the batch whole.
+    """
+    a, b, c = uuid.uuid7(), uuid.uuid7(), uuid.uuid7()
+    rig.commit(mint(rig.types, rig.predicates, "location", a)[1])
+
+    plans = plan_rekeys(
+        [
+            RekeyRow(seq=9, kind="merge", from_entity=a, to_entity=b),
+            RekeyRow(seq=10, kind="merge", from_entity=b, to_entity=c),
+        ],
+        rig.index,
+        rig.predicates,
+    )
+
+    assert [p.sole() for p in plans] == [rig.predicates.belief_id("location", c)]
+
+
+def test_a_split_product_later_merged_composes_too(rig: Rig):
+    """The chain need not be all merges: a product can be absorbed in the same batch."""
+    original, uk, us, group = uuid.uuid7(), uuid.uuid7(), uuid.uuid7(), uuid.uuid7()
+    rig.commit(mint(rig.types, rig.predicates, "employer", original)[1])
+
+    plans = plan_rekeys(
+        [
+            RekeyRow(seq=9, kind="split", from_entity=original, to_entity=uk),
+            RekeyRow(seq=9, kind="split", from_entity=original, to_entity=us),
+            RekeyRow(seq=10, kind="merge", from_entity=us, to_entity=group),
+        ],
+        rig.index,
+        rig.predicates,
+    )
+
+    assert len(plans) == 1
+    assert plans[0].candidates == (
+        rig.predicates.belief_id("employer", uk),
+        rig.predicates.belief_id("employer", group),
+    )
+
+
+def test_a_merge_cycle_in_a_batch_does_not_hang(rig: Rig):
+    """
+    A cycle is a contradiction in the log, and identity detects it at read.
+
+    The planner must not loop following one, and must not silently produce a target
+    either: it says it cannot re-key rather than picking an arbitrary point in a ring.
+    """
+    a, b = uuid.uuid7(), uuid.uuid7()
+    rig.commit(mint(rig.types, rig.predicates, "location", a)[1])
+
+    with pytest.raises(BeliefError):
+        plan_rekeys(
+            [
+                RekeyRow(seq=9, kind="merge", from_entity=a, to_entity=b),
+                RekeyRow(seq=10, kind="merge", from_entity=b, to_entity=a),
+            ],
+            rig.index,
+            rig.predicates,
+        )
+
+
+def test_an_unrenderable_belief_names_its_actual_cause(rig: Rig):
+    """
+    ``UnknownScheme`` for every cause is a lie a consumer cannot see past.
+
+    A migration problem, corrupt data and a mis-configured registry need different
+    responses, so the error is its own type and keeps the original as its cause.
+    """
+    entity = uuid.uuid7()
+    rig.commit(mint(rig.types, build_predicates("other"), "location", entity)[1])
+    rows = [RekeyRow(seq=9, kind="merge", from_entity=entity, to_entity=uuid.uuid7())]
+
+    with pytest.raises(UnrenderableBelief) as caught:
+        plan_rekeys(rows, rig.index, _registry_without_location())
+
+    assert isinstance(caught.value.__cause__, UnknownPredicate)

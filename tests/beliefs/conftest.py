@@ -112,4 +112,6 @@ def core() -> MemoryCore:
 
 @pytest.fixture
 def writer(core: MemoryCore) -> BeliefWriter:
-    return BeliefWriter(core, build_predicates(), scope_id="agent")
+    types = EventTypeRegistry()
+    register_builtin_events(types)
+    return BeliefWriter(core, build_predicates(), types, scope_id="agent")

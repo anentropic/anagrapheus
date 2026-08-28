@@ -55,7 +55,12 @@ __all__ = [
 CURRENT_SCHEME: Final = 1
 
 _NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-_NAMESPACE = re.compile(r"^[A-Za-z0-9_.-]*$")
+# Non-empty on purpose. The namespace is required *because* an unnamespaced id
+# collides across tenants, and `namespace=""` would satisfy the signature while
+# producing exactly the id the requirement exists to prevent. `parse` stays
+# permissive: minting decides what this process writes, parsing reads what the log
+# already holds.
+_NAMESPACE = re.compile(r"^[A-Za-z0-9_.-]+$")
 _BELIEF_ID = re.compile(r"^v(?P<scheme>\d+):(?P<ns>[^:()]*):(?P<name>[^:()]+)\((?P<args>[^()]*)\)$")
 
 
@@ -70,10 +75,11 @@ class PredicateKind(StrEnum):
     - ``FUNCTIONAL`` — ``location(alice)``. One value at a time; revision supersedes
       correctly, because the new place genuinely replaces the old one.
     - ``RELATIONAL`` — ``knows(alice, bob)``. Every argument belongs in the *id* and
-      the value is a mere assertion (a boolean, or a stance). Keyed as
-      ``knows(alice)`` with ``bob`` in the value, revising to ``carol`` would silently
-      retract the belief about bob — a retraction nobody asked for and nothing
-      records.
+      the value only asserts that the proposition holds, so it is a bool. (Not a
+      stance: *how firmly* it is held is doxastica's own ``stance`` argument, one axis
+      over.) Keyed as ``knows(alice)`` with ``bob`` in the value, revising to ``carol``
+      would silently retract the belief about bob — a retraction nobody asked for and
+      nothing records.
 
     Declaring the kind is what lets :class:`~anagrapheus.beliefs.writer.BeliefWriter`
     reject a relational belief carrying a substantive value; the arity check catches
@@ -131,7 +137,8 @@ class PredicateRegistry:
     def __init__(self, predicates: Iterable[Predicate], *, namespace: str) -> None:
         if not _NAMESPACE.match(namespace):
             raise ValueError(
-                f"namespace {namespace!r} may contain only letters, digits, '_', '.' and '-'"
+                f"namespace {namespace!r} must be non-empty and may contain only "
+                f"letters, digits, '_', '.' and '-'"
             )
         self._namespace = namespace
         self._predicates: dict[str, Predicate] = {}

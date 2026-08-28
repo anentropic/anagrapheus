@@ -5,7 +5,8 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING
 
-from anagrapheus.beliefs import BeliefWriter, divergence
+from anagrapheus.beliefs import BeliefWriter, divergence, register_builtin_events
+from anagrapheus.timeline import EventTypeRegistry
 
 from .conftest import build_predicates
 
@@ -59,8 +60,10 @@ def test_divergence_needs_both_scopes_to_have_minted_through_one_registry(
     registry the only way to mint.
     """
     alice = uuid.uuid7()
-    ours = BeliefWriter(core, build_predicates("crm"), scope_id="agent")
-    theirs = BeliefWriter(core, build_predicates("other"), scope_id="world")
+    types = EventTypeRegistry()
+    register_builtin_events(types)
+    ours = BeliefWriter(core, build_predicates("crm"), types, scope_id="agent")
+    theirs = BeliefWriter(core, build_predicates("other"), types, scope_id="world")
 
     ours.revise("location", (alice,), "London", uuid.uuid7())
     theirs.revise("location", (alice,), "Paris", uuid.uuid7())
@@ -68,6 +71,6 @@ def test_divergence_needs_both_scopes_to_have_minted_through_one_registry(
     assert divergence(core, "agent", "world") == []
 
     # Minted through one registry, the same two claims are the disagreement they are.
-    same = BeliefWriter(core, build_predicates("crm"), scope_id="rumour")
+    same = BeliefWriter(core, build_predicates("crm"), types, scope_id="rumour")
     same.revise("location", (alice,), "Paris", uuid.uuid7())
     assert [d.held for d in divergence(core, "agent", "rumour")] == ["London"]

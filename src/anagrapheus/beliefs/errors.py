@@ -5,8 +5,10 @@ from __future__ import annotations
 __all__ = [
     "BeliefError",
     "MalformedBeliefId",
+    "MergeCycleInBatch",
     "UnknownPredicate",
     "UnknownScheme",
+    "UnrenderableBelief",
     "WrongArity",
 ]
 
@@ -48,4 +50,27 @@ class UnknownScheme(BeliefError):
     is one this code cannot reproduce, and quietly substituting today's rule would
     orphan the history keyed on the old one — the failure a scheme version exists to
     make loud.
+    """
+
+
+class UnrenderableBelief(BeliefError):
+    """
+    A belief id in the index that this registry cannot re-mint, so a re-key cannot reach it.
+
+    Its own type rather than whichever error the attempt happened to raise: a scheme
+    this code does not know, an id that does not parse, and a predicate this registry
+    does not declare are a migration problem, corrupt data and a mis-configured process
+    respectively, and they want different responses. The original is kept as the
+    ``__cause__`` so the distinction survives.
+    """
+
+
+class MergeCycleInBatch(BeliefError):
+    """
+    A batch of re-key rows follows a ring rather than a chain.
+
+    Identity detects a merge cycle at read and refuses to name a canonical id; the
+    planner refuses for the same reason. A ring has no last element, so there is no
+    successor to re-mint to — and picking an arbitrary point in it would hand the
+    caller a confident answer to a question the log contradicts itself about.
     """

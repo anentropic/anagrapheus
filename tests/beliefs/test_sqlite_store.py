@@ -135,3 +135,28 @@ def test_a_file_from_the_future_refuses_to_open(tmp_path: Path):
 
     with pytest.raises(SchemaTooNew):
         build_rig(path)
+
+
+def test_listing_beliefs_does_not_run_a_query_per_row(rig: Rig):
+    """
+    Listing beliefs is one query, not one per row.
+
+    ``beliefs_for`` is asked on every merge, so 1+N queries is a cost that scales with
+    how much is believed about the busiest entity — exactly the entity a merge is most
+    likely to involve.
+    """
+    entity = uuid.uuid7()
+    rig.commit(
+        *[mint(rig.types, rig.predicates, "knows", entity, uuid.uuid7())[1] for _ in range(20)]
+    )
+
+    statements: list[str] = []
+    rig.store.connection.set_trace_callback(statements.append)
+    try:
+        rows = rig.index.beliefs_for(entity)
+    finally:
+        rig.store.connection.set_trace_callback(None)
+
+    assert len(rows) == 20
+    assert all(len(r.entity_ids) == 2 for r in rows)
+    assert len(statements) <= 2, statements

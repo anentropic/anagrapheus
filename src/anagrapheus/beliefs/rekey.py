@@ -20,7 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from anagrapheus.beliefs.errors import BeliefError, UnknownScheme
+from anagrapheus.beliefs.errors import BeliefError, MergeCycleInBatch, UnrenderableBelief
 from anagrapheus.beliefs.predicates import MintedId
 
 if TYPE_CHECKING:
@@ -32,6 +32,9 @@ if TYPE_CHECKING:
     from anagrapheus.identity.store import RekeyRow
 
 __all__ = ["BeliefRekey", "plan_rekeys"]
+
+#: Rows gathered by the decision that emitted them: ``(seq, kind, from_entity)``.
+type _Grouped = dict[tuple[int, str, UUID], list[UUID]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,17 +90,19 @@ def plan_rekeys(
     Off by default: a belief the caller cannot re-key is a real gap in the cascade, and
     silence about it is the failure mode the whole seam exists to prevent.
     """
+    grouped = _group(rekeys)
     plans: list[BeliefRekey] = []
-    for (seq, kind, from_entity), targets in _group(rekeys).items():
+    for (seq, kind, from_entity), targets in grouped.items():
         for row in index.beliefs_for(from_entity):
-            candidates = _successors(row.belief_id, from_entity, targets, predicates)
+            settled = _settle(from_entity, targets, grouped)
+            candidates = _successors(row.belief_id, from_entity, settled, predicates)
             if candidates is None:
                 if skip_unrenderable:
                     continue
-                raise UnknownScheme(
+                raise UnrenderableBelief(
                     f"belief {row.belief_id!r} names {from_entity} but cannot be re-minted "
                     f"by this registry; pass skip_unrenderable=True to drop it knowingly"
-                )
+                ) from _why_unrenderable(row.belief_id, predicates)
             plans.append(
                 BeliefRekey(
                     seq=seq,
@@ -116,6 +121,59 @@ def _group(rekeys: Iterable[RekeyRow]) -> dict[tuple[int, str, UUID], list[UUID]
     for row in rekeys:
         grouped.setdefault((row.seq, row.kind, row.from_entity), []).append(row.to_entity)
     return grouped
+
+
+def _settle(from_entity: UUID, targets: Sequence[UUID], grouped: _Grouped) -> list[UUID]:
+    """
+    Follow each target through any later decision in the same batch.
+
+    A batch can chain: ``A`` is absorbed into ``B``, then ``B`` into ``C``. Planning
+    each row against the index alone stops at ``B`` — nothing was ever minted on ``B``,
+    so no row plans it onward — and the caller re-keys onto an id the same batch has
+    already superseded. Only the beliefs the *index* knows about are planned, so the
+    composition has to happen here rather than by re-reading the index.
+
+    A split's products are followed the same way, independently: one may be absorbed
+    later while its siblings are not, and each candidate answers for itself.
+    """
+    settled: list[UUID] = []
+    for target in targets:
+        current = target
+        seen = {from_entity, current}
+        while (onward := _onward(current, grouped)) is not None:
+            current = onward
+            if current in seen:
+                raise MergeCycleInBatch(
+                    f"re-key rows lead {from_entity} back to {current}; a ring has no "
+                    f"last element, so there is no successor to re-mint to"
+                )
+            seen.add(current)
+        settled.append(current)
+    return settled
+
+
+def _onward(entity: UUID, grouped: _Grouped) -> UUID | None:
+    """
+    The single id ``entity`` yields to later in the batch, if it yields to one.
+
+    Only a merge is followed. A split does not supersede its original — the original
+    survives it — so an entity that is later split has not moved, and following one of
+    its products would be this layer choosing among them, which is the judgment it may
+    not make.
+    """
+    for (_seq, kind, from_entity), targets in grouped.items():
+        if kind == "merge" and from_entity == entity:
+            return targets[0]
+    return None
+
+
+def _why_unrenderable(belief_id: str, predicates: PredicateRegistry) -> BeliefError:
+    """The error the re-mint attempt actually hit, kept as the cause."""
+    try:
+        predicates.render(predicates.parse(belief_id))
+    except BeliefError as exc:
+        return exc
+    return UnrenderableBelief(f"belief {belief_id!r} renders on its own but not re-keyed")
 
 
 def _successors(

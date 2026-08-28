@@ -29,8 +29,10 @@ from anagrapheus.beliefs.divergence import Disagreement, divergence
 from anagrapheus.beliefs.errors import (
     BeliefError,
     MalformedBeliefId,
+    MergeCycleInBatch,
     UnknownPredicate,
     UnknownScheme,
+    UnrenderableBelief,
     WrongArity,
 )
 from anagrapheus.beliefs.events import BeliefMinted
@@ -70,6 +72,7 @@ __all__ = [
     "BeliefWriter",
     "Disagreement",
     "MalformedBeliefId",
+    "MergeCycleInBatch",
     "MintedId",
     "Predicate",
     "PredicateKind",
@@ -79,6 +82,7 @@ __all__ = [
     "SQLiteBeliefIndexStore",
     "UnknownPredicate",
     "UnknownScheme",
+    "UnrenderableBelief",
     "WrongArity",
     "divergence",
     "mint",

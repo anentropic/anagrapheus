@@ -16,10 +16,11 @@ in UUID7 byte order — makes its as-of cut agree with the log's own order.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from doxastica import Stance
 
+from anagrapheus.beliefs.minting import mint
 from anagrapheus.beliefs.predicates import PredicateKind
 
 if TYPE_CHECKING:
@@ -28,14 +29,30 @@ if TYPE_CHECKING:
     from doxastica import BeliefState, BeliefStore
 
     from anagrapheus.beliefs.predicates import PredicateRegistry
+    from anagrapheus.timeline.envelope import PendingEvent
+    from anagrapheus.timeline.registry import EventTypeRegistry
 
-__all__ = ["BeliefWriter", "RelationalValue"]
+__all__ = ["BeliefWriter", "RelationalValue", "Written"]
 
 #: What a relational belief's value may be: whether the proposition holds, and nothing
 #: else. *How firmly* is a separate axis, and doxastica already has a parameter for it —
 #: putting a grade in the value would merge the two, which is the merge R21 forbids and
 #: which doxastica's own encoding refuses anyway (values are JSON; ``Stance`` is not).
 type RelationalValue = bool
+
+
+class Written(NamedTuple):
+    """
+    A belief written, and the event recording that its id was minted.
+
+    The event is returned rather than appended for the reason every helper in this
+    library returns one: a belief is written *because* something happened, and the
+    caller owns that batch and its transaction. But it is returned rather than left
+    implicit because the alternative was a trap — see :class:`BeliefWriter`.
+    """
+
+    state: BeliefState
+    minted: PendingEvent
 
 
 class BeliefWriter:
@@ -45,17 +62,27 @@ class BeliefWriter:
     A thin wrapper by design: it adds minting, the ``source_event_id`` binding, and one
     check. Everything else — revision semantics, scopes, retraction cascades — is
     doxastica's, reached through the store the caller passes in.
+
+    **Writing hands back an event you must append.** An earlier draft minted the id and
+    said nothing, which made this class a trap: a caller who used only the writer — the
+    surface documented as the way to write beliefs — got no index entries at all, so
+    :func:`~anagrapheus.beliefs.rekey.plan_rekeys` found nothing and a merge silently
+    re-keyed none of their beliefs. The layer's own front door opened exactly the hole
+    it exists to close. Returning the event makes the recording impossible to forget
+    without discarding a return value.
     """
 
     def __init__(
         self,
         store: BeliefStore,
         predicates: PredicateRegistry,
+        types: EventTypeRegistry,
         *,
         scope_id: str,
     ) -> None:
         self._store = store
         self._predicates = predicates
+        self._types = types
         self._scope_id = scope_id
 
     @property
@@ -65,7 +92,7 @@ class BeliefWriter:
 
     def for_scope(self, scope_id: str) -> BeliefWriter:
         """Another writer over the same store and registry, in a different scope."""
-        return BeliefWriter(self._store, self._predicates, scope_id=scope_id)
+        return BeliefWriter(self._store, self._predicates, self._types, scope_id=scope_id)
 
     def revise(
         self,
@@ -74,10 +101,13 @@ class BeliefWriter:
         value: Any,
         source_event_id: UUID,
         stance: Stance = Stance.certain,
-    ) -> BeliefState:
+        *,
+        correlation_id: UUID | None = None,
+    ) -> Written:
         """AGM revision: supersede whatever this scope held for this proposition."""
-        belief_id = self._belief_id(predicate, entity_ids, value)
-        return self._store.revise(self._scope_id, belief_id, value, source_event_id, stance)
+        belief_id, minted = self._mint(predicate, entity_ids, value, correlation_id)
+        state = self._store.revise(self._scope_id, belief_id, value, source_event_id, stance)
+        return Written(state, minted)
 
     def expand(
         self,
@@ -86,10 +116,13 @@ class BeliefWriter:
         value: Any,
         source_event_id: UUID,
         stance: Stance = Stance.certain,
-    ) -> BeliefState:
+        *,
+        correlation_id: UUID | None = None,
+    ) -> Written:
         """AGM expansion: add without consistency enforcement."""
-        belief_id = self._belief_id(predicate, entity_ids, value)
-        return self._store.expand(self._scope_id, belief_id, value, source_event_id, stance)
+        belief_id, minted = self._mint(predicate, entity_ids, value, correlation_id)
+        state = self._store.expand(self._scope_id, belief_id, value, source_event_id, stance)
+        return Written(state, minted)
 
     def contract(self, predicate: str, entity_ids: tuple[UUID, ...], source_event_id: UUID) -> None:
         """AGM contraction: retract this proposition in this scope."""
@@ -97,8 +130,25 @@ class BeliefWriter:
             self._scope_id, self._predicates.belief_id(predicate, *entity_ids), source_event_id
         )
 
-    def _belief_id(self, predicate: str, entity_ids: tuple[UUID, ...], value: Any) -> str:
-        """Mint the id, and refuse the relational shape doc 00 §6a warns about."""
+    def _mint(
+        self,
+        predicate: str,
+        entity_ids: tuple[UUID, ...],
+        value: Any,
+        correlation_id: UUID | None,
+    ) -> tuple[str, PendingEvent]:
+        """Check the value, then mint through the recorded path rather than around it."""
+        self._check(predicate, value)
+        return mint(
+            self._types,
+            self._predicates,
+            predicate,
+            *entity_ids,
+            correlation_id=correlation_id,
+        )
+
+    def _check(self, predicate: str, value: Any) -> None:
+        """Refuse the relational shape doc 00 §6a warns about."""
         declared = self._predicates.predicate(predicate)
         if declared.kind is PredicateKind.RELATIONAL and not isinstance(value, bool):
             # The arity check already stops `knows(alice)` from being minted. This
@@ -120,4 +170,3 @@ class BeliefWriter:
                 f"proposition rather than answering it: pass a bool, not "
                 f"{type(value).__name__}{hint}"
             )
-        return self._predicates.belief_id(predicate, *entity_ids)

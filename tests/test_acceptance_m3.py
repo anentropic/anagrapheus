@@ -26,7 +26,6 @@ from anagrapheus.beliefs import (
     PredicateRegistry,
     SQLiteBeliefIndexStore,
     divergence,
-    mint,
     plan_rekeys,
 )
 from anagrapheus.beliefs.fold import FOLD_NAME as BELIEFS_FOLD
@@ -86,7 +85,7 @@ def test_milestone_3_acceptance(tmp_path: Path):
     predicates = PredicateRegistry(PREDICATES, namespace="crm")
     store, index_store, projector, identity, index = open_stack(path, types)
     core = MemoryCore(InMemoryBackend())
-    agent = BeliefWriter(core, predicates, scope_id="agent")
+    agent = BeliefWriter(core, predicates, types, scope_id="agent")
 
     # -- two contacts and a colleague, every id minted through the pin ledger ---------
     ledger = PinLedger(store, types)
@@ -95,21 +94,21 @@ def test_milestone_3_acceptance(tmp_path: Path):
     carol, e_c = establish(types, "carol@corp", provenance="crm", resolver=ledger)
     store.append([e_a, e_b, e_c])
 
-    # -- the agent believes things, minting each id and recording the mint ------------
-    _, m1 = mint(types, predicates, "location", contact_a)
-    _, m2 = mint(types, predicates, "knows", contact_b, carol)
-    _, m3 = mint(types, predicates, "location", carol)
+    # -- the agent believes things; each write hands back the event recording its mint,
+    # -- and the caller appends them in its own batch --------------------------------
+    #
+    # doxastica's `source_event_id` is a caller-supplied opaque handle, and the envelope
+    # id of the event that occasioned the belief is exactly the handle worth supplying:
+    # it makes "which event caused this?" answerable, and puts doxastica's as-of
+    # ordering in step with the log's own. Here that is the establishing event.
+    established = list(store.read())
+    _, m1 = agent.revise("location", (contact_a,), "London", established[0].envelope.event_id)
+    _, m2 = agent.revise(
+        "knows", (contact_b, carol), True, established[1].envelope.event_id, Stance.suspected
+    )
+    _, m3 = agent.revise("location", (carol,), "Paris", established[2].envelope.event_id)
     store.append([m1, m2, m3])
     projector.catch_up()
-
-    # doxastica's `source_event_id` is a caller-supplied opaque handle, and the
-    # envelope id of the event that occasioned the belief is exactly the handle worth
-    # supplying: it makes "which event caused this?" answerable, and puts doxastica's
-    # as-of ordering in step with the log's own.
-    events = list(store.read())
-    agent.revise("location", (contact_a,), "London", events[3].envelope.event_id)
-    agent.revise("knows", (contact_b, carol), True, events[4].envelope.event_id, Stance.suspected)
-    agent.revise("location", (carol,), "Paris", events[5].envelope.event_id)
 
     assert len(core.query_scope("agent", BeliefFilter())) == 3
 
@@ -117,6 +116,7 @@ def test_milestone_3_acceptance(tmp_path: Path):
     before_merge = store.last_seq()
     store.append([merge(types, kept=contact_a, absorbed=contact_b)])
     projector.catch_up()
+    merged_at = list(store.read(since_seq=before_merge))[0].envelope.event_id
 
     # -- and the stack answers the question doc 00 §5d asks --------------------------
     rekeys = identity.rekeys_since(before_merge)
@@ -134,17 +134,15 @@ def test_milestone_3_acceptance(tmp_path: Path):
             s for s in core.query_scope("agent", BeliefFilter()) if s.belief_id == plan.belief_id
         )
         successor = predicates.parse(plan.sole())
-        _, minted = mint(types, predicates, successor.name, *successor.entity_ids)
-        seq = store.append([minted])
-        rekeyed = list(store.read(since_seq=seq - 1))[0]
-        agent.revise(
+        _, minted = agent.revise(
             successor.name,
             successor.entity_ids,
             stale.value,
-            rekeyed.envelope.event_id,
+            merged_at,
             stale.stance,
         )
-        core.contract("agent", plan.belief_id, rekeyed.envelope.event_id)
+        store.append([minted])
+        core.contract("agent", plan.belief_id, merged_at)
     projector.catch_up()
 
     held = {s.belief_id for s in core.query_scope("agent", BeliefFilter())}
@@ -153,7 +151,8 @@ def test_milestone_3_acceptance(tmp_path: Path):
 
     # -- a second holder disagrees, which is the whole multi-agent case --------------
     rumour = agent.for_scope("rumour")
-    rumour.revise("location", (carol,), "Berlin", events[5].envelope.event_id)
+    _, rumoured = rumour.revise("location", (carol,), "Berlin", merged_at)
+    store.append([rumoured])
 
     assert [(d.held, d.reference) for d in divergence(core, "agent", "rumour")] == [
         ("Paris", "Berlin")
@@ -194,9 +193,9 @@ def test_the_relational_trap_is_unrepresentable(tmp_path: Path):
     """
     predicates = PredicateRegistry(PREDICATES, namespace="crm")
     core = MemoryCore(InMemoryBackend())
-    writer = BeliefWriter(core, predicates, scope_id="agent")
     types = EventTypeRegistry()
     register_builtin_events(types)
+    writer = BeliefWriter(core, predicates, types, scope_id="agent")
     store = SQLiteEventStore(tmp_path / "agent.db")
     try:
         alice, _ = establish(types, "alice", provenance="crm")

@@ -167,3 +167,30 @@ def test_mint_parse_round_trips(application: tuple[str, list[UUID]]):
     assert parsed.entity_ids == expected
     # ...and re-rendering the parse is a fixed point.
     assert predicates.render(parsed) == belief_id
+
+
+def test_an_empty_namespace_is_refused():
+    """
+    The namespace is required *because* an unnamespaced id collides across tenants.
+
+    Accepting ``""`` would let a caller satisfy the signature while getting exactly the
+    id the requirement exists to prevent — the decision made by not making it.
+    """
+    with pytest.raises(ValueError, match="namespace"):
+        PredicateRegistry(PREDICATES, namespace="")
+
+
+def test_parse_still_reads_an_id_with_no_namespace():
+    """
+    Strict on the way out, permissive on the way in.
+
+    Minting decides what this process writes; parsing reads what the log already
+    holds, which may include ids written before the rule tightened. Refusing to *read*
+    them would strand exactly the beliefs a re-key needs to reach.
+    """
+    entity = uuid.uuid7()
+
+    parsed = build_predicates().parse(f"v1::location({entity})")
+
+    assert parsed.namespace == ""
+    assert parsed.entity_ids == (entity,)

@@ -8,12 +8,13 @@ from typing import TYPE_CHECKING
 import pytest
 from doxastica import BeliefFilter, Stance
 
-from .conftest import build_predicates
+from anagrapheus.beliefs import BeliefWriter, plan_rekeys
+from anagrapheus.identity.store import RekeyRow
+
+from .conftest import Rig, build_predicates
 
 if TYPE_CHECKING:
     from doxastica import MemoryCore
-
-    from anagrapheus.beliefs import BeliefWriter
 
 
 def test_a_belief_is_written_under_the_minted_id(writer: BeliefWriter, core: MemoryCore):
@@ -58,7 +59,7 @@ def test_a_stance_is_not_a_value_even_for_a_relational_predicate(writer: BeliefW
     with pytest.raises(TypeError, match="`stance` argument"):
         writer.revise("knows", (alice, bob), Stance.suspected, uuid.uuid7())
 
-    state = writer.revise("knows", (alice, bob), True, uuid.uuid7(), Stance.suspected)
+    state, _ = writer.revise("knows", (alice, bob), True, uuid.uuid7(), Stance.suspected)
     assert state.stance is Stance.suspected
 
 
@@ -108,7 +109,7 @@ def test_the_event_id_travels_into_the_belief_state(writer: BeliefWriter):
     """
     caused_by = uuid.uuid7()
 
-    state = writer.revise("location", (uuid.uuid7(),), "London", caused_by)
+    state, _ = writer.revise("location", (uuid.uuid7(),), "London", caused_by)
 
     assert state.source_event_id == caused_by
 
@@ -123,3 +124,33 @@ def test_contract_retracts_the_minted_id(writer: BeliefWriter, core: MemoryCore)
     assert [
         s.status for s in core.query_scope("agent", BeliefFilter(), include_retracted=True)
     ] == ["retracted"]
+
+
+def test_writing_through_the_writer_alone_reaches_the_index(rig: Rig, core: MemoryCore):
+    """
+    The gap that made the writer a trap.
+
+    `BeliefWriter` is advertised as the way to write beliefs, and it minted ids without
+    recording that it had. A caller who used only the writer got an empty index — so
+    `plan_rekeys` found nothing, and a merge silently re-keyed none of their beliefs.
+    That is precisely the hole this layer exists to close, opened by its own front door.
+
+    Writing now hands back the event that records the mint, so the caller cannot append
+    their batch without it.
+    """
+    writer = BeliefWriter(core, rig.predicates, rig.types, scope_id="agent")
+    alice, bob = uuid.uuid7(), uuid.uuid7()
+
+    _, minted = writer.revise("knows", (alice, bob), True, uuid.uuid7())
+    rig.commit(minted)
+
+    assert [r.belief_id for r in rig.index.beliefs_for(alice)] == [
+        rig.predicates.belief_id("knows", alice, bob)
+    ]
+    # ...and the belief the writer wrote is therefore reachable by a merge cascade.
+    plans = plan_rekeys(
+        [RekeyRow(seq=99, kind="merge", from_entity=bob, to_entity=uuid.uuid7())],
+        rig.index,
+        rig.predicates,
+    )
+    assert len(plans) == 1

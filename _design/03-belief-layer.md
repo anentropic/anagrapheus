@@ -105,6 +105,19 @@ whose stance survives a collision. Those are judgments about belief, and this li
 owns the id and not the belief — the same line identity draws when it states the
 consequence and performs no cascade.
 
+**Chained decisions compose within a batch.** `A` absorbed into `B`, then `B` into
+`C`, arriving in one `rekeys_since` batch: planning each row against the index alone
+stops at `B`, because nothing was ever minted on `B` and so no row plans it onward.
+The caller would re-key onto an id the same batch had already superseded. Only what
+the *index* knows is planned, so the composition happens in the planner. A ring rather
+than a chain raises `MergeCycleInBatch` — a ring has no last element, so there is no
+successor, and identity refuses to name a canonical id for the same reason.
+
+Splits are followed but never followed *through*: a split does not supersede its
+original (the original survives it), so an entity later split has not moved, and
+picking one of its products would be the judgment this layer may not make. A product
+later absorbed *is* followed, per-candidate.
+
 Two consequences worth recording:
 
 - **Rows of one split are one plan.** Identity reports a split as several rows sharing
@@ -113,7 +126,11 @@ Two consequences worth recording:
   not know which" into N wrong answers.
 - **A belief that cannot be re-minted is reported, not skipped.** An unknown scheme or
   an undeclared predicate means a hole in the cascade, and silence about a hole is the
-  failure the seam exists to prevent. Dropping them takes an argument that says so.
+  failure the seam exists to prevent. Dropping them takes an argument that says so. The
+  failure is its own type, `UnrenderableBelief`, keeping the original as its `__cause__`:
+  a scheme this code does not know, an id that does not parse and a predicate this
+  registry does not declare are a migration problem, corrupt data and a mis-configured
+  process, and a consumer that cannot tell them apart cannot respond to any of them.
 
 ## 6. What this milestone changed elsewhere
 
@@ -128,7 +145,33 @@ Two consequences worth recording:
   intrinsic to a `BeliefState` and not to "this referent is called X". A stale
   argument left standing is worse than no argument, so note 02 records the loss.
 
-## 7. Open questions
+## 7. What review round 1 changed
+
+Six findings, all real. Two were more than nits and are recorded above: the
+chain-composition gap in §5, and the writer's silence below. The rest — an empty
+namespace slipping past the "namespace is required" rule, a `PredicateKind` docstring
+still offering a stance as a value after the rule changed, `UnknownScheme` standing in
+for every unrenderable cause, and a 1+N query behind `beliefs_for` — were straightforward.
+
+**The writer was a trap, and the sharpest finding of the round.** It minted ids and
+said nothing, so a caller who used only `BeliefWriter` — the surface documented as
+*the* way to write beliefs — got no index entries at all. `plan_rekeys` then found
+nothing, and a merge silently re-keyed none of their beliefs. The layer's own front
+door opened exactly the hole the layer exists to close, and the acceptance test missed
+it only because the story happened to call `mint()` separately.
+
+Writing now returns `Written(state, minted)`: the event comes back in the caller's
+hand and cannot be skipped without discarding a return value. That is the same
+persist-nothing discipline every other helper here follows — a belief is written
+*because* something happened, and the caller owns that batch — but arrived at from the
+other direction, because leaving it implicit was not merely inconvenient, it was
+wrong.
+
+It also sharpens §7's open question rather than settling it: the writer now carries
+three collaborators (a belief store, a predicate registry, an event-type registry) to
+enforce a discipline an application could choose to bypass entirely.
+
+## 8. Open questions
 
 - **Does the index need to survive a scheme bump?** Today it stores the id as minted
   and `parse` reads the scheme off it, so a v1 id and a v2 id coexist and re-key

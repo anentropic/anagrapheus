@@ -17,6 +17,8 @@ from anagrapheus.beliefs.store import BeliefRow
 from anagrapheus.timeline.migrations import migrate
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from anagrapheus.beliefs.events import BeliefMinted
 
 __all__ = ["SQLiteBeliefIndexStore"]
@@ -79,7 +81,7 @@ class SQLiteBeliefIndexStore:
         """Every belief id naming ``entity_id``, oldest first."""
         rows = self._conn.execute(
             """
-            SELECT b.* FROM belief_ids b
+            SELECT b.belief_id, b.predicate, b.seq FROM belief_ids b
             JOIN belief_entities e ON e.belief_id = b.belief_id
             WHERE e.entity_id = ?
             GROUP BY b.belief_id
@@ -87,15 +89,16 @@ class SQLiteBeliefIndexStore:
             """,
             (str(entity_id),),
         ).fetchall()
-        return [self._row(row) for row in rows]
+        return self._rows(rows)
 
     def beliefs_of(self, predicate: str) -> list[BeliefRow]:
         """Every belief id minted for ``predicate``, oldest first."""
         rows = self._conn.execute(
-            "SELECT * FROM belief_ids WHERE predicate = ? ORDER BY seq, belief_id",
+            "SELECT belief_id, predicate, seq FROM belief_ids WHERE predicate = ? "
+            "ORDER BY seq, belief_id",
             (predicate,),
         ).fetchall()
-        return [self._row(row) for row in rows]
+        return self._rows(rows)
 
     def reset(self) -> None:
         """Empty the projection so it can be rebuilt from the log."""
@@ -105,13 +108,34 @@ class SQLiteBeliefIndexStore:
     # ---- internals ------------------------------------------------------------------
 
     def _row(self, row: sqlite3.Row) -> BeliefRow:
-        entities = self._conn.execute(
-            "SELECT entity_id FROM belief_entities WHERE belief_id = ? ORDER BY position",
-            (row["belief_id"],),
-        ).fetchall()
-        return BeliefRow(
-            belief_id=row["belief_id"],
-            predicate=row["predicate"],
-            entity_ids=tuple(UUID(e["entity_id"]) for e in entities),
-            seq=row["seq"],
-        )
+        return self._rows([row])[0]
+
+    def _rows(self, rows: Sequence[sqlite3.Row]) -> list[BeliefRow]:
+        """
+        Attach each row's entities in one query rather than one query per row.
+
+        ``beliefs_for`` is asked on every merge, and the entity a merge involves is
+        typically the one most is believed about — so a per-row lookup made the cost
+        scale with exactly the case it exists to serve, after an index seek put it
+        within reach.
+        """
+        if not rows:
+            return []
+        ids = [row["belief_id"] for row in rows]
+        placeholders = ",".join("?" * len(ids))
+        entities: dict[str, list[UUID]] = {belief_id: [] for belief_id in ids}
+        for entity in self._conn.execute(
+            f"SELECT belief_id, entity_id FROM belief_entities "  # noqa: S608 -- count only
+            f"WHERE belief_id IN ({placeholders}) ORDER BY belief_id, position",
+            ids,
+        ):
+            entities[entity["belief_id"]].append(UUID(entity["entity_id"]))
+        return [
+            BeliefRow(
+                belief_id=row["belief_id"],
+                predicate=row["predicate"],
+                entity_ids=tuple(entities[row["belief_id"]]),
+                seq=row["seq"],
+            )
+            for row in rows
+        ]
