@@ -14,7 +14,7 @@ from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Literal, Self, cast
 
-from anyio import Event, Lock
+from anyio import Event
 from pydantic import BaseModel
 
 from anagrapheus.timeline._canonical import Json, concrete_json
@@ -83,10 +83,8 @@ class ReplayPins:
         self._announce = announce
         self._hits = 0
         # One lock per key, so concurrent draws for one key coalesce; see `_lock_for`.
-        self._locks: dict[PinKey, Lock] = {}
-        # Keys with a stream open right now -- see `resolve_stream` for why these
-        # cannot be the locks above.
-        self._streaming: dict[PinKey, Event] = {}
+        # Keys with a draw in flight right now, plain or streamed.
+        self._inflight: dict[PinKey, Event] = {}
         self._divergence: Divergence | None = None
 
     @staticmethod
@@ -201,14 +199,21 @@ class ReplayPins:
         the call is made, which is what makes "no model was reached" an assertion a test
         can hold rather than a hope.
         """
-        # Same per-key lock as the live ledger, for the same reason: record mode pins a
-        # fresh draw, so it has the same gap between the check and the write.
-        async with self._lock_for(key):
-            if key in self._pins:
-                self._hits += 1
-                return interpret(cast("R", self._pins[key]))
-            self._miss(key, kind)
-            return interpret(self._record(key, await effect()))
+        # Same shared per-key gate as the live ledger, for the same reason: record mode
+        # pins a fresh draw, so it has the same gap between the check and the write --
+        # and it must coordinate with `resolve_stream`, since a streamed call and a
+        # plain one share a key.
+        await self._await_inflight(key)
+        if key in self._pins:
+            self._hits += 1
+            return interpret(cast("R", self._pins[key]))
+        self._miss(key, kind)
+        gate = self._begin(key)
+        try:
+            raw = self._record(key, await effect())
+        finally:
+            self._end(key, gate)
+        return interpret(raw)
 
     @asynccontextmanager
     async def resolve_stream[R: Json, S](
@@ -233,24 +238,16 @@ class ReplayPins:
         boundaries and timing are this library's rather than the provider's. It
         replays *a* stream, which is not the same claim as having streamed.
         """
-        # A gate rather than `_lock_for`, for the reason the ledger gives: an
-        # `anyio.Lock` is task-affine and this one would be released by whichever task
-        # finalizes the stream, which is not always the one that opened it.
-        while True:
-            if key in self._pins:
-                self._hits += 1
-                yield interpret(cast("R", self._pins[key]))
-                return
-            open_stream = self._streaming.get(key)
-            if open_stream is None:
-                break
-            await open_stream.wait()
+        await self._await_inflight(key)
+        if key in self._pins:
+            self._hits += 1
+            yield interpret(cast("R", self._pins[key]))
+            return
 
         # After the wait, so a caller that ends up reusing another's pin never counts
         # as a divergence.
         self._miss(key, kind)
-        gate = Event()
-        self._streaming[key] = gate
+        gate = self._begin(key)
         try:
             async with effect() as live:
                 try:
@@ -261,15 +258,29 @@ class ReplayPins:
                     # part of what happened.
                     self._record(key, capture(live))
         finally:
-            del self._streaming[key]
-            gate.set()
+            self._end(key, gate)
 
-    def _lock_for(self, key: PinKey) -> Lock:
-        """The lock guarding draws for one key, created on first use."""
-        lock = self._locks.get(key)
-        if lock is None:
-            lock = self._locks[key] = Lock()
-        return lock
+    async def _await_inflight(self, key: PinKey) -> None:
+        """
+        Block while another caller is drawing this key, plain or streamed.
+
+        One mechanism for both async shapes, as on the live ledger — the two transports
+        share a key by design, so two independent guards would leave exactly the gap
+        each closed on its own path. Ownerless, because `resolve_stream` holds its claim
+        across a ``yield`` that another task may finalize.
+        """
+        while (gate := self._inflight.get(key)) is not None:
+            await gate.wait()
+
+    def _begin(self, key: PinKey) -> Event:
+        """Claim this key for the current draw. Safe without a lock: no await here."""
+        gate = self._inflight[key] = Event()
+        return gate
+
+    def _end(self, key: PinKey, gate: Event) -> None:
+        """Release the claim and wake everyone waiting on it, drawn or failed."""
+        del self._inflight[key]
+        gate.set()
 
     def _miss(self, key: PinKey, kind: str) -> None:
         """Apply the ``on_miss`` policy: raise, or announce the first and carry on."""

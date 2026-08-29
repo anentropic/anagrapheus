@@ -25,7 +25,7 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Protocol, cast
 from uuid import UUID
 
-from anyio import Event, Lock
+from anyio import Event
 from pydantic import JsonValue
 
 from anagrapheus.timeline._canonical import Json, concrete_json, sha256_hex
@@ -190,13 +190,9 @@ class PinLedger:
         self._registry = registry
         self.unit_id = unit_id if unit_id is not None else uuid.uuid7()
         self._promote_as = promote_as
-        # One lock per key drawn in this unit of work. Bounded by the number of
-        # distinct keys, and discarded with the ledger.
-        self._locks: dict[PinKey, Lock] = {}
-        # Gates for keys with a stream currently open. Separate from the locks because
-        # a stream is held open across a `yield` and may be closed by another task --
-        # see `resolve_stream`. Only ever holds keys being streamed right now.
-        self._streaming: dict[PinKey, Event] = {}
+        # Keys with a draw in flight right now, plain or streamed. One gate per key,
+        # removed as soon as the draw ends, so this never grows with the corpus.
+        self._inflight: dict[PinKey, Event] = {}
 
     def resolve[R: Json, O](
         self,
@@ -233,14 +229,20 @@ class PinLedger:
         awaited **only** on a miss, so a reused pin costs no call at all rather than one
         started and thrown away.
         """
-        # Everything under a per-key lock, because the await below is a suspension
-        # point in exactly the gap `resolve` does not have. Without it two concurrent
-        # callers both miss, both draw, and the second write hits the primary key --
-        # breaking the one promise this layer makes. Per key rather than global, so
-        # draws for *different* keys still run concurrently.
-        async with self._lock_for(key):
-            found, pinned = self._reuse(key)
-            raw = cast("R", pinned) if found else self._record(key, kind, await effect())
+        # The await below is a suspension point in exactly the gap `resolve` does not
+        # have. Without coordination two concurrent callers both miss, both draw, and
+        # the second write hits the primary key -- breaking the one promise this layer
+        # makes. The gate is shared with `resolve_stream` and keyed, so a streamed and
+        # a plain call on one key coalesce while different keys still run concurrently.
+        await self._await_inflight(key)
+        found, pinned = self._reuse(key)
+        if found:
+            return interpret(cast("R", pinned))
+        gate = self._begin(key)
+        try:
+            raw = self._record(key, kind, await effect())
+        finally:
+            self._end(key, gate)
         return interpret(raw)
 
     @asynccontextmanager
@@ -266,27 +268,14 @@ class PinLedger:
         partial response is an outcome the model produced, and replaying it as the same
         partial is more faithful than either discarding it or pretending it finished.
         """
-        # Deliberately NOT `_lock_for`. An `anyio.Lock` is task-affine -- it refuses a
-        # release by a task that did not acquire it -- and a consumer may well finalize
-        # this stream from a different task than the one that opened it (pydantic-ai's
-        # temporal grouping does exactly that). Holding a lock across the `yield` below
-        # therefore raises on the way out. A gate has no owner, so it can.
-        while True:
-            found, pinned = self._reuse(key)
-            if found:
-                # Never opens the effect: a reused pin costs no connection at all.
-                yield interpret(cast("R", pinned))
-                return
-            open_stream = self._streaming.get(key)
-            if open_stream is None:
-                break
-            # Another caller is mid-stream on this key. Wait for it rather than opening
-            # a second one, then re-check -- it will have pinned by then, and if it
-            # failed before pinning, this caller becomes the one that draws.
-            await open_stream.wait()
+        await self._await_inflight(key)
+        found, pinned = self._reuse(key)
+        if found:
+            # Never opens the effect: a reused pin costs no connection at all.
+            yield interpret(cast("R", pinned))
+            return
 
-        gate = Event()
-        self._streaming[key] = gate
+        gate = self._begin(key)
         try:
             async with effect() as live:
                 try:
@@ -297,21 +286,36 @@ class PinLedger:
                     # at any point, so this is safe on the exception path too.
                     self._record(key, kind, capture(live))
         finally:
-            del self._streaming[key]
-            gate.set()
+            self._end(key, gate)
 
-    def _lock_for(self, key: PinKey) -> Lock:
+    async def _await_inflight(self, key: PinKey) -> None:
         """
-        The lock guarding draws for one key, created on first use.
+        Block while another caller is drawing this key, however it is drawing it.
 
-        Creating it is safe without a lock of its own: this runs on the event loop
-        thread with no await between the lookup and the insert, so no other coroutine
-        can interleave and make a second one.
+        **One mechanism for both async shapes**, which is what makes a streamed call and
+        a plain one on the same key coalesce rather than race. They *do* share a key by
+        design — see the provider layer's note on transport not being part of the call's
+        identity — so two independent guards would leave exactly the gap they each
+        closed on their own path.
+
+        Not an ``anyio.Lock``, because :meth:`resolve_stream` holds its claim across a
+        ``yield`` and a lock is task-affine: it refuses a release by a task that did not
+        acquire it, and a stream may be finalized by a different task than opened it. An
+        ``Event`` has no owner. The loop re-checks after waking, since the waiter it was
+        waiting on may have been replaced by another claimant.
         """
-        lock = self._locks.get(key)
-        if lock is None:
-            lock = self._locks[key] = Lock()
-        return lock
+        while (gate := self._inflight.get(key)) is not None:
+            await gate.wait()
+
+    def _begin(self, key: PinKey) -> Event:
+        """Claim this key for the current draw. Safe without a lock: no await here."""
+        gate = self._inflight[key] = Event()
+        return gate
+
+    def _end(self, key: PinKey, gate: Event) -> None:
+        """Release the claim and wake everyone waiting on it, drawn or failed."""
+        del self._inflight[key]
+        gate.set()
 
     def _reuse(self, key: PinKey) -> tuple[bool, Json]:
         """The pinned result for ``key`` and whether there was one, bumping attempts."""

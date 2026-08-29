@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+import anyio
 import pytest
 from pydantic_ai.messages import ModelResponse, TextPart
 from pydantic_ai.models.function import FunctionModel
@@ -81,6 +82,34 @@ class CountedStream:
                 yield chunk
 
         return FunctionModel(stream_function=stream)
+
+
+@dataclass
+class Bimodal:
+    """
+    A `FunctionModel` that answers on **both** transports, counting every draw.
+
+    Needed to exercise the case §4's shared key creates: the same call arriving once
+    plainly and once streamed. A model that supports only one transport cannot show it.
+    """
+
+    text: str
+    delay: float = 0.0
+    draws: int = 0
+
+    def model(self) -> FunctionModel:
+        def plain(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+            self.draws += 1
+            return ModelResponse(parts=[TextPart(self.text)])
+
+        async def streamed(messages: list[ModelMessage], info: AgentInfo) -> AsyncIterator[str]:
+            self.draws += 1
+            # A window wide enough for another caller to arrive mid-stream, which is
+            # the only moment the race exists.
+            await anyio.sleep(self.delay)
+            yield self.text
+
+        return FunctionModel(plain, stream_function=streamed)
 
 
 @dataclass

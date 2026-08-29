@@ -142,24 +142,37 @@ that this is not a recording of its stream.
 code can produce is worse than no exception at all, so it was removed rather than left
 as a decoration. `ProviderError` remains as the base.
 
-## 4a. The lock that could not be a lock — [ours]
+## 4a. One gate, and why it cannot be a lock — [ours]
 
-`resolve_stream` holds its guard across a `yield`, which `resolve` and `resolve_async`
-never do. That turns out to rule out the obvious primitive.
+Two constraints met here, and the second was found by review rather than by reasoning.
 
-An `anyio.Lock` is **task-affine**: it refuses a release by a task that did not acquire
-it. A stream's consumer may well finalize it from a different task than the one that
-opened it — pydantic-ai's `stream_text(delta=True)` groups deltas temporally and does
-exactly that — so a lock held across the `yield` raises `RuntimeError` on the way out,
-*after* the answer has been delivered, which is the worst available moment.
+**It cannot be an `anyio.Lock`.** `resolve_stream` holds its claim across a `yield`,
+which `resolve` and `resolve_async` never do. A Lock is **task-affine** — it refuses a
+release by a task that did not acquire it — and a stream's consumer may finalize it from
+a different task than opened it, which pydantic-ai's `stream_text(delta=True)` does by
+grouping deltas temporally. Held across the `yield`, it raises `RuntimeError` on the way
+out, *after* the answer has been delivered. So the guard is an `Event`, which has no
+owner.
 
-The guard is therefore a per-key `Event` gate with no owner: a second caller on a key
-already streaming waits for the first, then re-checks and reuses its pin. If the first
-failed before pinning, the waiter becomes the one that draws. The ordinary locks stay
-where they were, on the two paths that do not yield.
+**And it must be the same gate the plain path uses.** The first draft gave
+`resolve_stream` its own gate and left `resolve_async` on its lock — two guards, each
+correct on its own path, and a hole exactly between them. Because §4 makes a streamed
+call and a plain one **share a key**, a `request()` beginning while a stream is open
+misses, both draw, and the live ledger's second write hits the scratch primary key. In
+record-mode replay it fails silently instead: no primary key to raise, so the last
+completion simply wins.
 
-This was found by the acceptance test rather than by reasoning, and a test now pins it
-so the gate does not get "simplified" back into a lock.
+The shape of that mistake is worth keeping. Each guard was written to close a race, and
+each did close the one in front of it; what neither could see was that the *decision to
+share a key* — the thing §4 argues for — turns two safe halves into one unsafe whole. A
+design choice made in one section became a concurrency obligation in another, and
+nothing connected them but a reviewer.
+
+So both async shapes now claim through one per-key `_inflight` gate: a caller waits for
+whatever draw is in flight, however it is drawing, then re-checks and reuses its pin. If
+the in-flight draw failed before pinning, the waiter becomes the one that draws. Tests
+cover the mixed plain/stream race in both ledger and record mode, and both fail against
+the split-gate version.
 
 ## 5. Tools are pinned, and the wrapper is always async — [ours]
 
@@ -236,6 +249,17 @@ same string. It was asserting the *name-based* contract all along and only the a
 hid it. Both context tests now use values that are distinguishable by construction, and
 both fail under mutation — which is the property a test of an exclusion rule needs, since
 the failure mode it guards against is two things looking identical.
+
+## 7a. What review round 2 changed (M5)
+
+One finding, and a real one: **the two async paths did not coordinate with each other**
+— §4a above. Reproduced before fixing, with the effect running twice and the second
+write raising `UNIQUE constraint failed: pin_scratch.unit_id, pin_scratch.pin_key`.
+
+Worth recording that this is the second time in this layer that a *correct local
+decision* opened a race one level up. M4's was `resolve_async` putting an await in the
+gap `resolve` did not have; M5's was two guards that were each right about their own
+path. Both were invisible from inside the change and obvious from outside it.
 
 ## 8. Open questions
 

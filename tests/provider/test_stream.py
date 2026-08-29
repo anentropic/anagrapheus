@@ -13,17 +13,17 @@ from typing import TYPE_CHECKING
 
 import pytest
 from pydantic_ai import Agent
-from pydantic_ai.messages import ModelResponse, TextPart
+from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
 from pydantic_ai.models import ModelRequestParameters
 
 from anagrapheus.provider import PIN_KIND, PinnedModel, PinnedStreamedResponse
 from anagrapheus.timeline import ReplayPins
 from anagrapheus.timeline.replay import PinMiss
 
-from .conftest import Counted, CountedStream, Rig, says
+from .conftest import Bimodal, Counted, CountedStream, Rig, says
 
 if TYPE_CHECKING:
-    from pydantic_ai.messages import ModelResponseState
+    from pydantic_ai.messages import ModelMessage, ModelResponseState
 
 
 async def _streamed(agent: Agent[None, str], prompt: str) -> str:
@@ -293,9 +293,8 @@ def test_unrelated_streams_are_not_serialized(rig: Rig):
     assert counted.opens == 4
 
 
-def _prompt(text: str):  # noqa: ANN202 -- a one-line fixture, not the subject
-    from pydantic_ai.messages import ModelRequest, UserPromptPart
-
+def _prompt(text: str) -> ModelMessage:
+    """One user turn, typed as the union the model API takes."""
     return ModelRequest(parts=[UserPromptPart(content=text)])
 
 
@@ -323,3 +322,65 @@ def test_a_stream_closed_by_another_task_still_unwinds(rig: Rig):
 
     assert "".join(chunks) == "The harbour is quiet tonight."
     assert counted.opens == 1
+
+
+def test_a_plain_and_a_streamed_call_on_one_key_coalesce(rig: Rig):
+    """
+    The two transports share a key by design, so they must share their coordination.
+
+    Guarding the plain path and the streamed path independently leaves exactly the gap
+    each one closed on its own: a ``request()`` starting while a stream is open misses,
+    both draw, and the live ledger's second write hits the scratch primary key. That the
+    key is shared is the *point* of §4 — which is precisely what makes an unshared gate
+    a bug rather than a theoretical one.
+    """
+    model = PinnedModel(Bimodal("Lisbon", delay=0.01).model(), rig.ledger)
+    messages = [_prompt("where?")]
+
+    async def streamed() -> None:
+        async with model.request_stream(messages, None, ModelRequestParameters()) as s:
+            async for _ in s:
+                pass
+
+    async def plain() -> None:
+        await asyncio.sleep(0.005)  # begin while the stream is still open
+        await model.request(messages, None, ModelRequestParameters())
+
+    async def both() -> None:
+        await asyncio.gather(streamed(), plain())
+
+    asyncio.run(both())
+
+    rig.ledger.commit()
+    promoted = [e for e in rig.store.read() if e.envelope.type == "PinPromoted"]
+    assert len(promoted) == 1
+    assert promoted[0].payload["attempts"] == 2, "the second caller reused rather than drew"
+
+
+def test_record_mode_coalesces_across_transports_too(rig: Rig):
+    """
+    The same race in record-mode replay, where it fails silently instead of loudly.
+
+    There is no primary key to raise here: both draws simply complete and the last one
+    written wins. A test is the only thing that would notice.
+    """
+    counter = Bimodal("Lisbon", delay=0.01)
+    replay = ReplayPins.from_events([], rig.types, on_miss="record")
+    model = PinnedModel(counter.model(), replay)
+    messages = [_prompt("where?")]
+
+    async def streamed() -> None:
+        async with model.request_stream(messages, None, ModelRequestParameters()) as s:
+            async for _ in s:
+                pass
+
+    async def plain() -> None:
+        await asyncio.sleep(0.005)
+        await model.request(messages, None, ModelRequestParameters())
+
+    async def both() -> None:
+        await asyncio.gather(streamed(), plain())
+
+    asyncio.run(both())
+
+    assert counter.draws == 1, "one key, one draw, whichever transport asked first"
