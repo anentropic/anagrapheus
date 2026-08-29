@@ -15,11 +15,11 @@ from pydantic_ai.messages import (
 )
 from pydantic_ai.models import ModelRequestParameters
 
-from anagrapheus.provider import PIN_KIND, PinnedModel, StreamingNotPinnable
+from anagrapheus.provider import PIN_KIND, PinnedModel
 from anagrapheus.timeline import ReplayPins
 from anagrapheus.timeline.replay import PinMiss
 
-from .conftest import Counted, Rig, says
+from .conftest import Counted, CountedStream, Rig, says
 
 if TYPE_CHECKING:
     from pydantic_ai.messages import ModelMessage
@@ -111,26 +111,29 @@ def test_a_changed_prompt_diverges_rather_than_pretending(rig: Rig):
     assert replay.divergence.kind == PIN_KIND
 
 
-def test_streaming_refuses_rather_than_drawing_unpinned(rig: Rig):
+def test_streaming_is_pinned_rather_than_refused_or_passed_through(rig: Rig):
     """
-    The inherited behaviour would delegate, silently, to a live unrecorded draw.
+    The two wrong answers, ruled out together.
 
-    A run doing that would still believe itself replayable, which is the one thing a
-    pinned model must never let happen.
+    Passing a stream through unpinned would put a live unrecorded draw inside a run that
+    believes every draw is pinned. Refusing it — which this library did until M5 — kept
+    that honest but made the whole streaming surface unusable, including
+    ``run_stream_events`` and an ``event_stream_handler`` on an ordinary ``run()``,
+    since all three route through ``request_stream``. Neither is needed: the stream is
+    opened once and replayed from what it accumulated.
     """
-    counted = Counted(says("Lisbon"))
-    model = PinnedModel(counted.model(), rig.ledger)
-    agent = Agent(model=model)
+    counted = CountedStream(["Lis", "bon"])
+    agent = Agent(model=PinnedModel(counted.model(), rig.ledger))
 
-    async def stream() -> None:
-        async with agent.run_stream("where?"):
-            pass  # pragma: no cover -- the context manager never opens
+    async def stream() -> str:
+        async with agent.run_stream("where?") as result:
+            return await result.get_output()
 
-    with pytest.raises(StreamingNotPinnable):
-        import asyncio
+    import asyncio
 
-        asyncio.run(stream())
-    assert counted.count == 0
+    assert asyncio.run(stream()) == "Lisbon"
+    assert asyncio.run(stream()) == "Lisbon"
+    assert counted.opens == 1
 
 
 def test_a_tool_loop_pins_every_step(rig: Rig):

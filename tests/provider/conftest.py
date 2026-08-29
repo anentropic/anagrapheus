@@ -23,7 +23,7 @@ from anagrapheus.timeline import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import AsyncIterator, Callable, Iterator
     from pathlib import Path
 
     from pydantic_ai.messages import ModelMessage
@@ -56,6 +56,31 @@ def says(text: str) -> Callable[[list[ModelMessage], AgentInfo], ModelResponse]:
         return ModelResponse(parts=[TextPart(text)])
 
     return reply
+
+
+@dataclass
+class CountedStream:
+    """
+    A streaming `FunctionModel` that records how many times it was actually opened.
+
+    The counterpart of `Counted` for the streamed path. The same discipline applies and
+    for a sharper reason: a reused pin must not open a connection at all, so the count
+    is what separates "replayed" from "re-drew and happened to agree".
+    """
+
+    chunks: list[str]
+    opens: int = 0
+
+    def model(self) -> FunctionModel:
+        # The stream function's *name* is part of `FunctionModel`'s model_id, and the
+        # model id is part of the pin key -- so live and replay must share one function
+        # object, not two that behave alike.
+        async def stream(messages: list[ModelMessage], info: AgentInfo) -> AsyncIterator[str]:
+            self.opens += 1
+            for chunk in self.chunks:
+                yield chunk
+
+        return FunctionModel(stream_function=stream)
 
 
 @dataclass
