@@ -83,8 +83,7 @@ def test_a_changed_prompt_diverges_rather_than_pretending(rig: Rig):
 
 def test_a_streamed_pin_replays_through_the_plain_path(rig: Rig):
     """
-    Cross-transport, the first direction: streaming is *how you receive*, not what you
-    ask.
+    Cross-transport: streaming is *how you receive*, not what you ask.
 
     §4a keys on the semantic identity of the call, so the transport is not in the key.
     This is that decision made falsifiable — if the key ever gained a streaming flag,

@@ -100,9 +100,7 @@ def test_milestone_5_acceptance(tmp_path: Path):
     # an event_stream_handler on a plain run() -- likewise refused before
     handled: list[AgentStreamEvent] = []
 
-    async def handler(
-        ctx: RunContext[object], stream: AsyncIterable[AgentStreamEvent]
-    ) -> None:
+    async def handler(ctx: RunContext[object], stream: AsyncIterable[AgentStreamEvent]) -> None:
         async for event in stream:
             handled.append(event)
 
