@@ -21,10 +21,11 @@ material — is the application's to own. This module owns the mechanism.
 from __future__ import annotations
 
 import uuid
+from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Protocol, cast
 from uuid import UUID
 
-from anyio import Lock
+from anyio import Event, Lock
 from pydantic import JsonValue
 
 from anagrapheus.timeline._canonical import Json, concrete_json, sha256_hex
@@ -33,7 +34,8 @@ from anagrapheus.timeline.registry import RESERVED_NAMESPACE, EventKey
 from anagrapheus.timeline.store import ScratchRow
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Mapping
+    from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
+    from contextlib import AbstractAsyncContextManager
 
     from anagrapheus.timeline.envelope import PendingEvent
     from anagrapheus.timeline.registry import EventTypeRegistry
@@ -73,12 +75,13 @@ class PinResolver(Protocol):
     Both the live ledger and replay implement it, so a unit of work is written once
     and runs identically live, under retry, and under replay.
 
-    Two shapes, one policy. :meth:`resolve` is for a synchronous effect;
+    Three shapes, one policy. :meth:`resolve` is for a synchronous effect;
     :meth:`resolve_async` is for an awaited one, because the effects most worth pinning
-    — a model call above all — are async in every library that makes them. They differ
-    only in how the draw is performed: the key, the reuse, the concretization and the
-    interpretation are identical, and the implementations share them rather than
-    keeping two copies of a rule that could drift apart.
+    — a model call above all — are async in every library that makes them;
+    :meth:`resolve_stream` is for an effect whose result exists only once the *caller*
+    has consumed it. They differ only in how the draw is performed: the key, the reuse,
+    the concretization and the interpretation are identical, and the implementations
+    share them rather than keeping two copies of a rule that could drift apart.
     """
 
     def resolve[R: Json, O](
@@ -101,6 +104,26 @@ class PinResolver(Protocol):
         interpret: Callable[[R], O],
     ) -> O:
         """Await (or reuse) the effect under ``key``; return only the interpretation."""
+        ...
+
+    def resolve_stream[R: Json, S](
+        self,
+        key: PinKey,
+        *,
+        kind: str,
+        effect: Callable[[], AbstractAsyncContextManager[S]],
+        capture: Callable[[S], R],
+        interpret: Callable[[R], S],
+    ) -> AbstractAsyncContextManager[S]:
+        """
+        Open (or replay) a streamed effect under ``key``.
+
+        Three callables rather than two, because a stream's result does not exist at
+        the moment of the draw. ``effect`` opens the live stream, ``capture`` reduces
+        it to the pinned value **after the caller has consumed it**, and ``interpret``
+        rebuilds a stream from that value on reuse. The extra one is the price of the
+        shape: :meth:`resolve_async` can pin what its effect returns, and this cannot.
+        """
         ...
 
 
@@ -170,6 +193,10 @@ class PinLedger:
         # One lock per key drawn in this unit of work. Bounded by the number of
         # distinct keys, and discarded with the ledger.
         self._locks: dict[PinKey, Lock] = {}
+        # Gates for keys with a stream currently open. Separate from the locks because
+        # a stream is held open across a `yield` and may be closed by another task --
+        # see `resolve_stream`. Only ever holds keys being streamed right now.
+        self._streaming: dict[PinKey, Event] = {}
 
     def resolve[R: Json, O](
         self,
@@ -215,6 +242,63 @@ class PinLedger:
             found, pinned = self._reuse(key)
             raw = cast("R", pinned) if found else self._record(key, kind, await effect())
         return interpret(raw)
+
+    @asynccontextmanager
+    async def resolve_stream[R: Json, S](
+        self,
+        key: PinKey,
+        *,
+        kind: str,
+        effect: Callable[[], AbstractAsyncContextManager[S]],
+        capture: Callable[[S], R],
+        interpret: Callable[[R], S],
+    ) -> AsyncGenerator[S]:
+        """
+        Open the stream once under ``key``; replay it from the pin thereafter.
+
+        The same policy as :meth:`resolve_async` with the draw spread over time. What
+        differs is *when* the pin is written: not at the draw, because a stream has no
+        result then, but once the caller is done with it.
+
+        **An abandoned stream still pins.** If the consumer breaks out early or the
+        stream errors mid-way, what arrived is recorded with the state the provider
+        stamped on it — ``incomplete`` or ``interrupted`` rather than ``complete``. A
+        partial response is an outcome the model produced, and replaying it as the same
+        partial is more faithful than either discarding it or pretending it finished.
+        """
+        # Deliberately NOT `_lock_for`. An `anyio.Lock` is task-affine -- it refuses a
+        # release by a task that did not acquire it -- and a consumer may well finalize
+        # this stream from a different task than the one that opened it (pydantic-ai's
+        # temporal grouping does exactly that). Holding a lock across the `yield` below
+        # therefore raises on the way out. A gate has no owner, so it can.
+        while True:
+            found, pinned = self._reuse(key)
+            if found:
+                # Never opens the effect: a reused pin costs no connection at all.
+                yield interpret(cast("R", pinned))
+                return
+            open_stream = self._streaming.get(key)
+            if open_stream is None:
+                break
+            # Another caller is mid-stream on this key. Wait for it rather than opening
+            # a second one, then re-check -- it will have pinned by then, and if it
+            # failed before pinning, this caller becomes the one that draws.
+            await open_stream.wait()
+
+        gate = Event()
+        self._streaming[key] = gate
+        try:
+            async with effect() as live:
+                try:
+                    yield live
+                finally:
+                    # In a `finally` so an abandoned or failed stream still records what
+                    # arrived. `capture` reads the accumulation, which is well-defined
+                    # at any point, so this is safe on the exception path too.
+                    self._record(key, kind, capture(live))
+        finally:
+            del self._streaming[key]
+            gate.set()
 
     def _lock_for(self, key: PinKey) -> Lock:
         """

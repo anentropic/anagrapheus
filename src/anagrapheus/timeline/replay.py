@@ -11,9 +11,10 @@ run continuing the same history, announced — never a different run wearing the
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Literal, Self, cast
 
-from anyio import Lock
+from anyio import Event, Lock
 from pydantic import BaseModel
 
 from anagrapheus.timeline._canonical import Json, concrete_json
@@ -23,7 +24,8 @@ from anagrapheus.timeline.pins import PinKey, PinPromoted, ReplayDiverged
 from anagrapheus.timeline.registry import RESERVED_NAMESPACE, EventKey
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import AsyncGenerator, Iterable
+    from contextlib import AbstractAsyncContextManager
     from uuid import UUID
 
     from anagrapheus.timeline.registry import EventTypeRegistry
@@ -82,6 +84,9 @@ class ReplayPins:
         self._hits = 0
         # One lock per key, so concurrent draws for one key coalesce; see `_lock_for`.
         self._locks: dict[PinKey, Lock] = {}
+        # Keys with a stream open right now -- see `resolve_stream` for why these
+        # cannot be the locks above.
+        self._streaming: dict[PinKey, Event] = {}
         self._divergence: Divergence | None = None
 
     @staticmethod
@@ -204,6 +209,60 @@ class ReplayPins:
                 return interpret(cast("R", self._pins[key]))
             self._miss(key, kind)
             return interpret(self._record(key, await effect()))
+
+    @asynccontextmanager
+    async def resolve_stream[R: Json, S](
+        self,
+        key: PinKey,
+        *,
+        kind: str,
+        effect: Callable[[], AbstractAsyncContextManager[S]],
+        capture: Callable[[S], R],
+        interpret: Callable[[R], S],
+    ) -> AsyncGenerator[S]:
+        """
+        Replay a streamed effect from the log, following the same ``on_miss`` policy.
+
+        Under strict replay the stream is **never opened**: the miss raises before
+        ``effect`` is entered, so "no model was reached" stays an assertion a test can
+        hold rather than a hope — the same property :meth:`resolve_async` has, carried
+        through a path where the connection would otherwise be made before anyone knew
+        whether it was needed.
+
+        What comes back is a stream rebuilt from the pinned response, so its chunk
+        boundaries and timing are this library's rather than the provider's. It
+        replays *a* stream, which is not the same claim as having streamed.
+        """
+        # A gate rather than `_lock_for`, for the reason the ledger gives: an
+        # `anyio.Lock` is task-affine and this one would be released by whichever task
+        # finalizes the stream, which is not always the one that opened it.
+        while True:
+            if key in self._pins:
+                self._hits += 1
+                yield interpret(cast("R", self._pins[key]))
+                return
+            open_stream = self._streaming.get(key)
+            if open_stream is None:
+                break
+            await open_stream.wait()
+
+        # After the wait, so a caller that ends up reusing another's pin never counts
+        # as a divergence.
+        self._miss(key, kind)
+        gate = Event()
+        self._streaming[key] = gate
+        try:
+            async with effect() as live:
+                try:
+                    yield live
+                finally:
+                    # Recorded even when abandoned, exactly as the live ledger does:
+                    # record mode exists to build a corpus, and a partial response is
+                    # part of what happened.
+                    self._record(key, capture(live))
+        finally:
+            del self._streaming[key]
+            gate.set()
 
     def _lock_for(self, key: PinKey) -> Lock:
         """The lock guarding draws for one key, created on first use."""
