@@ -26,12 +26,17 @@ asymmetric in our favour.
 anagrapheus.timeline    # the event log, folds, pins, replay  (doc 00 §3–§4)
 anagrapheus.identity    # later: entity shapes + registry fold (§5)
 anagrapheus.beliefs     # later: belief-id minting registry over doxastica (§6)
-anagrapheus.provider    # later, optional extra: pinned pydantic-ai adapter
+anagrapheus.provider    # the pinned pydantic-ai adapter  (doc 00 §2, §4)
 anagrapheus.chronicle   # later, behind a decision gate (§10 Q3)
 ```
 
 Nothing in `timeline/` imports upward; later subpackages import it, never the
 reverse.
+
+*Amended 2026-08-29 (M4). `provider` was listed as an optional extra; it is a required
+dependency like `beliefs`, and the layout comment said otherwise. Recorded rather than
+silently corrected, because "optional extra" was a packaging intention and dropping it
+is a decision, not a typo.*
 
 ## 3. Python floor: >=3.14
 

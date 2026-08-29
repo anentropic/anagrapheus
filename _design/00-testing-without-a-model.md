@@ -7,9 +7,14 @@ why the answer is mostly "it doesn't".
 
 ## 0. Status
 
-**Proposed.** No code exists yet, so nothing here has been validated against a real
-suite — it is a plan for one, written while the decision is still cheap. It mints no
-rulings and binds nothing.
+**Proposed when written; tiers 0–2 now exist.** The suite this note planned was
+built over milestones 1–4, and the plan survived contact: folds are tested without a
+model, the provider seam is tested with `FunctionModel`, and generation-replay is
+tested from recorded pins. It mints no rulings and binds nothing.
+
+*Amended 2026-08-29 (M4).* Two things the note asked for are now answered rather than
+proposed — see [§8](#8-open-questions). What has **not** been built is tier 3: no live
+smoke test exists.
 
 Facts with a shelf life are dated in [§7](#7-sources). Model prices and third-party
 free tiers move; the reasoning does not depend on their exact values, only on their
@@ -214,8 +219,12 @@ above should stand for a reader who does not follow them.
 
 - **Where do recorded pin ledgers live, and in what format?** They are fixtures, but
   they are also the log format. Same serialization, or a test-facing one?
-- **What is the canonicalization policy for test pins?** Doc 00 §4c leaves the
-  policy — what counts as the same call versus a re-interpretation — to the
-  application. Tests are an application. A too-loose policy makes fixtures match calls
-  they shouldn't; too tight and every prompt tweak invalidates the corpus.
+- ~~**What is the canonicalization policy for test pins?**~~ **Answered in M4.**
+  `CallPolicy` is replaceable and `SemanticCallPolicy` is the default, and the answer is
+  the same for tests as for production *because they run the same path* — which was the
+  point of preferring pins to a mock library in the first place. Tests do not get a
+  looser policy; they get the one the application ships.
+  See [note 04 §3](04-provider-layer.md).
 - **Does tier 3 gate a release?** A nightly that nobody reads is not a smoke test.
+  Still open, and now overdue: tiers 0–2 are built and tier 3 is not, so the question
+  has stopped being hypothetical.
