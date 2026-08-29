@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from . import beliefs, identity, timeline
+from . import beliefs, identity, provider, timeline
 
 if TYPE_CHECKING:
     from anagrapheus.timeline.registry import EventTypeRegistry
 
-__all__ = ["beliefs", "identity", "register_builtin_events", "timeline"]
+__all__ = ["beliefs", "identity", "provider", "register_builtin_events", "timeline"]
 
 
 def register_builtin_events(registry: EventTypeRegistry) -> None:
