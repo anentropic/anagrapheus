@@ -83,8 +83,6 @@ def test_the_available_tools_are_part_of_the_call():
     without = POLICY.material(messages, "m", ModelRequestParameters())
     with_tool = POLICY.material(messages, "m", ModelRequestParameters(function_tools=[lookup]))
 
-    assert without["tools"] == []
-    assert with_tool["tools"] == ["lookup"]
     assert without != with_tool
 
 
@@ -106,7 +104,7 @@ def test_the_required_output_shape_is_part_of_the_call():
         messages, "m", ModelRequestParameters(output_mode="tool", output_tools=[answer])
     )
 
-    assert plain["output"] != structured["output"]
+    assert plain != structured
 
 
 def test_an_application_policy_replaces_the_default(rig: Rig):
@@ -142,3 +140,67 @@ def test_an_unknown_part_kind_keeps_its_content():
     other = POLICY.material([ModelResponse(parts=[TextPart("b")])], "m", PARAMS)
 
     assert text != other
+
+
+def test_a_tool_that_keeps_its_name_but_changes_contract_is_a_different_call():
+    """
+    Keying tools by name alone replays an answer produced under a different contract.
+
+    The model is sent the description and the argument schema, not just the name, so a
+    tool that keeps its name and changes its shape is a different question — and the
+    stale answer would be about arguments the tool no longer takes.
+    """
+    before = ToolDefinition(
+        name="lookup",
+        parameters_json_schema={"type": "object", "properties": {"q": {"type": "string"}}},
+        description="search by query",
+    )
+    after = ToolDefinition(
+        name="lookup",
+        parameters_json_schema={"type": "object", "properties": {"n": {"type": "integer"}}},
+        description="fetch by row number",
+    )
+
+    assert POLICY.material(
+        [], "m", ModelRequestParameters(function_tools=[before])
+    ) != POLICY.material([], "m", ModelRequestParameters(function_tools=[after]))
+
+
+def test_an_output_tool_that_changes_schema_is_a_different_call():
+    """The same hazard on the output side: the answer's required shape is sent too."""
+    before = ToolDefinition(name="final", parameters_json_schema={"required": ["city"]})
+    after = ToolDefinition(name="final", parameters_json_schema={"required": ["country"]})
+
+    assert POLICY.material(
+        [], "m", ModelRequestParameters(output_tools=[before])
+    ) != POLICY.material([], "m", ModelRequestParameters(output_tools=[after]))
+
+
+def test_capabilities_beyond_the_function_tools_are_keyed():
+    """
+    ``native_tools`` and tool visibility change what the model may do, so they count.
+
+    Cherry-picking the fields to include is how they were missed; the default now
+    reduces the parameters by *exclusion*, the same way it reduces message parts.
+    """
+    plain = POLICY.material([], "m", ModelRequestParameters())
+    hidden = POLICY.material([], "m", ModelRequestParameters(revealed_tool_names={"a"}))
+    thinking = POLICY.material([], "m", ModelRequestParameters(allow_image_output=True))
+
+    assert plain != hidden
+    assert plain != thinking
+
+
+def test_tool_order_does_not_change_the_key():
+    """
+    The same tools declared in another order are the same capability set.
+
+    Worth pinning: reducing by exclusion means the whole parameters object is dumped,
+    and a list preserves an order the model does not care about.
+    """
+    a = ToolDefinition(name="a", parameters_json_schema={"type": "object"})
+    b = ToolDefinition(name="b", parameters_json_schema={"type": "object"})
+
+    assert POLICY.material(
+        [], "m", ModelRequestParameters(function_tools=[a, b])
+    ) == POLICY.material([], "m", ModelRequestParameters(function_tools=[b, a]))

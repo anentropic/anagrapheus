@@ -29,9 +29,10 @@ from __future__ import annotations
 
 import functools
 import inspect
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, cast, get_origin, get_type_hints
 
 from anyio.to_thread import run_sync
+from pydantic_ai import RunContext
 from pydantic_core import to_jsonable_python
 
 from anagrapheus.timeline.pins import pin_key
@@ -47,10 +48,38 @@ __all__ = ["PIN_KIND", "pinned_tool"]
 #: The pin kind every tool invocation is recorded under.
 PIN_KIND = "tool_call"
 
-#: Parameter names pydantic-ai fills from the run rather than from the model's
-#: arguments. They carry per-run state, are not JSON, and are not part of what the tool
-#: was asked to do.
-_INJECTED = frozenset({"ctx", "context", "run_context"})
+
+def _injected_parameter(signature: inspect.Signature, func: Callable[..., object]) -> str | None:
+    """
+    The name of the ``RunContext`` parameter, if the tool takes one.
+
+    pydantic-ai injects the context by the **first parameter's annotation**, not by its
+    name, and matching on a name list gets it wrong in both directions: a context called
+    ``state`` would leak per-run state into the key so every replay misses, and an
+    ordinary model argument called ``context`` would be dropped so two different calls
+    collide. The second is the worse one — it answers, wrongly.
+
+    Annotations may still be strings when the defining module uses postponed evaluation,
+    so the resolved hints are preferred and the raw annotation is the fallback.
+    """
+    first = next(iter(signature.parameters.values()), None)
+    if first is None:
+        return None
+    annotation = _resolved(func).get(first.name, first.annotation)
+    if annotation is RunContext or get_origin(annotation) is RunContext:
+        return first.name
+    # A string annotation that never resolved -- an unimportable name in the module, say.
+    # Matching textually is a guess, but the alternative is treating a context as a model
+    # argument, which puts run state in the key.
+    return first.name if str(annotation).lstrip("'\"").startswith("RunContext") else None
+
+
+def _resolved(func: Callable[..., object]) -> Mapping[str, object]:
+    """The function's type hints, or nothing if they cannot be resolved."""
+    try:
+        return get_type_hints(func)
+    except Exception:  # noqa: BLE001 -- an unresolvable hint is not this layer's problem
+        return {}
 
 
 def pinned_tool[**P, R](
@@ -79,7 +108,7 @@ def pinned_tool[**P, R](
     """
     tool_name = name if name is not None else func.__name__
     signature = inspect.signature(func)
-    is_async = inspect.iscoroutinefunction(func)
+    injected = _injected_parameter(signature, func)
 
     def material(args: tuple[object, ...], kwargs: Mapping[str, object]) -> Mapping[str, Json]:
         bound = signature.bind(*args, **kwargs)
@@ -92,7 +121,7 @@ def pinned_tool[**P, R](
                     {
                         parameter: value
                         for parameter, value in bound.arguments.items()
-                        if parameter not in _INJECTED
+                        if parameter != injected
                     },
                     fallback=repr,
                 ),
@@ -102,11 +131,16 @@ def pinned_tool[**P, R](
     @functools.wraps(func)
     async def pinned(*args: P.args, **kwargs: P.kwargs) -> Any:  # noqa: ANN401
         async def draw() -> Any:  # noqa: ANN401
-            if is_async:
+            if inspect.iscoroutinefunction(func):
                 return await cast("Any", func(*args, **kwargs))
             # Offloaded so a slow tool does not block the loop, exactly as pydantic-ai
             # would have run it -- while the ledger stays on the calling thread.
-            return await run_sync(functools.partial(func, *args, **kwargs))
+            result = await run_sync(functools.partial(func, *args, **kwargs))
+            # A plain callable is allowed to return an awaitable -- pydantic-ai supports
+            # that shape -- and `iscoroutinefunction` is false for it. Recording the
+            # coroutine object instead of awaiting it would change what wrapping a tool
+            # does, which is the one thing a wrapper must not do.
+            return await result if inspect.isawaitable(result) else result
 
         return await resolver.resolve_async(
             pin_key(kind, material(args, kwargs)),

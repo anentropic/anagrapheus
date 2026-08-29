@@ -39,6 +39,14 @@ concretization, same scratch row — so the two paths **share their internals** 
 than becoming two copies of a rule that could drift apart. The store stays synchronous,
 which is right: the slow part is the draw, and the draw is the part being awaited.
 
+**Concurrent draws coalesce per key, which the async path made necessary.** `resolve`
+has no suspension point between checking the scratch and writing to it, so within a
+thread it is atomic; `resolve_async` put an await in exactly that gap. Two concurrent
+callers on one key then both missed, both ran the effect, and the second write hit the
+primary key — breaking the single promise the layer makes. A lock **per key** fixes it
+without serializing unrelated draws, which matters because pydantic-ai runs non-barrier
+tool calls concurrently: that is the case the layer is for, not an exotic one.
+
 One property worth stating because a test depends on it: under strict replay the effect
 is *never awaited at all*. The miss raises before the call is made, which is what makes
 "no model was reached" an assertion rather than a hope.
@@ -59,16 +67,16 @@ never happen, nothing would raise, and the bill would be the only symptom. That 
 failure mode this note most wants on record.
 
 **What it keeps, including one that looks wrong.** The messages' semantic content, the
-model's identity, the available tools, and the required output shape. The last two
-deserve their reasons:
+model's identity, and the whole of the request parameters — everything the model is told
+it may do and must produce. The last deserves its reason:
 
-- **The tool set** changes what the model can do, so it changes what it draws. An agent
-  that gains a tool can answer the same prompt differently, and reusing the old answer
-  would hide that.
 - **The output shape** is sent *to* the model and changes what it generates, so it
   consumes entropy. This is not §4a's forbidden case: what §4a forbids is keying on the
   parsing done *after* the draw, which is `interpret`'s job and never reaches the
   material.
+
+The parameters are reduced by **exclusion**, like the message parts and for the stronger
+version of the same reason — see §8.
 
 `model_settings` is deliberately **out** by default. A temperature change arguably makes
 a different call and a timeout change plainly does not, and that judgment is the
@@ -77,7 +85,9 @@ application's — which is what having a replaceable policy is for.
 The default reduces by **exclusion** rather than by listing each known part type.
 pydantic-ai adds part kinds between releases, and an allow-list would silently drop a
 new kind's content from the key — making two different calls collide, which is the
-worse of the two failures and the quieter one.
+worse of the two failures and the quieter one. Tool lists are sorted by name, because
+declaring the same capabilities in another order is the same capability set and the
+model is not told the order.
 
 This also answers the open question [note 00 §8](00-testing-without-a-model.md) left —
 *"what is the canonicalization policy for test pins?"* — with the same answer for tests
@@ -131,7 +141,38 @@ exactly what `resolve_async` makes possible.
   exist and are exercised; the note says so, and its canonicalization question is
   answered in §3 above.
 
-## 7. Open questions
+## 7. What review round 1 changed
+
+Five findings, all real, and two of them serious enough to be worth recording rather
+than merely fixing.
+
+**Concurrent draws ran the effect more than once** — §2 above. Introduced by this
+milestone's own async path, and it broke the layer's central promise. The reproduction
+is four lines: `asyncio.gather` two pinned calls on one key and watch the effect fire
+twice, then watch the second write hit the primary key.
+
+**The key material was cherry-picked, twice over.** Tools were keyed by *name*, so a
+tool that kept its name while changing its description or argument schema shared a key
+with the old contract; and whole parameter fields — native tools, tool visibility, the
+instructions — were omitted outright. Both replay an answer produced under different
+terms, and neither says anything. The fix is the same exclusion principle already
+argued for message parts, and the earlier draft's failure is the argument for it: naming
+what matters got it wrong the first time it was tried.
+
+Three smaller ones, each a real defect:
+
+- **`RunContext` was detected by parameter name.** pydantic-ai injects it by the first
+  parameter's *annotation*, so a context named `state` would have leaked per-run state
+  into the key (every replay misses), and an ordinary model argument named `context`
+  was dropped (two different calls collide, and the second gets the first one's answer —
+  the worse direction, since it answers rather than re-drawing).
+- **A plain callable returning an awaitable** — a shape pydantic-ai supports — had its
+  coroutine object recorded rather than awaited, so wrapping such a tool changed its
+  behaviour, which is the one thing a wrapper must not do.
+- The default's structure changed shape as a result, so two tests that asserted on the
+  key's *layout* now assert on its *behaviour*, which is what they meant.
+
+## 8. Open questions
 
 - **Streaming.** Refused, not solved. A streamed response could in principle be pinned
   as its accumulated parts and replayed as a synthetic stream — but "replayed a stream"

@@ -13,6 +13,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Literal, Self, cast
 
+from anyio import Lock
 from pydantic import BaseModel
 
 from anagrapheus.timeline._canonical import Json, concrete_json
@@ -79,6 +80,8 @@ class ReplayPins:
         self._on_miss: Literal["strict", "record"] = on_miss
         self._announce = announce
         self._hits = 0
+        # One lock per key, so concurrent draws for one key coalesce; see `_lock_for`.
+        self._locks: dict[PinKey, Lock] = {}
         self._divergence: Divergence | None = None
 
     @staticmethod
@@ -193,11 +196,21 @@ class ReplayPins:
         the call is made, which is what makes "no model was reached" an assertion a test
         can hold rather than a hope.
         """
-        if key in self._pins:
-            self._hits += 1
-            return interpret(cast("R", self._pins[key]))
-        self._miss(key, kind)
-        return interpret(self._record(key, await effect()))
+        # Same per-key lock as the live ledger, for the same reason: record mode pins a
+        # fresh draw, so it has the same gap between the check and the write.
+        async with self._lock_for(key):
+            if key in self._pins:
+                self._hits += 1
+                return interpret(cast("R", self._pins[key]))
+            self._miss(key, kind)
+            return interpret(self._record(key, await effect()))
+
+    def _lock_for(self, key: PinKey) -> Lock:
+        """The lock guarding draws for one key, created on first use."""
+        lock = self._locks.get(key)
+        if lock is None:
+            lock = self._locks[key] = Lock()
+        return lock
 
     def _miss(self, key: PinKey, kind: str) -> None:
         """Apply the ``on_miss`` policy: raise, or announce the first and carry on."""

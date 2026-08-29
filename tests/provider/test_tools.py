@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from typing import TYPE_CHECKING
+from types import SimpleNamespace
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
@@ -12,6 +13,8 @@ from anagrapheus.provider import TOOL_PIN_KIND, pinned_tool
 from anagrapheus.timeline import ReplayPins
 
 if TYPE_CHECKING:
+    from pydantic_ai import RunContext
+
     from .conftest import Rig
 
 
@@ -144,3 +147,77 @@ def test_a_tool_taking_run_context_excludes_it_from_the_key(rig: Rig):
     assert asyncio.run(pinned(object(), "capital")) == "Portugal"
     assert asyncio.run(pinned(object(), "capital")) == "Portugal"
     assert calls == ["capital"]
+
+
+def test_the_injected_context_is_found_by_annotation_not_by_name(rig: Rig):
+    """
+    pydantic-ai injects the context by the first parameter's ``RunContext`` annotation.
+
+    A name list gets it wrong in both directions: a context named ``state`` leaks
+    per-run state into the key so every replay misses, and a genuine model argument
+    named ``context`` is dropped so two different calls collide.
+    """
+    calls: list[str] = []
+
+    def lookup(state: RunContext[None], what: str) -> str:
+        calls.append(what)
+        return "Portugal"
+
+    pinned = pinned_tool(rig.ledger, lookup)
+    # Deliberately distinguishable: two runs never share a context, so a wrapper that
+    # keyed on it would miss every time and this test would catch nothing if they
+    # happened to look alike.
+    first = _context(run_id="run-one", deps=None)
+    second = _context(run_id="run-two", deps=None)
+
+    assert asyncio.run(pinned(first, "capital")) == "Portugal"
+    assert asyncio.run(pinned(second, "capital")) == "Portugal"
+    assert calls == ["capital"]
+
+
+def test_an_argument_merely_called_context_is_kept(rig: Rig):
+    """
+    The other direction, and the one that answers wrongly rather than merely re-drawing.
+
+    ``context`` here is an ordinary argument the model supplies. Dropping it made two
+    different questions one call, so the second got the first one's answer.
+    """
+    asked: list[tuple[str, str]] = []
+
+    def search(context: str, query: str) -> str:
+        asked.append((context, query))
+        return f"{context}:{query}"
+
+    pinned = pinned_tool(rig.ledger, search)
+
+    assert asyncio.run(pinned("europe", "q")) == "europe:q"
+    assert asyncio.run(pinned("asia", "q")) == "asia:q"
+    assert asked == [("europe", "q"), ("asia", "q")]
+
+
+def test_a_plain_callable_returning_an_awaitable_is_awaited(rig: Rig):
+    """
+    pydantic-ai supports a tool that is not a coroutine function but returns a coroutine.
+
+    ``iscoroutinefunction`` is false for it, so the wrapper would have tried to record
+    the coroutine object and failed — changing the tool's behaviour by wrapping it.
+    """
+    calls: list[int] = []
+
+    def returns_coroutine(n: int):  # noqa: ANN202 -- the untyped shape is the subject
+        async def inner() -> int:
+            calls.append(n)
+            return n * 2
+
+        return inner()
+
+    pinned = pinned_tool(rig.ledger, returns_coroutine)
+
+    assert asyncio.run(pinned(21)) == 42
+    assert asyncio.run(pinned(21)) == 42
+    assert calls == [21]
+
+
+def _context(**kwargs: object) -> RunContext[None]:
+    """A RunContext with only what the wrapper is allowed to look at: nothing."""
+    return cast("RunContext[None]", SimpleNamespace(**kwargs))

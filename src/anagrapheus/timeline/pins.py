@@ -24,6 +24,7 @@ import uuid
 from typing import TYPE_CHECKING, Protocol, cast
 from uuid import UUID
 
+from anyio import Lock
 from pydantic import JsonValue
 
 from anagrapheus.timeline._canonical import Json, concrete_json, sha256_hex
@@ -166,6 +167,9 @@ class PinLedger:
         self._registry = registry
         self.unit_id = unit_id if unit_id is not None else uuid.uuid7()
         self._promote_as = promote_as
+        # One lock per key drawn in this unit of work. Bounded by the number of
+        # distinct keys, and discarded with the ledger.
+        self._locks: dict[PinKey, Lock] = {}
 
     def resolve[R: Json, O](
         self,
@@ -202,9 +206,28 @@ class PinLedger:
         awaited **only** on a miss, so a reused pin costs no call at all rather than one
         started and thrown away.
         """
-        found, pinned = self._reuse(key)
-        raw = cast("R", pinned) if found else self._record(key, kind, await effect())
+        # Everything under a per-key lock, because the await below is a suspension
+        # point in exactly the gap `resolve` does not have. Without it two concurrent
+        # callers both miss, both draw, and the second write hits the primary key --
+        # breaking the one promise this layer makes. Per key rather than global, so
+        # draws for *different* keys still run concurrently.
+        async with self._lock_for(key):
+            found, pinned = self._reuse(key)
+            raw = cast("R", pinned) if found else self._record(key, kind, await effect())
         return interpret(raw)
+
+    def _lock_for(self, key: PinKey) -> Lock:
+        """
+        The lock guarding draws for one key, created on first use.
+
+        Creating it is safe without a lock of its own: this runs on the event loop
+        thread with no await between the lookup and the insert, so no other coroutine
+        can interleave and make a second one.
+        """
+        lock = self._locks.get(key)
+        if lock is None:
+            lock = self._locks[key] = Lock()
+        return lock
 
     def _reuse(self, key: PinKey) -> tuple[bool, Json]:
         """The pinned result for ``key`` and whether there was one, bumping attempts."""

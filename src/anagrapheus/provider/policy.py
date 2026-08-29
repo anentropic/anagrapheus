@@ -96,8 +96,7 @@ class SemanticCallPolicy:
         return {
             "model": model_id,
             "messages": [self._message(message) for message in messages],
-            "output": self._output(parameters),
-            "tools": sorted(tool.name for tool in parameters.function_tools),
+            "parameters": self._parameters(parameters),
         }
 
     def _message(self, message: ModelMessage) -> Json:
@@ -121,14 +120,31 @@ class SemanticCallPolicy:
             return dumped
         return {key: value for key, value in dumped.items() if key not in _VOLATILE}
 
-    def _output(self, parameters: ModelRequestParameters) -> Json:
-        """The shape the answer is required to take, which the model is told about."""
-        output_object = parameters.output_object
-        return {
-            "mode": parameters.output_mode,
-            "object": None
-            if output_object is None
-            else cast("Json", to_jsonable_python(output_object)),
-            "tools": sorted(tool.name for tool in parameters.output_tools),
-            "allow_text": parameters.allow_text_output,
-        }
+    def _parameters(self, parameters: ModelRequestParameters) -> Json:
+        """
+        Everything the model is told it may do and must produce.
+
+        Reduced by **exclusion**, like the message parts and for the stronger version of
+        the same reason. An earlier draft named the fields it thought mattered — the
+        tool names and the output mode — and got it wrong twice over: a tool that kept
+        its name while changing its description or argument schema shared a key with the
+        old contract, and whole fields (native tools, tool visibility, the instructions)
+        were missing outright. Both failures replay an answer produced under different
+        terms, and neither says anything.
+
+        Tool lists are sorted by name, because declaring the same capabilities in
+        another order is the same capability set and the model is not told the order.
+        """
+        dumped = cast("Json", to_jsonable_python(parameters, fallback=repr))
+        if not isinstance(dumped, dict):
+            return dumped
+        return {key: self._ordered(key, value) for key, value in dumped.items()}
+
+    @staticmethod
+    def _ordered(field: str, value: Json) -> Json:
+        """Sort a list of tool definitions by name; leave everything else alone."""
+        if not field.endswith("tools") or not isinstance(value, list):
+            return value
+        if not all(isinstance(item, dict) and "name" in item for item in value):
+            return value
+        return sorted(value, key=lambda item: str(cast("dict[str, Json]", item)["name"]))
