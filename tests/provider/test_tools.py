@@ -134,18 +134,19 @@ def test_a_tool_taking_run_context_excludes_it_from_the_key(rig: Rig):
     The context is filled from the run, not by the model, and differs between runs.
 
     Keying on it would make every replay a miss — the same failure as keying on a
-    timestamp, arriving through the tool path.
+    timestamp, arriving through the tool path. The parameter is named ``ctx`` here and
+    ``state`` below: both are excluded, because what identifies it is the annotation.
     """
     calls: list[str] = []
 
-    def lookup(ctx: object, what: str) -> str:
+    def lookup(ctx: RunContext[None], what: str) -> str:
         calls.append(what)
         return "Portugal"
 
     pinned = pinned_tool(rig.ledger, lookup)
 
-    assert asyncio.run(pinned(object(), "capital")) == "Portugal"
-    assert asyncio.run(pinned(object(), "capital")) == "Portugal"
+    assert asyncio.run(pinned(_context(run_id="run-one"), "capital")) == "Portugal"
+    assert asyncio.run(pinned(_context(run_id="run-two"), "capital")) == "Portugal"
     assert calls == ["capital"]
 
 

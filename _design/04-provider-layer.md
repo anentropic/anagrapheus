@@ -172,6 +172,14 @@ Three smaller ones, each a real defect:
 - The default's structure changed shape as a result, so two tests that asserted on the
   key's *layout* now assert on its *behaviour*, which is what they meant.
 
+And one the fix exposed rather than caused. The older context test wrote its context as
+a bare `object()` annotated `object`, and passed locally while failing on CI: CPython had
+freed the first instance and reused its address, so `fallback=repr` gave both draws the
+same string. It was asserting the *name-based* contract all along and only the allocator
+hid it. Both context tests now use values that are distinguishable by construction, and
+both fail under mutation — which is the property a test of an exclusion rule needs, since
+the failure mode it guards against is two things looking identical.
+
 ## 8. Open questions
 
 - **Streaming.** Refused, not solved. A streamed response could in principle be pinned
