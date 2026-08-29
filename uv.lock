@@ -7,8 +7,10 @@ name = "anagrapheus"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "anyio" },
     { name = "doxastica" },
     { name = "pydantic" },
+    { name = "pydantic-ai-slim" },
 ]
 
 [package.dev-dependencies]
@@ -17,7 +19,6 @@ dev = [
     { name = "hypothesis" },
     { name = "ipython" },
     { name = "pdbpp" },
-    { name = "pydantic-ai-slim" },
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "ruff" },
@@ -33,8 +34,10 @@ docs = [
 
 [package.metadata]
 requires-dist = [
+    { name = "anyio", specifier = ">=4.0" },
     { name = "doxastica", specifier = ">=0.2,<0.3" },
     { name = "pydantic", specifier = ">=2.11,<3" },
+    { name = "pydantic-ai-slim", specifier = ">=1.0" },
 ]
 
 [package.metadata.requires-dev]
@@ -43,7 +46,6 @@ dev = [
     { name = "hypothesis", specifier = ">=6.130" },
     { name = "ipython", specifier = ">=9.10.0" },
     { name = "pdbpp", specifier = ">=0.12.0.post1" },
-    { name = "pydantic-ai-slim", specifier = ">=1.0" },
     { name = "pytest", specifier = ">=8.0.0" },
     { name = "pytest-cov", specifier = ">=6.0.0" },
     { name = "ruff", specifier = ">=0.15.1" },

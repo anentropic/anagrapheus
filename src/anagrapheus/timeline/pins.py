@@ -24,6 +24,7 @@ import uuid
 from typing import TYPE_CHECKING, Protocol, cast
 from uuid import UUID
 
+from anyio import Lock
 from pydantic import JsonValue
 
 from anagrapheus.timeline._canonical import Json, concrete_json, sha256_hex
@@ -32,7 +33,7 @@ from anagrapheus.timeline.registry import RESERVED_NAMESPACE, EventKey
 from anagrapheus.timeline.store import ScratchRow
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Awaitable, Callable, Mapping
 
     from anagrapheus.timeline.envelope import PendingEvent
     from anagrapheus.timeline.registry import EventTypeRegistry
@@ -71,6 +72,13 @@ class PinResolver(Protocol):
 
     Both the live ledger and replay implement it, so a unit of work is written once
     and runs identically live, under retry, and under replay.
+
+    Two shapes, one policy. :meth:`resolve` is for a synchronous effect;
+    :meth:`resolve_async` is for an awaited one, because the effects most worth pinning
+    — a model call above all — are async in every library that makes them. They differ
+    only in how the draw is performed: the key, the reuse, the concretization and the
+    interpretation are identical, and the implementations share them rather than
+    keeping two copies of a rule that could drift apart.
     """
 
     def resolve[R: Json, O](
@@ -82,6 +90,17 @@ class PinResolver(Protocol):
         interpret: Callable[[R], O],
     ) -> O:
         """Run (or reuse) the effect under ``key``; return only the interpretation."""
+        ...
+
+    async def resolve_async[R: Json, O](
+        self,
+        key: PinKey,
+        *,
+        kind: str,
+        effect: Callable[[], Awaitable[R]],
+        interpret: Callable[[R], O],
+    ) -> O:
+        """Await (or reuse) the effect under ``key``; return only the interpretation."""
         ...
 
 
@@ -148,6 +167,9 @@ class PinLedger:
         self._registry = registry
         self.unit_id = unit_id if unit_id is not None else uuid.uuid7()
         self._promote_as = promote_as
+        # One lock per key drawn in this unit of work. Bounded by the number of
+        # distinct keys, and discarded with the ledger.
+        self._locks: dict[PinKey, Lock] = {}
 
     def resolve[R: Json, O](
         self,
@@ -164,22 +186,72 @@ class PinLedger:
         ``interpret`` passed in with the draw. A retry with the same key reuses; a
         materially different call is a different key and draws fresh.
         """
-        existing = self._store.scratch_get(self.unit_id, key)
-        if existing is not None:
-            self._store.scratch_bump(self.unit_id, key)
-            # The stored value round-tripped through JSON; the key guarantees it is
-            # the same draw this effect would have produced.
-            raw = cast("R", existing.result)
-        else:
-            # Concretize BEFORE both persistence and the first interpretation, so
-            # interpret sees the identical shape on first resolve, retry, and
-            # replay — a tuple is a list everywhere, and an unserializable result
-            # fails here rather than after it has been half-consumed.
-            raw = cast("R", concrete_json(effect()))
-            self._store.scratch_put(
-                ScratchRow(unit_id=self.unit_id, pin_key=key, kind=kind, result=raw, attempts=1)
-            )
+        found, pinned = self._reuse(key)
+        raw = cast("R", pinned) if found else self._record(key, kind, effect())
         return interpret(raw)
+
+    async def resolve_async[R: Json, O](
+        self,
+        key: PinKey,
+        *,
+        kind: str,
+        effect: Callable[[], Awaitable[R]],
+        interpret: Callable[[R], O],
+    ) -> O:
+        """
+        The awaited twin of :meth:`resolve`, for an effect that is a coroutine.
+
+        Identical in every respect that matters — same reuse, same concretization, same
+        scratch row — because it is the same policy with the draw awaited. The effect is
+        awaited **only** on a miss, so a reused pin costs no call at all rather than one
+        started and thrown away.
+        """
+        # Everything under a per-key lock, because the await below is a suspension
+        # point in exactly the gap `resolve` does not have. Without it two concurrent
+        # callers both miss, both draw, and the second write hits the primary key --
+        # breaking the one promise this layer makes. Per key rather than global, so
+        # draws for *different* keys still run concurrently.
+        async with self._lock_for(key):
+            found, pinned = self._reuse(key)
+            raw = cast("R", pinned) if found else self._record(key, kind, await effect())
+        return interpret(raw)
+
+    def _lock_for(self, key: PinKey) -> Lock:
+        """
+        The lock guarding draws for one key, created on first use.
+
+        Creating it is safe without a lock of its own: this runs on the event loop
+        thread with no await between the lookup and the insert, so no other coroutine
+        can interleave and make a second one.
+        """
+        lock = self._locks.get(key)
+        if lock is None:
+            lock = self._locks[key] = Lock()
+        return lock
+
+    def _reuse(self, key: PinKey) -> tuple[bool, Json]:
+        """The pinned result for ``key`` and whether there was one, bumping attempts."""
+        existing = self._store.scratch_get(self.unit_id, key)
+        if existing is None:
+            # `None` is a legitimate pinned result, so the flag carries the answer and
+            # the value never has to stand in for "nothing".
+            return False, None
+        self._store.scratch_bump(self.unit_id, key)
+        # The stored value round-tripped through JSON; the key guarantees it is
+        # the same draw this effect would have produced.
+        return True, existing.result
+
+    def _record[R: Json](self, key: PinKey, kind: str, drawn: R) -> R:
+        """Concretize a fresh draw and pin it in the scratch."""
+        # Concretize BEFORE both persistence and the first interpretation, so
+        # interpret sees the identical shape on first resolve, retry, and
+        # replay — a tuple is a list everywhere, and an unserializable result
+        # fails here rather than after it has been half-consumed.
+        raw = cast("R", concrete_json(drawn))
+        self._store.scratch_put(
+            ScratchRow(unit_id=self.unit_id, pin_key=key, kind=kind, result=raw, attempts=1)
+        )
+        return raw
 
     def commit(self, *, correlation_id: UUID | None = None) -> int:
         """
