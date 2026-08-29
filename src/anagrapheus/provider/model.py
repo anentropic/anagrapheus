@@ -20,12 +20,13 @@ from pydantic import TypeAdapter
 from pydantic_ai.messages import ModelResponse
 from pydantic_ai.models.wrapper import WrapperModel
 
-from anagrapheus.provider.errors import StreamingNotPinnable
 from anagrapheus.provider.policy import SemanticCallPolicy
+from anagrapheus.provider.stream import PinnedStreamedResponse
 from anagrapheus.timeline.pins import pin_key
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
+    from contextlib import AbstractAsyncContextManager
 
     from pydantic_ai import RunContext
     from pydantic_ai.messages import ModelMessage
@@ -108,20 +109,43 @@ class PinnedModel(WrapperModel):
         run_context: RunContext[Any] | None = None,
     ) -> AsyncGenerator[StreamedResponse]:
         """
-        Refuse to stream, rather than streaming unpinned.
+        Stream the call, pinning what it accumulates to; replay it from the pin after.
 
-        ``WrapperModel`` would delegate this to the wrapped model, and the delegation
-        would be silent: a run using a pinned model would make a live, unrecorded draw
-        and still believe itself replayable. A streamed response arrives in pieces and
-        has no single result to record, so it cannot be pinned as it stands — and the
-        honest response to "cannot" is to say so.
+        **The key is the same one :meth:`request` would build.** Streaming is how a
+        response is *received*, not part of what the model is asked, and §4a keys on the
+        semantic identity of the call — so a conversation pins the same whether it was
+        streamed or not, and a corpus recorded either way replays either way. That
+        property is worth testing in both directions, and is.
+
+        ``run_context`` is excluded for the same reason ``pinned_tool`` excludes a
+        ``RunContext`` parameter: it is filled from the run, differs between runs, and
+        is not part of what the model was asked. Keying on it would make every replay a
+        miss.
         """
-        raise StreamingNotPinnable(
-            f"{type(self).__name__} cannot pin a streamed response, and will not pass "
-            f"one through unpinned; use the non-streaming path, or the unwrapped model "
-            f"where an unreproducible stream is what you want"
+        key = pin_key(
+            self._kind,
+            self._policy.material(messages, self.model_id, model_request_parameters),
         )
-        yield  # pragma: no cover -- unreachable; makes this an async generator
+
+        def live() -> AbstractAsyncContextManager[StreamedResponse]:
+            return super(PinnedModel, self).request_stream(
+                messages, model_settings, model_request_parameters, run_context
+            )
+
+        def replayed(raw: Json) -> StreamedResponse:
+            return PinnedStreamedResponse(
+                model_request_parameters=model_request_parameters,
+                pinned=_interpret(raw),
+            )
+
+        async with self._resolver.resolve_stream(
+            key,
+            kind=self._kind,
+            effect=live,
+            capture=_capture,
+            interpret=replayed,
+        ) as stream:
+            yield stream
 
     async def _draw(
         self,
@@ -132,6 +156,17 @@ class PinnedModel(WrapperModel):
         """Make the real call and reduce it to the JSON the ledger stores."""
         response = await super().request(messages, model_settings, model_request_parameters)
         return cast("Json", _RESPONSE.dump_python(response, mode="json"))
+
+
+def _capture(stream: StreamedResponse) -> Json:
+    """
+    Reduce a consumed stream to the JSON the ledger stores.
+
+    ``get()`` builds the accumulated response and stamps it with the state the stream
+    ended in, so a stream abandoned or broken part-way pins as the partial it was
+    rather than as a complete answer or as nothing at all.
+    """
+    return cast("Json", _RESPONSE.dump_python(stream.get(), mode="json"))
 
 
 def _interpret(raw: Json) -> ModelResponse:

@@ -1,9 +1,12 @@
 # The provider layer
 
-**Created 2026-08-29.** What `anagrapheus.provider` decided, and where it departs from
-or fills gaps in the upstream design. Companion to
-[note 00](00-testing-without-a-model.md), which planned this seam before it existed;
-spec authority remains
+**Created 2026-08-29. Amended 2026-08-29 for M5 (streaming).** What
+`anagrapheus.provider` decided, and where it departs from or fills gaps in the upstream
+design. §4 states the opposite of what it originally said; the reversal is recorded in
+place rather than rewritten away, because what M4 got wrong is part of the argument.
+
+Companion to [note 00](00-testing-without-a-model.md), which planned this seam before it
+existed; spec authority remains
 [`agent-core` doc 00 §2 and §4](https://github.com/anentropic/narrative-vm/blob/main/_design/agent-core/00-agent-core-architecture.md).
 
 Doc 00 §2 gives this layer *the model call: structured outputs, tool loop, casting* and
@@ -32,7 +35,9 @@ means an application's agent code is unchanged by the decision to pin it.
 ## 2. The timeline gained an async resolver — [ours]
 
 `Model.request` is `async`; `PinResolver.resolve` took a sync effect. So the protocol
-gained `resolve_async`, implemented on both `PinLedger` and `ReplayPins`.
+gained `resolve_async`, implemented on both `PinLedger` and `ReplayPins`. M5 added a
+third, `resolve_stream` — see §4 — for an effect whose result exists only once the
+*caller* has consumed it.
 
 It is the same policy with the draw awaited — same key, same reuse, same
 concretization, same scratch row — so the two paths **share their internals** rather
@@ -93,16 +98,81 @@ This also answers the open question [note 00 §8](00-testing-without-a-model.md)
 *"what is the canonicalization policy for test pins?"* — with the same answer for tests
 and for production, because they run the same path.
 
-## 4. Streaming is refused, loudly — [ours]
+## 4. Streaming is pinned, not refused — [ours, amended 2026-08-29]
 
-`request_stream` raises `StreamingNotPinnable` rather than inheriting `WrapperModel`'s
-passthrough.
+**This section originally said the opposite.** M4 had `request_stream` raise
+`StreamingNotPinnable`, on the argument that a streamed response arrives in pieces and
+has no single result to record. The first half of that argument was right and the
+conclusion was wrong.
 
-A streamed response arrives in pieces and has no single result to record, so it cannot
-be pinned as it stands. The inherited behaviour would delegate to the wrapped model —
-silently — putting an **unpinned live draw** inside a run that believes every draw is
-pinned. The run would not replay, and nothing would say so. Declining is the honest
-version of "cannot"; half-supporting it would be the dishonest one.
+**What the refusal actually cost.** Three surfaces route through `request_stream`, not
+one: `run_stream()`, `run_stream_events()`, and an `event_stream_handler` passed to an
+ordinary `run()`. So a pinned agent could not report progress *by any means* — the last
+case especially, where the caller never asked for a stream at all and only wanted to
+observe. Only `agent.iter()` survived, at step granularity. M4's note named just
+`run_stream`, which understated it.
+
+**What makes it pinnable.** `StreamedResponse.get()` builds the accumulated
+`ModelResponse` and stamps it with a `state` — `complete`, `incomplete`, `suspended` or
+`interrupted`. That is the single result the refusal assumed did not exist. Pin it, and
+replay rebuilds a stream from it.
+
+**A stream's key is the key its non-streamed twin would have.** §4a keys on the semantic
+identity of the call, and streaming is how a response is *received*, not part of what
+the model is asked. So one corpus serves both paths, in both directions — a pin recorded
+streaming replays through `request`, and a pin recorded plainly replays as a stream.
+Both directions are tested, because that decision is exactly the kind that stays true in
+name while quietly becoming false.
+
+**An abandoned stream still pins.** If the consumer breaks out early or the stream
+raises, what arrived is recorded with the state it ended in. This replaces the open
+question M4 left — *"error on an abandoned partial stream"* — with a better answer:
+recording nothing would make the next attempt re-run the effect, which is the one thing
+the layer promises against, and recording it as `complete` would hand back a truncated
+answer dressed as a finished one. A partial is an outcome the model produced.
+
+**What replay does not reproduce: chunk boundaries and timing.** They were the
+provider's, they are not in the pin, and synthesizing plausible ones would fabricate a
+stream that never happened. Each part is surfaced whole. So a replay *replays a stream*,
+which is not the same claim as having streamed — the distinction matters for exactly one
+consumer, code that acts on chunk boundaries, and for that consumer the honest answer is
+that this is not a recording of its stream.
+
+**`StreamingNotPinnable` is gone**, since nothing raises it any more. An exception no
+code can produce is worse than no exception at all, so it was removed rather than left
+as a decoration. `ProviderError` remains as the base.
+
+## 4a. One gate, and why it cannot be a lock — [ours]
+
+Two constraints met here, and the second was found by review rather than by reasoning.
+
+**It cannot be an `anyio.Lock`.** `resolve_stream` holds its claim across a `yield`,
+which `resolve` and `resolve_async` never do. A Lock is **task-affine** — it refuses a
+release by a task that did not acquire it — and a stream's consumer may finalize it from
+a different task than opened it, which pydantic-ai's `stream_text(delta=True)` does by
+grouping deltas temporally. Held across the `yield`, it raises `RuntimeError` on the way
+out, *after* the answer has been delivered. So the guard is an `Event`, which has no
+owner.
+
+**And it must be the same gate the plain path uses.** The first draft gave
+`resolve_stream` its own gate and left `resolve_async` on its lock — two guards, each
+correct on its own path, and a hole exactly between them. Because §4 makes a streamed
+call and a plain one **share a key**, a `request()` beginning while a stream is open
+misses, both draw, and the live ledger's second write hits the scratch primary key. In
+record-mode replay it fails silently instead: no primary key to raise, so the last
+completion simply wins.
+
+The shape of that mistake is worth keeping. Each guard was written to close a race, and
+each did close the one in front of it; what neither could see was that the *decision to
+share a key* — the thing §4 argues for — turns two safe halves into one unsafe whole. A
+design choice made in one section became a concurrency obligation in another, and
+nothing connected them but a reviewer.
+
+So both async shapes now claim through one per-key `_inflight` gate: a caller waits for
+whatever draw is in flight, however it is drawing, then re-checks and reuses its pin. If
+the in-flight draw failed before pinning, the waiter becomes the one that draws. Tests
+cover the mixed plain/stream race in both ledger and record mode, and both fail against
+the split-gate version.
 
 ## 5. Tools are pinned, and the wrapper is always async — [ours]
 
@@ -180,18 +250,34 @@ hid it. Both context tests now use values that are distinguishable by constructi
 both fail under mutation — which is the property a test of an exclusion rule needs, since
 the failure mode it guards against is two things looking identical.
 
+## 7a. What review round 2 changed (M5)
+
+One finding, and a real one: **the two async paths did not coordinate with each other**
+— §4a above. Reproduced before fixing, with the effect running twice and the second
+write raising `UNIQUE constraint failed: pin_scratch.unit_id, pin_scratch.pin_key`.
+
+Worth recording that this is the second time in this layer that a *correct local
+decision* opened a race one level up. M4's was `resolve_async` putting an await in the
+gap `resolve` did not have; M5's was two guards that were each right about their own
+path. Both were invisible from inside the change and obvious from outside it.
+
 ## 8. Open questions
 
-- **Streaming.** Refused, not solved. A streamed response could in principle be pinned
-  as its accumulated parts and replayed as a synthetic stream — but "replayed a stream"
-  and "streamed" are not the same claim, and the difference would need stating before
-  the feature would be honest.
+- ~~**Streaming.** Refused, not solved.~~ **Closed by M5** — pinned as the accumulated
+  response, replayed as a synthetic stream, with the "replayed a stream is not streamed"
+  caveat stated in §4 rather than left implied. The partial-stream question it carried
+  is closed too, and differently than expected: a partial is pinned, not refused.
 - **Does `model_settings` belong in the default key?** Left out on the argument that
   temperature is the application's judgment. A consumer who pins across a settings
   change and gets a stale answer would reasonably call that a bug in the default.
 - **Tier 3, the live smoke test**, still does not exist. Note 00 §8 asks whether it
   gates a release; nothing here answers that, and a nightly nobody reads is not a smoke
   test.
+- **Does a replayed stream need to be paced?** It is delivered as fast as the consumer
+  pulls. That is right for a test and for a debugging replay, and it is right for the
+  Narrator case that motivated M5, where a replayed turn has no perceived latency to
+  hide. It would be wrong if a replay were ever shown to a player as though live — and
+  nothing currently stops that.
 - **The pin corpus as a fixture format** — note 00 §8's first open question, about where
   recorded ledgers live and in what format. The acceptance test records and replays
   within one test rather than from a committed fixture, so the question is still open in
