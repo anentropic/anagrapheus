@@ -20,13 +20,16 @@ draws through the pin ledger:
   model is asked and drops the timestamps and provider ids that would otherwise give
   every call a fresh key.
 
-Streaming is refused rather than passed through unpinned — see
-:class:`StreamingNotPinnable`.
+Streaming is pinned like any other draw: the stream's accumulated response is what
+gets recorded, and replay rebuilds a stream from it — see
+:class:`~anagrapheus.provider.stream.PinnedStreamedResponse` for what that does and
+does not reproduce.
 """
 
-from anagrapheus.provider.errors import ProviderError, StreamingNotPinnable
+from anagrapheus.provider.errors import ProviderError
 from anagrapheus.provider.model import PIN_KIND, PinnedModel
 from anagrapheus.provider.policy import CallPolicy, SemanticCallPolicy
+from anagrapheus.provider.stream import PinnedStreamedResponse
 from anagrapheus.provider.tools import PIN_KIND as TOOL_PIN_KIND
 from anagrapheus.provider.tools import pinned_tool
 
@@ -35,8 +38,8 @@ __all__ = [
     "TOOL_PIN_KIND",
     "CallPolicy",
     "PinnedModel",
+    "PinnedStreamedResponse",
     "ProviderError",
     "SemanticCallPolicy",
-    "StreamingNotPinnable",
     "pinned_tool",
 ]
