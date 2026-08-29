@@ -10,7 +10,7 @@ run continuing the same history, announced — never a different run wearing the
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Literal, Self, cast
 
 from pydantic import BaseModel
@@ -175,6 +175,32 @@ class ReplayPins:
         if key in self._pins:
             self._hits += 1
             return interpret(cast("R", self._pins[key]))
+        self._miss(key, kind)
+        return interpret(self._record(key, effect()))
+
+    async def resolve_async[R: Json, O](
+        self,
+        key: PinKey,
+        *,
+        kind: str,
+        effect: Callable[[], Awaitable[R]],
+        interpret: Callable[[R], O],
+    ) -> O:
+        """
+        The awaited twin of :meth:`resolve`, following the same ``on_miss`` policy.
+
+        Under strict replay the effect is never awaited at all: the miss raises before
+        the call is made, which is what makes "no model was reached" an assertion a test
+        can hold rather than a hope.
+        """
+        if key in self._pins:
+            self._hits += 1
+            return interpret(cast("R", self._pins[key]))
+        self._miss(key, kind)
+        return interpret(self._record(key, await effect()))
+
+    def _miss(self, key: PinKey, kind: str) -> None:
+        """Apply the ``on_miss`` policy: raise, or announce the first and carry on."""
         miss = Divergence(missed_key=key, kind=kind, after_hits=self._hits)
         if self._on_miss == "strict":
             if self._divergence is None:
@@ -184,6 +210,9 @@ class ReplayPins:
             self._divergence = miss
             if self._announce is not None:
                 self._announce(miss)
-        raw = cast("R", concrete_json(effect()))
+
+    def _record[R: Json](self, key: PinKey, drawn: R) -> R:
+        """Pin a fresh draw, so replayed and fresh keys alike keep reuse-under-retry."""
+        raw = cast("R", concrete_json(drawn))
         self._pins[key] = cast("Json", raw)
-        return interpret(raw)
+        return raw
