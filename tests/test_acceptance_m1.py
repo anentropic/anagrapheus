@@ -33,7 +33,7 @@ from anagrapheus.timeline.registry import RESERVED_NAMESPACE, EventKey
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from anagrapheus.timeline import PinResolver
+    from anagrapheus.timeline import FoldDeterminism, PinResolver
 
 
 class StepTaken(DomainEvent, frozen=True):
@@ -51,6 +51,7 @@ class StepCount:
     """Counts StepTaken events into the store's own file; ignores library events."""
 
     name = "step_count"
+    fold: FoldDeterminism = "deterministic"
 
     def apply(self, event: StoredEvent, txn: object) -> None:
         assert isinstance(txn, sqlite3.Connection)

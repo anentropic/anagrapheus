@@ -17,6 +17,7 @@ from anagrapheus.timeline.registry import EventKey
 if TYPE_CHECKING:
     from anagrapheus.beliefs.store import BeliefIndexStore
     from anagrapheus.timeline.envelope import StoredEvent
+    from anagrapheus.timeline.folds import FoldDeterminism
     from anagrapheus.timeline.registry import EventTypeRegistry
 
 __all__ = ["FOLD_NAME", "BeliefIndexFold"]
@@ -44,6 +45,9 @@ class BeliefIndexFold:
     def name(self) -> str:
         """The position key."""
         return self._name
+
+    #: Deterministic: a decode-and-index fold, with no draw anywhere in it.
+    fold: FoldDeterminism = "deterministic"
 
     def apply(self, event: StoredEvent, txn: object) -> None:
         """Fold one event, if the vocabulary recognises it as a minting."""
