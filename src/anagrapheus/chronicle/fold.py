@@ -43,12 +43,17 @@ FOLD_NAME = "chronicle"
 
 
 class Consolidation(NamedTuple):
-    """What a summarizer returns: the prose, and the pin the draw resolved under."""
+    """What a summarizer returns: the prose, and the pins its draws resolved under."""
 
     prose: str
-    #: ``None`` if the summarizer drew outside a ledger. Legal, and worth knowing: such
-    #: a section can never be shown to have rebuilt bit-exact, only to have rebuilt.
-    pin: PinKey | None = None
+    #: Plural because consolidating a range may take several calls, and empty when the
+    #: summarizer drew outside a ledger. Worth recording either way: a section with no
+    #: pins can be shown to have rebuilt, never to have rebuilt *bit-exact*.
+    #:
+    #: Obtainable from :class:`~anagrapheus.provider.model.PinnedModel` by passing it an
+    #: ``on_key`` recorder — the model computes the key internally, so without that hook
+    #: a summarizer would have to duplicate the policy to learn it.
+    pins: tuple[PinKey, ...] = ()
 
 
 class Summarizer(Protocol):
@@ -110,17 +115,34 @@ class ChronicleFold:
         self._boundary = boundary
         self._summarize = summarize
         self._name = name
+        # What `prepare` drew, waiting for `apply` to write it. Emptied as it is
+        # consumed, so it never holds more than one batch's worth.
+        self._prepared: dict[int, tuple[int, Consolidation]] = {}
 
     @property
     def name(self) -> str:
         """The position key."""
         return self._name
 
-    def apply(self, event: StoredEvent, txn: object) -> None:
-        """Consolidate, if this event closes a unit and there is anything to cover."""
+    def prepare(self, event: StoredEvent) -> None:
+        """
+        Draw this unit's consolidation, **outside the write transaction**.
+
+        The model call lives here rather than in ``apply`` because ``apply`` runs under
+        ``BEGIN IMMEDIATE``: a remote call there holds SQLite's write lock for its whole
+        duration and blocks every append in the process. Consolidation is debt, run in
+        the background — blocking the hot path is the one thing it must not do.
+
+        The range is read here too, so a unit already covered costs no call at all.
+        """
         if not self._boundary.closes_unit(event):
             return
-        start = self._store.consolidated_through() + 1
+        # The store's watermark alone is not enough: a batch can hold several
+        # boundaries, and every `prepare` in it runs before any `apply` writes. Reading
+        # only `consolidated_through()` would give each of them the same start, so the
+        # second would claim a range overlapping the first. The pending draws are the
+        # rest of the answer, and they clear themselves as `apply` consumes them.
+        start = max([self._store.consolidated_through(), *self._prepared]) + 1
         if event.seq < start:
             # Already covered -- the fold contract allows the last batch to be
             # re-applied after a crash, and re-consolidating would spend a model call
@@ -129,7 +151,14 @@ class ChronicleFold:
         events = list(self._reader.read_raw(since_seq=start - 1, limit=event.seq - start + 1))
         if not events:
             return
-        consolidation = self._summarize(events)
+        self._prepared[event.seq] = (start, self._summarize(events))
+
+    def apply(self, event: StoredEvent, txn: object) -> None:
+        """Write what :meth:`prepare` drew. Nothing slow happens here."""
+        drawn = self._prepared.pop(event.seq, None)
+        if drawn is None:
+            return
+        start, consolidation = drawn
         self._store.append(
             Section(
                 anchor=Anchor(
@@ -140,7 +169,7 @@ class ChronicleFold:
                     supersedes=None,
                 ),
                 prose=consolidation.prose,
-                pin=consolidation.pin,
+                pins=consolidation.pins,
             )
         )
 

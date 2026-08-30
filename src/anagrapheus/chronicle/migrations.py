@@ -24,7 +24,7 @@ MIGRATIONS: Final[tuple[tuple[str, ...], ...]] = (
             unit        INTEGER NOT NULL,
             supersedes  TEXT,
             prose       TEXT    NOT NULL,
-            pin         TEXT
+            pins        TEXT    NOT NULL DEFAULT ''
         ) STRICT
         """,
         # Range lookup is the chronicle's whole read pattern: "what covers seq N", and

@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import sqlite3
 from typing import TYPE_CHECKING
 
 from anagrapheus.chronicle import (
     Anchors,
+    Consolidation,
     Prose,
     Section,
     section_id,
@@ -14,6 +16,11 @@ from anagrapheus.chronicle import (
 from anagrapheus.chronicle.sections import Anchor
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from pathlib import Path
+
+    from anagrapheus.timeline.envelope import StoredEvent
+
     from .conftest import Rig
 
 
@@ -149,3 +156,56 @@ def test_the_default_retriever_is_naive_and_says_so(rig: Rig):
     assert len(hits) == 2
     assert hits[0].anchor.to_seq > hits[1].anchor.to_seq, "most recent first"
     assert substring_retriever(rig.prose.all(), "pears") == []
+
+
+def test_the_draw_happens_outside_the_write_lock(tmp_path: Path):
+    """
+    A model call must not hold SQLite's write lock while it waits.
+
+    ``Projector._apply_batch`` runs ``apply`` inside ``BEGIN IMMEDIATE`` so state and
+    position commit together. A remote call there blocks every append in the process for
+    as long as the model takes — and consolidation is *debt*, run in the background, so
+    blocking the hot path is the one thing it must not do. Hence the ``prepare`` phase.
+
+    Measured rather than reasoned about: a second connection tries to take the write
+    lock from inside the summarizer, and must get it.
+    """
+    from .conftest import build_rig
+
+    rig = build_rig(tmp_path / "lock.db")
+    took_the_lock: list[bool] = []
+
+    def probing(events: Sequence[StoredEvent]) -> Consolidation:
+        other = sqlite3.connect(tmp_path / "lock.db", timeout=0.3)
+        try:
+            other.execute("BEGIN IMMEDIATE")
+            took_the_lock.append(True)
+            other.rollback()
+        except sqlite3.OperationalError:
+            took_the_lock.append(False)
+        finally:
+            other.close()
+        return Consolidation(prose="summary")
+
+    rig.fold._summarize = probing  # noqa: SLF001 -- swapping the draw is the subject
+    try:
+        rig.commit(rig.step("a"), rig.close("one"))
+        assert took_the_lock == [True], "the draw held the write lock"
+    finally:
+        rig.store.close()
+
+
+def test_two_boundaries_in_one_batch_do_not_overlap(rig: Rig):
+    """
+    Every ``prepare`` in a batch runs before any ``apply``, so the watermark lags.
+
+    Reading only ``consolidated_through()`` gives each boundary in the batch the same
+    start, and the second claims a range the first already covered. Caught by the
+    lag test when the prepare phase was introduced; asserted directly here, since that
+    test was about something else and would not have named this.
+    """
+    rig.append(rig.step("a"), rig.close("one"), rig.step("b"), rig.close("two"))
+
+    rig.projector.catch_up()
+
+    assert [(a.from_seq, a.to_seq) for a in rig.anchors.all()] == [(1, 2), (3, 4)]

@@ -17,6 +17,7 @@ from anagrapheus.timeline.errors import (
 )
 from anagrapheus.timeline.folds import (
     FoldDeterminism,
+    GenerativeFold,
     GenerativeRebuild,
     ProjectionFold,
     Projector,
@@ -66,6 +67,7 @@ __all__ = [
     "PinScratchStore",
     "PinsAbandoned",
     "FoldDeterminism",
+    "GenerativeFold",
     "GenerativeRebuild",
     "ProjectionFold",
     "Projector",

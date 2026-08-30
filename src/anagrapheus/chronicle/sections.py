@@ -54,7 +54,7 @@ class Section(NamedTuple):
 
     anchor: Anchor
     prose: str
-    #: The pin the consolidating draw resolved under. Present so a rebuild can be shown
-    #: to have hit or missed rather than assumed to have; a section written outside the
-    #: ledger has none.
-    pin: PinKey | None = None
+    #: The pins the consolidating draws resolved under — plural, since a range may take
+    #: several calls. Present so a rebuild can be *shown* to have hit rather than
+    #: assumed to have; empty for a section written outside a ledger.
+    pins: tuple[PinKey, ...] = ()

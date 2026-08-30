@@ -25,7 +25,7 @@ from anagrapheus.provider.stream import PinnedStreamedResponse
 from anagrapheus.timeline.pins import pin_key
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
+    from collections.abc import AsyncGenerator, Callable
     from contextlib import AbstractAsyncContextManager
 
     from pydantic_ai import RunContext
@@ -35,7 +35,7 @@ if TYPE_CHECKING:
 
     from anagrapheus.provider.policy import CallPolicy
     from anagrapheus.timeline._canonical import Json
-    from anagrapheus.timeline.pins import PinResolver
+    from anagrapheus.timeline.pins import PinKey, PinResolver
 
 __all__ = ["PIN_KIND", "PinnedModel"]
 
@@ -54,6 +54,12 @@ class PinnedModel(WrapperModel):
     changes. Everything except :meth:`request` and :meth:`request_stream` delegates to
     the wrapped model, inherited from ``WrapperModel``.
 
+    ``on_key`` is called with the key of every request this model makes. The key is
+    computed internally from the policy, so without this hook a caller wanting to record
+    which pin produced a result would have to duplicate the policy to recompute it — and
+    a duplicated policy is one that drifts. Used by the chronicle to record a section's
+    provenance; ignore it otherwise.
+
     The resolver decides what pinning *means* here: a
     :class:`~anagrapheus.timeline.pins.PinLedger` draws once and reuses under retry; a
     :class:`~anagrapheus.timeline.replay.ReplayPins` answers from the log and announces
@@ -68,11 +74,13 @@ class PinnedModel(WrapperModel):
         *,
         policy: CallPolicy | None = None,
         kind: str = PIN_KIND,
+        on_key: Callable[[PinKey], None] | None = None,
     ) -> None:
         super().__init__(wrapped)
         self._resolver = resolver
         self._policy = policy if policy is not None else SemanticCallPolicy()
         self._kind = kind
+        self._on_key = on_key
 
     async def request(
         self,
@@ -89,10 +97,7 @@ class PinnedModel(WrapperModel):
         :class:`~anagrapheus.provider.policy.SemanticCallPolicy` keeps to what the model
         is *asked*. An application that disagrees supplies its own policy.
         """
-        key = pin_key(
-            self._kind,
-            self._policy.material(messages, self.model_id, model_request_parameters),
-        )
+        key = self._key(messages, model_request_parameters)
         return await self._resolver.resolve_async(
             key,
             kind=self._kind,
@@ -122,10 +127,7 @@ class PinnedModel(WrapperModel):
         is not part of what the model was asked. Keying on it would make every replay a
         miss.
         """
-        key = pin_key(
-            self._kind,
-            self._policy.material(messages, self.model_id, model_request_parameters),
-        )
+        key = self._key(messages, model_request_parameters)
 
         def live() -> AbstractAsyncContextManager[StreamedResponse]:
             return super(PinnedModel, self).request_stream(
@@ -146,6 +148,13 @@ class PinnedModel(WrapperModel):
             interpret=replayed,
         ) as stream:
             yield stream
+
+    def _key(self, messages: list[ModelMessage], parameters: ModelRequestParameters) -> PinKey:
+        """Build this call's key, and report it to ``on_key`` if one was given."""
+        key = pin_key(self._kind, self._policy.material(messages, self.model_id, parameters))
+        if self._on_key is not None:
+            self._on_key(key)
+        return key
 
     async def _draw(
         self,

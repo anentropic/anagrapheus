@@ -146,6 +146,50 @@ This reversed an earlier working assumption of mine, which had reached for event
 the grounds that a deterministic rebuild needed them. The premise was wrong: a
 fold-generative fold is still a fold, and projection-hood never required determinism.
 
+## 7a. What review round 1 changed
+
+Five findings, all real. Two worth recording rather than merely fixing.
+
+**A generative fold's draw was holding SQLite's write lock.** `Projector._apply_batch`
+calls `apply` inside `BEGIN IMMEDIATE` so state and position commit together — free for
+a deterministic fold, and badly wrong for one whose `apply` makes a remote call. Every
+append in the process blocked for the model's full latency, and a batch with several
+boundaries held it across all of them. Measured, not reasoned about: a second connection
+got `database is locked` for the whole call.
+
+The fix generalizes, as R61 clause 1 says such things should: `GenerativeFold` adds a
+`prepare` phase that the projector runs **outside** the transaction, leaving `apply`
+with nothing slow in it. Every generative fold needs it — a portrait regenerator has the
+identical problem — so it belongs in `timeline` beside the grade, not in the chronicle.
+
+**And the fix introduced a bug the existing tests caught immediately.** Every `prepare`
+in a batch runs before any `apply`, so `consolidated_through()` still reads the old
+watermark and two boundaries in one batch both claimed the same start — the second
+covering a range the first already had. The pending draws are the missing half of the
+answer, and they clear themselves as `apply` consumes them. Both the failure and the fix
+now have their own test, since the one that caught it was about lag and would not have
+named this.
+
+Three smaller ones, each a real defect:
+
+- **`Consolidation.pin` was unfillable**, which made it decorative. `PinnedModel`
+  computes the key internally, so a summarizer using the recommended integration could
+  not learn it without duplicating the policy — and a duplicated policy drifts. Fixed by
+  giving `PinnedModel` an `on_key` recorder, and by making the field **plural**, which
+  is the accurate shape: consolidating a range may take several calls. The acceptance
+  test now *asserts* the pins are identical across a bit-exact rebuild rather than
+  inferring it from the prose.
+- **`covering()` filtered in Python**, loading every section's prose to answer a point
+  lookup and bypassing the range index added for exactly that read. Now both predicates
+  in SQL, one row back, and `EXPLAIN QUERY PLAN` confirms the index is used.
+- **`load()`'s docstring promised a merge it does not perform.** Section ids are
+  range-derived, so two chronicles over one log collide on every id and the incoming
+  prose is dropped. That is correct for the case the method exists for — resumable
+  transfer of *one* chronicle — and the docstring now says so instead of claiming
+  "without either winning".
+- **`chronicle` was missing from the package root**, so `import anagrapheus;
+  anagrapheus.chronicle` did not work and root API discovery omitted the new layer.
+
 ## 8. Open questions
 
 - **Nothing enforces the no-binding-read rule across a process boundary.** The API split
@@ -160,4 +204,8 @@ fold-generative fold is still a fold, and projection-hood never required determi
   `substring_retriever` so it cannot be mistaken for ranked retrieval. The risk is the
   opposite of the usual one: a default that looked competent would discourage replacing
   it.
-- **Tier 3, the live smoke test**, still does not exist — now five milestones running.
+- **Merging two divergent chronicles is not possible**, and `load` no longer pretends
+  otherwise. It would need identity that distinguishes two consolidations of one range,
+  which range-derived ids deliberately do not provide — the same property that makes
+  anchors replay is what makes divergent sections collide.
+- **Tier 3, the live smoke test**, still does not exist — now six milestones running.

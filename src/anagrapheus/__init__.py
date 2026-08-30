@@ -1,15 +1,22 @@
-"""Event-sourced timeline, belief store, and identity layer for long-running agents."""
+"""Event-sourced timeline, belief store, identity and chronicle for long-running agents."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from . import beliefs, identity, provider, timeline
+from . import beliefs, chronicle, identity, provider, timeline
 
 if TYPE_CHECKING:
     from anagrapheus.timeline.registry import EventTypeRegistry
 
-__all__ = ["beliefs", "identity", "provider", "register_builtin_events", "timeline"]
+__all__ = [
+    "beliefs",
+    "chronicle",
+    "identity",
+    "provider",
+    "register_builtin_events",
+    "timeline",
+]
 
 
 def register_builtin_events(registry: EventTypeRegistry) -> None:

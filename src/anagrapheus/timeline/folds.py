@@ -21,7 +21,7 @@ but so is a portrait regenerator or any other read model whose content a model w
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol, cast
 
 from anagrapheus.timeline.errors import TimelineError
 from anagrapheus.timeline.store import TransactionalStore
@@ -33,7 +33,13 @@ if TYPE_CHECKING:
     from anagrapheus.timeline.store import EventStore
     from anagrapheus.timeline.upcast import EventReader
 
-__all__ = ["FoldDeterminism", "GenerativeRebuild", "ProjectionFold", "Projector"]
+__all__ = [
+    "FoldDeterminism",
+    "GenerativeFold",
+    "GenerativeRebuild",
+    "ProjectionFold",
+    "Projector",
+]
 
 #: A fold's replay grade. ``"deterministic"`` folds satisfy fold-replay: same log, same
 #: projection. ``"generative"`` folds do not — their ``apply`` draws from a model, so
@@ -85,6 +91,33 @@ class ProjectionFold(Protocol):
 
 class GenerativeRebuild(TimelineError):
     """A generative fold was asked to rebuild without acknowledging what that discards."""
+
+
+class GenerativeFold(Protocol):
+    """
+    A fold whose content is drawn **before** the write transaction opens.
+
+    :meth:`Projector._apply_batch` calls ``apply`` inside ``BEGIN IMMEDIATE``, so that a
+    projection's state and its position commit together. For a deterministic fold that
+    is free — the work is arithmetic. For a generative one it is not: the draw is a
+    remote call, and holding SQLite's write lock across it blocks every append in the
+    process for as long as the model takes to answer. Consolidation is *debt*, run in
+    the background; blocking the hot path is the one thing it must not do.
+
+    So a generative fold splits in two. :meth:`prepare` draws, outside any transaction.
+    ``apply`` then writes what was prepared, under the lock, with nothing slow left in
+    it. **Every generative fold must implement it**, and the projector calls it by the
+    declared grade rather than by duck-typing, so a fold that forgot fails loudly.
+    """
+
+    def prepare(self, event: StoredEvent) -> None:
+        """
+        Draw whatever ``apply`` will need for this event. Runs with no lock held.
+
+        Called for every event in the batch before the transaction opens, so a fold
+        that has nothing to do for an event should return without drawing.
+        """
+        ...
 
 
 def _validate_batch_size(batch_size: int) -> None:
@@ -194,6 +227,13 @@ class Projector:
 
     def _apply_batch(self, fold: ProjectionFold, batch: list[StoredEvent], position: int) -> int:
         new_position = batch[-1].seq
+        if fold.fold == "generative":
+            # Outside the transaction, deliberately -- see `GenerativeFold`. A batch may
+            # hold several boundaries, so this is where a whole batch's model calls
+            # happen, and none of them is holding the write lock while it does.
+            generative = cast("GenerativeFold", fold)
+            for event in batch:
+                generative.prepare(event)
         if isinstance(self._store, TransactionalStore):
             with self._store.transaction() as txn:
                 for event in batch:

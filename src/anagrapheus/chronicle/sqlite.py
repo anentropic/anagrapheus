@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 
 __all__ = ["SQLiteChronicleStore"]
 
-_COLUMNS = "section_id, from_seq, to_seq, unit, supersedes, prose, pin"
+_COLUMNS = "section_id, from_seq, to_seq, unit, supersedes, prose, pins"
 
 
 class SQLiteChronicleStore:
@@ -53,12 +53,12 @@ class SQLiteChronicleStore:
                 section.anchor.unit,
                 section.anchor.supersedes,
                 section.prose,
-                section.pin,
+                _dump(section.pins),
             ),
         )
 
     def load(self, sections: Iterable[Section]) -> int:
-        """Insert exported sections, skipping ids already present."""
+        """Insert exported sections, skipping ids already present. Transfer, not merge."""
         landed = 0
         for section in sections:
             before = self._conn.total_changes
@@ -94,9 +94,26 @@ class SQLiteChronicleStore:
         return _row(row) if row is not None else None
 
     def covering(self, seq: int) -> Section | None:
-        """The current section covering ``seq``, if any range does."""
-        found = [s for s in self.sections() if s.anchor.from_seq <= seq <= s.anchor.to_seq]
-        return found[0] if found else None
+        """
+        The current section covering ``seq``, if any range does.
+
+        Both predicates in SQL, and one row back. Filtering in Python would load every
+        section's prose to answer a point lookup, growing linearly with the chronicle
+        and bypassing the range index that exists for exactly this read.
+        """
+        row = self._conn.execute(
+            f"""
+            SELECT {_COLUMNS} FROM chronicle_sections
+             WHERE from_seq <= :seq AND to_seq >= :seq
+               AND section_id NOT IN (
+                       SELECT supersedes FROM chronicle_sections WHERE supersedes IS NOT NULL
+                   )
+             ORDER BY from_seq
+             LIMIT 1
+            """,  # noqa: S608 -- `_COLUMNS` is a module literal
+            {"seq": seq},
+        ).fetchone()
+        return _row(row) if row is not None else None
 
     def sections(self, *, upto_seq: int | None = None) -> Sequence[Section]:
         """Every current section, oldest first."""
@@ -133,6 +150,16 @@ class SQLiteChronicleStore:
         ).fetchall()
 
 
+def _dump(pins: tuple[str, ...]) -> str:
+    """Pins as one text column. Newline-joined: a pin key never contains one."""
+    return "\n".join(pins)
+
+
+def _parse(raw: str) -> tuple[str, ...]:
+    """The inverse of :func:`_dump`, treating empty as no pins rather than one blank."""
+    return tuple(raw.split("\n")) if raw else ()
+
+
 def _row(row: sqlite3.Row) -> Section:
     """Rebuild a section from its row."""
     return Section(
@@ -144,5 +171,5 @@ def _row(row: sqlite3.Row) -> Section:
             supersedes=row["supersedes"],
         ),
         prose=row["prose"],
-        pin=row["pin"],
+        pins=_parse(row["pins"]),
     )

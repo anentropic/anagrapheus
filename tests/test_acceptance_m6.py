@@ -81,13 +81,15 @@ def test_milestone_6_acceptance(tmp_path: Path):
         drawn.append(len(drawn))
         return ModelResponse(parts=[TextPart(f"account #{len(drawn)}")])
 
-    model = PinnedModel(FunctionModel(write), ledger)
+    keys: list[str] = []
+    model = PinnedModel(FunctionModel(write), ledger, on_key=keys.append)
 
     def summarize(events: Sequence[StoredEvent]) -> Consolidation:
         """The application's, as it must be: the prompt lives here, so the key does."""
         what = ", ".join(str(e.payload.get("what", e.envelope.type)) for e in events)
+        keys.clear()
         result = Agent(model=model).run_sync(f"summarise: {what}")
-        return Consolidation(prose=result.output, pin=None)
+        return Consolidation(prose=result.output, pins=tuple(keys))
 
     fold = ChronicleFold(
         chronicle,
@@ -110,6 +112,9 @@ def test_milestone_6_acceptance(tmp_path: Path):
     prose_before = [s.prose for s in chronicle.sections()]
     assert [(a.from_seq, a.to_seq) for a in anchors_before] == [(1, 2), (3, 4)]
     assert len(drawn) == 2
+    # Provenance recorded, not merely claimed: each section names the pin that made it.
+    assert all(s.pins for s in chronicle.sections())
+    pins_before = [s.pins for s in chronicle.sections()]
 
     # -- rebuild is refused by default, because it is neither cheap nor exact ---------
     with pytest.raises(GenerativeRebuild):
@@ -125,12 +130,13 @@ def test_milestone_6_acceptance(tmp_path: Path):
     # the log, which is the claim that matters: a consolidation pinned months ago can
     # be reproduced exactly, without reaching a model.
     replay = ReplayPins.from_events(events, types, on_miss="record")
-    replayed_model = PinnedModel(FunctionModel(write), replay)
+    replayed_model = PinnedModel(FunctionModel(write), replay, on_key=keys.append)
 
     def summarize_replayed(events: Sequence[StoredEvent]) -> Consolidation:
         what = ", ".join(str(e.payload.get("what", e.envelope.type)) for e in events)
+        keys.clear()
         output = Agent(model=replayed_model).run_sync(f"summarise: {what}").output
-        return Consolidation(prose=output)
+        return Consolidation(prose=output, pins=tuple(keys))
 
     Projector(
         store,
@@ -151,6 +157,9 @@ def test_milestone_6_acceptance(tmp_path: Path):
     )
     assert len(drawn) == 2, "and reaches no model to do it"
     assert replay.divergence is None
+    assert [s.pins for s in chronicle.sections()] == pins_before, (
+        "the same keys, which is what makes the bit-exactness checkable rather than lucky"
+    )
 
     # -- rebuild against a cold ledger: same anchors, regenerated prose ---------------
     cold = PinLedger(store, types)
@@ -158,7 +167,9 @@ def test_milestone_6_acceptance(tmp_path: Path):
 
     def summarize_cold(events: Sequence[StoredEvent]) -> Consolidation:
         what = ", ".join(str(e.payload.get("what", e.envelope.type)) for e in events)
-        return Consolidation(prose=Agent(model=cold_model).run_sync(f"summarise: {what}").output)
+        keys.clear()
+        output = Agent(model=cold_model).run_sync(f"summarise: {what}").output
+        return Consolidation(prose=output, pins=tuple(keys))
 
     cold_fold = ChronicleFold(
         chronicle,

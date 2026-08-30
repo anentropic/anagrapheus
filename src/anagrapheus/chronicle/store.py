@@ -69,8 +69,16 @@ class ChronicleStore(Protocol):
         """
         Insert exported sections, skipping ids already present. Returns how many landed.
 
-        Idempotent so a carry can be resumed, and additive so two chronicles over the
-        same log can be merged without either winning.
+        **Resumable transfer of one chronicle, not a merge.** Idempotent, so a carry
+        interrupted half-way can simply be repeated. But section ids are derived from
+        the range they cover — which is what makes anchors replay — so two chronicles
+        over the same log collide on every id, and a collision keeps what is already
+        there and drops the incoming prose.
+
+        That is fine for the case this exists for: carrying *a* chronicle across a
+        backend swap. It is not a merge, and an earlier version of this docstring
+        claimed it was. Merging divergent consolidations would need identity that
+        distinguishes them, which nothing here provides — see note 05 §8.
         """
         ...
 
