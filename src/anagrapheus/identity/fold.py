@@ -23,6 +23,7 @@ from anagrapheus.timeline.registry import EventKey
 if TYPE_CHECKING:
     from anagrapheus.identity.store import IdentityStore
     from anagrapheus.timeline.envelope import StoredEvent
+    from anagrapheus.timeline.folds import FoldDeterminism
     from anagrapheus.timeline.registry import EventTypeRegistry
 
 __all__ = ["FOLD_NAME", "IdentityFold"]
@@ -50,6 +51,9 @@ class IdentityFold:
     def name(self) -> str:
         """The position key."""
         return self._name
+
+    #: Deterministic: a decode-and-index fold, with no draw anywhere in it.
+    fold: FoldDeterminism = "deterministic"
 
     def apply(self, event: StoredEvent, txn: object) -> None:
         """Fold one event, if the vocabulary recognises it as an identity decision."""

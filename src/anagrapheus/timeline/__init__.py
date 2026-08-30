@@ -15,7 +15,13 @@ from anagrapheus.timeline.errors import (
     UnknownEventType,
     UpcastGap,
 )
-from anagrapheus.timeline.folds import ProjectionFold, Projector
+from anagrapheus.timeline.folds import (
+    FoldDeterminism,
+    GenerativeFold,
+    GenerativeRebuild,
+    ProjectionFold,
+    Projector,
+)
 from anagrapheus.timeline.migrations import SchemaTooNew
 from anagrapheus.timeline.pins import (
     DiscardedPin,
@@ -60,6 +66,9 @@ __all__ = [
     "PinResolver",
     "PinScratchStore",
     "PinsAbandoned",
+    "FoldDeterminism",
+    "GenerativeFold",
+    "GenerativeRebuild",
     "ProjectionFold",
     "Projector",
     "ReplayDiverged",

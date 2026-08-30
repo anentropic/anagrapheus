@@ -27,7 +27,7 @@ anagrapheus.timeline    # the event log, folds, pins, replay  (doc 00 §3–§4)
 anagrapheus.identity    # later: entity shapes + registry fold (§5)
 anagrapheus.beliefs     # later: belief-id minting registry over doxastica (§6)
 anagrapheus.provider    # the pinned pydantic-ai adapter  (doc 00 §2, §4)
-anagrapheus.chronicle   # later, behind a decision gate (§10 Q3)
+anagrapheus.chronicle   # the anchoring discipline, as a generative projection (§7)
 ```
 
 Nothing in `timeline/` imports upward; later subpackages import it, never the
@@ -37,6 +37,10 @@ reverse.
 dependency like `beliefs`, and the layout comment said otherwise. Recorded rather than
 silently corrected, because "optional extra" was a packaging intention and dropping it
 is a decision, not a typo.*
+
+*Amended 2026-08-30 (M6). `chronicle` was "later, behind a decision gate (§10 Q3)". The
+gate is open: it ships as a projection helper. Q3 itself stays listed open upstream —
+R61's consequences defer the doc sweep to ratification, and R61 is PROPOSED.*
 
 ## 3. Python floor: >=3.14
 

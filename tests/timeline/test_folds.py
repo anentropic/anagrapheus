@@ -16,6 +16,8 @@ from anagrapheus.timeline.upcast import EventReader, UpcastRegistry
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from anagrapheus.timeline import FoldDeterminism
+
 
 class StepTaken(DomainEvent, frozen=True):
     n: int
@@ -31,6 +33,7 @@ class SqlSum:
     """A fold keeping its state in the store's own file: fully transactional."""
 
     name = "sql_sum"
+    fold: FoldDeterminism = "deterministic"
 
     def apply(self, event: StoredEvent, txn: object) -> None:
         assert isinstance(txn, sqlite3.Connection)
@@ -56,6 +59,7 @@ class MemoryLog:
         self.seen: list[int] = []
 
     name = "memory_log"
+    fold: FoldDeterminism = "deterministic"
 
     def apply(self, event: StoredEvent, txn: object) -> None:
         self.seen.append(event.seq)
