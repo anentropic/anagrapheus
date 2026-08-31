@@ -28,9 +28,9 @@ from examples.negotiation.table import Table
 from pydantic_ai.messages import ModelResponse, ToolCallPart
 from pydantic_ai.models.function import FunctionModel
 
-from anagrapheus.beliefs import BeliefIndex, BeliefIndexFold, SQLiteBeliefIndexStore, plan_rekeys
-from anagrapheus.identity import IdentityFold, merge
-from anagrapheus.timeline import PinLedger, Projector, ReplayPins
+from anagrapheus.beliefs import BeliefIndex, plan_rekeys
+from anagrapheus.identity import merge
+from anagrapheus.timeline import PinLedger, ReplayPins
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -41,13 +41,7 @@ if TYPE_CHECKING:
 
 def test_milestone_7_acceptance(tmp_path: Path):
     table = Table.open(tmp_path / "summit.db", "eu", "uk")
-    index = SQLiteBeliefIndexStore(table.store.connection)
-    table.index_store = index
-    table.projector = Projector(
-        table.store,
-        table.reader,
-        [IdentityFold(table.identity, table.types), BeliefIndexFold(index, table.types)],
-    )
+    index = table.index_store
 
     fisheries = table.table_clause("fisheries")
     # The UK is seated twice: the delegation and the government, not yet known to be one.
@@ -68,6 +62,28 @@ def test_milestone_7_acceptance(tmp_path: Path):
     assert [(d.held, d.reference) for d in table.taken_at_their_word("eu", "uk")] == [
         ("concede", "never")
     ], "and is right not to take them at their word"
+
+    # -- the delegations turn out to be one party -------------------------------------
+    # Before the round, deliberately: the brief looks a position up by its exact belief
+    # id, so until the delegation and the government are known to be one party there is
+    # no `position(uk, fisheries)` to find. Reconciling identity is a precondition for
+    # briefing an agent, not a tidy-up afterwards.
+    table.append(merge(table.types, kept=uk, absorbed=hmg))
+    table.projector.catch_up()
+    plans = plan_rekeys(table.identity.rekeys_since(0), BeliefIndex(index), table.predicates)
+    applied = apply_rekeys(table, plans, source_event=uuid.uuid7())
+    table.projector.catch_up()
+
+    assert len(plans) == 1, "one belief id"
+    assert [a.scope for a in applied] == [
+        held("uk"),
+        stated("uk"),
+        model_of("eu", "uk"),
+    ], "three scopes -- the plan cannot say where, so the application does"
+
+    # The queries still answer, which is what makes the cascade correct rather than
+    # merely complete: a partial re-key would report perfect agreement.
+    assert [(d.held, d.reference) for d in table.own_gap("uk")] == [("never", "concede")]
 
     # -- a round: the agent proposes from its model, not from what was said ------------
     calls: list[str] = []
@@ -98,23 +114,6 @@ def test_milestone_7_acceptance(tmp_path: Path):
     )
     record_offer(table, offer, party="eu", clause_id=fisheries, source=uuid.uuid7())
     ledger.commit()
-
-    # -- the delegations turn out to be one party -------------------------------------
-    table.append(merge(table.types, kept=uk, absorbed=hmg))
-    table.projector.catch_up()
-    plans = plan_rekeys(table.identity.rekeys_since(0), BeliefIndex(index), table.predicates)
-    applied = apply_rekeys(table, plans, source_event=uuid.uuid7())
-
-    assert len(plans) == 1, "one belief id"
-    assert [a.scope for a in applied] == [
-        held("uk"),
-        stated("uk"),
-        model_of("eu", "uk"),
-    ], "three scopes -- the plan cannot say where, so the application does"
-
-    # The queries still answer, which is what makes the cascade correct rather than
-    # merely complete: a partial re-key would report perfect agreement.
-    assert [(d.held, d.reference) for d in table.own_gap("uk")] == [("never", "concede")]
 
     # -- and the round replays with no model reached ----------------------------------
     events = list(table.store.read())

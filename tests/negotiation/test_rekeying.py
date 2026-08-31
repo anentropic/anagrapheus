@@ -156,3 +156,99 @@ def test_a_belief_minted_without_appending_is_invisible_to_the_plan(table: Table
     table.projector.catch_up()
 
     assert _plans(table) == [], "nothing was indexed, so nothing is planned"
+
+
+def test_two_merged_entities_in_one_belief_both_get_substituted(table: Table):
+    """
+    Two plans for one belief id, and both substitutions must land.
+
+    `plan_rekeys` emits a plan per identity decision, so one proposition naming two
+    re-keyed entities yields two plans sharing an old belief id.
+
+    Collapsing them into a dict keyed on that id keeps only the last, leaving the other
+    entity reference stale — a belief that looks re-keyed and is half-wrong. Each plan
+    is therefore diffed against the original and the substitutions applied together, so
+    the order they arrive in cannot matter.
+    """
+    # Both the party and the clause turn out to be duplicates.
+    old_clause = table.table_clause("fisheries")
+    new_clause = table.table_clause("Fisheries and Aquaculture")
+    kept, absorbed = table.seats["uk"], table.seat("HMG")
+    table.believe(held("uk"), "position", (absorbed, old_clause), "concede", uuid.uuid7())
+    table.projector.catch_up()
+
+    table.append(merge(table.types, kept=kept, absorbed=absorbed))
+    table.append(merge(table.types, kept=new_clause, absorbed=old_clause))
+    table.projector.catch_up()
+    plans = _plans(table)
+    assert len({p.belief_id for p in plans}) == 1, "two plans, one old belief id"
+
+    apply_rekeys(table, plans, source_event=uuid.uuid7())
+
+    from doxastica import BeliefFilter
+
+    surviving = {s.belief_id for s in table.core.query_scope(held("uk"), BeliefFilter())}
+    assert table.predicates.belief_id("position", kept, new_clause) in surviving, (
+        "both substitutions landed, not just the last plan's"
+    )
+
+
+def test_a_rekeyed_belief_can_itself_be_rekeyed_again(table: Table):
+    """
+    The successor must reach the entity index, or the *next* merge plans nothing.
+
+    Writing the survivor straight to `MemoryCore` holds the belief but emits no
+    `BeliefMinted`, so the index still knows only the old id. Everything reads correctly
+    until a second identity decision, which then finds nothing to plan and leaves the
+    belief keyed on an entity that no longer names anything — the same quiet failure
+    `Table.believe` exists to prevent, reached through the re-key path instead.
+    """
+    fisheries = table.table_clause("fisheries")
+    first, second, third = table.seats["uk"], table.seat("HMG"), table.seat("UKDel")
+    table.believe(held("uk"), "position", (third, fisheries), "concede", uuid.uuid7())
+    table.projector.catch_up()
+
+    # third -> second, applied; then second -> first, which can only be planned if the
+    # first re-key's successor was recorded.
+    table.append(merge(table.types, kept=second, absorbed=third))
+    table.projector.catch_up()
+    assert apply_rekeys(table, _plans(table), source_event=uuid.uuid7())
+    table.projector.catch_up()
+
+    table.append(merge(table.types, kept=first, absorbed=second))
+    table.projector.catch_up()
+    later = [p for p in _plans(table) if p.from_entity == second]
+
+    assert later, "the successor was indexed, so the second merge can plan for it"
+    assert apply_rekeys(table, later, source_event=uuid.uuid7())
+
+    from doxastica import BeliefFilter
+
+    surviving = {s.belief_id for s in table.core.query_scope(held("uk"), BeliefFilter())}
+    assert table.predicates.belief_id("position", first, fisheries) in surviving
+
+
+def test_a_rekey_carries_the_original_stance(table: Table):
+    """
+    A re-key moves a belief; it must not quietly restate it more confidently.
+
+    `MemoryCore.revise` defaults the stance, so writing the survivor without passing
+    the original silently promotes a hedged belief to a certain one — a change in what
+    the holder claims, made by machinery that was only supposed to change its key.
+    """
+    from doxastica import BeliefFilter, Stance
+
+    fisheries = table.table_clause("fisheries")
+    kept, absorbed = table.seats["uk"], table.seat("HMG")
+    written = table.writer(held("uk")).revise(
+        "position", (absorbed, fisheries), "concede", uuid.uuid7(), Stance.suspected
+    )
+    table.append(written.minted)
+    table.projector.catch_up()
+    table.append(merge(table.types, kept=kept, absorbed=absorbed))
+    table.projector.catch_up()
+
+    apply_rekeys(table, _plans(table), source_event=uuid.uuid7())
+
+    moved = next(iter(table.core.query_scope(held("uk"), BeliefFilter())))
+    assert moved.stance is Stance.suspected, "the hedge survived the re-key"

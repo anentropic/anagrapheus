@@ -47,18 +47,35 @@ def brief_for(table: Table, holder: str, other: str, clause: str) -> str:
     Three lines from three scopes, and the difference between them is the whole brief:
     what we want, what they said, and what we think they actually want. A brief built
     from one scope would read identically whether or not we had any model of them.
+
+    Each line is looked up by its **exact belief id**. Taking the first belief in the
+    scope instead reads correctly while a scope holds one thing and starts answering
+    with an unrelated clause -- or with a `red_line` rather than a `position` -- the
+    moment it holds two. The agent would then negotiate confidently about the wrong
+    proposition, which is the kind of wrong that never raises.
     """
     from doxastica import BeliefFilter
 
-    def one(scope: str) -> str:
-        states = list(table.core.query_scope(scope, BeliefFilter()))
-        return str(states[0].value) if states else "unknown"
+    clause_id = table.clauses[clause]
+
+    def position_of(scope: str, party: str) -> str:
+        wanted = table.predicates.belief_id("position", table.seats[party], clause_id)
+        found = next(
+            (
+                state
+                for state in table.core.query_scope(scope, BeliefFilter())
+                if state.belief_id == wanted
+            ),
+            None,
+        )
+        return str(found.value) if found is not None else "unknown"
 
     return (
         f"Clause: {clause}\n"
-        f"Our position: {one(held(holder))}\n"
-        f"Their stated position: {one(stated(other))}\n"
-        f"What we believe they actually want: {one(model_of(holder, other))}"
+        f"Our position: {position_of(held(holder), holder)}\n"
+        f"Their stated position: {position_of(stated(other), other)}\n"
+        f"What we believe they actually want: "
+        f"{position_of(model_of(holder, other), other)}"
     )
 
 

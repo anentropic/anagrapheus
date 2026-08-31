@@ -15,7 +15,13 @@ from examples.negotiation import domain
 from examples.negotiation.scopes import held, model_of, stated
 
 from anagrapheus import register_builtin_events
-from anagrapheus.beliefs import BeliefWriter, Disagreement, SQLiteBeliefIndexStore, divergence
+from anagrapheus.beliefs import (
+    BeliefIndexFold,
+    BeliefWriter,
+    Disagreement,
+    SQLiteBeliefIndexStore,
+    divergence,
+)
 from anagrapheus.identity import IdentityFold, SQLiteIdentityStore, establish
 from anagrapheus.timeline import (
     EventReader,
@@ -46,7 +52,7 @@ class Table:
     predicates: PredicateRegistry
     identity: SQLiteIdentityStore
     projector: Projector
-    index_store: SQLiteBeliefIndexStore | None = None
+    index_store: SQLiteBeliefIndexStore
     #: Party name -> entity id. Parties are **identity-layer entities**, not strings:
     #: a belief names entities by id, so a party that can be merged must have one.
     #: Discovered by trying it the other way -- see note 06.
@@ -61,6 +67,7 @@ class Table:
         domain.register(types)
         store = SQLiteEventStore(path)
         identity = SQLiteIdentityStore(store.connection)
+        index = SQLiteBeliefIndexStore(store.connection)
         reader = EventReader(store, UpcastRegistry(), types)
         table = cls(
             store=store,
@@ -69,7 +76,16 @@ class Table:
             core=MemoryCore(InMemoryBackend()),
             predicates=domain.predicates(),
             identity=identity,
-            projector=Projector(store, reader, [IdentityFold(identity, types)]),
+            index_store=index,
+            # Both folds, because a table without the belief index is one where
+            # `plan_rekeys` silently returns nothing: it reads what was minted from
+            # that index, so a merge would appear to succeed having moved nothing.
+            # Leaving it to the caller meant every entry point re-assembled this.
+            projector=Projector(
+                store,
+                reader,
+                [IdentityFold(identity, types), BeliefIndexFold(index, types)],
+            ),
         )
         for name in parties:
             table.seat(name)

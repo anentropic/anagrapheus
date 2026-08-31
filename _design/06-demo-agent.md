@@ -146,6 +146,54 @@ underlying tool over explicit paths (`uv run ruff check examples/ tests/ src/`) 
 change adds directories. The second is the one that would have caught this, because it
 names the paths rather than trusting a flag to find them.
 
+## 5b. What review round 1 changed
+
+Six findings, all real. **The first invalidated this milestone's headline claim.**
+
+**Tier 3 could never have reached a provider.** `tests/conftest.py` sets
+`ALLOW_MODEL_REQUESTS = False` at import, session-wide, so a stray call in tiers 0–2
+fails rather than silently billing anyone. That guard is right — and it silently
+disarmed the one test written to defeat it. Proven rather than reasoned: with a dummy
+key the call raised `RuntimeError: Model requests are not allowed`, never reaching
+Anthropic. After lifting the guard for that test alone, the same dummy key produces a
+`401` from the provider, which is what proves the request now leaves the process.
+
+The shape of this failure is the one tier 3 exists to prevent, arriving through tier 3
+itself: a claim that the stack works against a real provider, with nothing having
+checked. It would have been invisible — green in CI (skipped, no key) and confusingly
+red anywhere a key existed.
+
+**A green tier 3 run did not mean the smoke test ran.** The test skips without a key,
+so a dispatch with a missing or unavailable secret exited successfully having called
+nothing. The workflow now fails explicitly when the key is absent, because a gate that
+passes by doing nothing is worse than no gate — it is believed.
+
+**And the re-key loop fell into the trap §4 documents.** It wrote survivors straight to
+`MemoryCore`, which drops the stance to its default *and* emits no `BeliefMinted`, so
+the successor never reached the entity index and a second merge could plan nothing for
+it. The note warning about exactly this was written two sections above the code that
+did it. Now applied through the recorded minting path, carrying the original stance,
+with tests for both halves — a re-key of a re-key, and a hedged belief that must not
+come back certain.
+
+Three more, each a real defect:
+
+- **Plans were collapsed by belief id.** `plan_rekeys` emits a plan per identity
+  decision, so a proposition naming two independently re-keyed entities yields two
+  plans sharing an old id, and a dict kept only the last — a belief that looks re-keyed
+  and is half wrong. Each plan is now diffed against the original and the substitutions
+  applied together, so arrival order cannot matter.
+- **The brief read the first belief in a scope**, ignoring both the clause and the
+  entity ids. Correct while a scope held one thing; the moment it held two, the agent
+  would negotiate confidently about the wrong proposition. Fixing it immediately
+  exposed a modelling error in the acceptance test — beliefs minted under the
+  delegation while the brief asked about the party — which the loose lookup had been
+  hiding. The story now reconciles identity *before* the round, which is truer anyway:
+  you cannot brief an agent about a party whose identity is unsettled.
+- **`Table.open` installed only the identity fold**, so every entry point re-assembled
+  the projector to add the belief index. That duplication was the smell; both tests now
+  patch nothing.
+
 ## 6. Open questions
 
 - **Does the re-key loop belong in the library?** §3 above states the case both ways

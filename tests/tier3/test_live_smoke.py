@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from pydantic_ai import Agent
+from pydantic_ai.models import override_allow_model_requests
 from pydantic_ai.models.anthropic import AnthropicModel
 
 from anagrapheus import register_builtin_events
@@ -39,6 +40,7 @@ from anagrapheus.timeline import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from pathlib import Path
 
 pytestmark = [
@@ -57,7 +59,24 @@ pytestmark = [
 MODEL = "claude-opus-5"
 
 
-def test_a_real_call_is_pinned_and_replays_offline(tmp_path: Path):
+@pytest.fixture
+def live_calls_allowed() -> Iterator[None]:
+    """
+    Lift the suite-wide no-live-model guard, for this test only.
+
+    `tests/conftest.py` sets `ALLOW_MODEL_REQUESTS = False` at import so a stray call
+    in tiers 0-2 fails rather than silently billing anyone. That guard is right, and it
+    also silently disarmed this test: without lifting it the call is rejected before
+    Anthropic is reached, so the release gate exercised nothing and said so to nobody.
+
+    Scoped rather than flipped globally, and restored on the way out, so a tier-3 run in
+    the same session cannot leave the guard down for anything that follows it.
+    """
+    with override_allow_model_requests(allow_model_requests=True):
+        yield
+
+
+def test_a_real_call_is_pinned_and_replays_offline(tmp_path: Path, live_calls_allowed: None):
     """
     One live call through `PinnedModel`, then the same run from the log with no provider.
 

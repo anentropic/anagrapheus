@@ -7,10 +7,6 @@ from typing import TYPE_CHECKING
 import pytest
 from examples.negotiation.table import Table
 
-from anagrapheus.beliefs import BeliefIndexFold, SQLiteBeliefIndexStore
-from anagrapheus.identity import IdentityFold
-from anagrapheus.timeline import Projector
-
 if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
@@ -19,20 +15,13 @@ if TYPE_CHECKING:
 @pytest.fixture
 def table(tmp_path: Path) -> Iterator[Table]:
     """
-    A table with two parties, and **both** folds running.
+    A table with two parties, wired as `Table.open` wires it.
 
-    The belief index fold is not optional here: `plan_rekeys` reads what was minted
-    from that index, so a table without it reports no plans and a merge silently
-    misses every belief.
+    Nothing is patched here. It used to be: both folds had to be re-assembled by every
+    entry point because `Table.open` installed only the identity fold, which is exactly
+    the smell that says a composition root is incomplete.
     """
     seated = Table.open(tmp_path / "negotiation.db", "eu", "uk")
-    index = SQLiteBeliefIndexStore(seated.store.connection)
-    seated.index_store = index
-    seated.projector = Projector(
-        seated.store,
-        seated.reader,
-        [IdentityFold(seated.identity, seated.types), BeliefIndexFold(index, seated.types)],
-    )
     try:
         yield seated
     finally:

@@ -36,8 +36,22 @@ jobs:
       - name: Sync dependencies
         run: uv sync --locked --dev
 
+      # The test skips without a key, so without this check a dispatch with a missing
+      # or unavailable secret would exit green having called nothing -- a gate that
+      # passes by doing nothing is worse than no gate, because it is believed.
+      - name: Require the key
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "::error::ANTHROPIC_API_KEY is not set; tier 3 would skip and report success."
+            exit 1
+          fi
+
       # `-m tier3` opts in: the default addopts exclude the marker, so this is the
       # only place the suite reaches a provider. One call, roughly $0.0075.
+      # With the key guaranteed present by the step above, the test's skipif cannot
+      # fire -- so a green run here means the call was made, not merely not attempted.
       - name: Live smoke test
         run: uv run pytest -m tier3
         env:
