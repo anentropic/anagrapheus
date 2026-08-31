@@ -18,8 +18,15 @@ dependencies = [
 requires = ["uv_build>=0.9.18,<1.0.0"]
 build-backend = "uv_build"
 
+[project.optional-dependencies]
+# Only tier 3 -- the live smoke test -- needs a real provider. Kept out of the base
+# install so the library stays provider-agnostic: pydantic-ai is the seam, and which
+# provider sits behind it is the consumer's choice.
+anthropic = ["pydantic-ai-slim[anthropic]>=1.0"]
+
 [dependency-groups]
 dev = [
+    "anagrapheus[anthropic]",
     "basedpyright>=1.38.0",
     "ipython>=9.10.0",
     "pdbpp>=0.12.0.post1",
@@ -73,4 +80,9 @@ ignore = [
 ]
 
 [tool.pytest.ini_options]
-addopts = "-v"
+addopts = "-v -m 'not tier3'"
+markers = [
+    # Tier 3 costs money and needs a key, so it is excluded by default rather than
+    # skipped noisily on every local run. `-m tier3` opts in.
+    "tier3: reaches a real provider; needs ANTHROPIC_API_KEY",
+]

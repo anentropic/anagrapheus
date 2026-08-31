@@ -1,0 +1,58 @@
+# Tier 3 -- the live smoke test. Note 00 §3's fourth tier, and §8's question answered:
+# it gates a release.
+#
+# Deliberately NOT on pull requests. Note 00 §5 records that repository secrets are
+# unavailable to workflows triggered by PRs from forks, so a PR trigger would fail
+# every outside contribution -- which is why free hosted inference was rejected as a
+# CI strategy in the first place.
+name: Tier 3
+
+on:
+  workflow_call:
+    secrets:
+      ANTHROPIC_API_KEY:
+        required: true
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Live smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+          python-version: "3.14"
+
+      - name: Sync dependencies
+        run: uv sync --locked --dev
+
+      # The test skips without a key, so without this check a dispatch with a missing
+      # or unavailable secret would exit green having called nothing -- a gate that
+      # passes by doing nothing is worse than no gate, because it is believed.
+      - name: Require the key
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "::error::ANTHROPIC_API_KEY is not set; tier 3 would skip and report success."
+            exit 1
+          fi
+
+      # `-m tier3` opts in: the default addopts exclude the marker, so this is the
+      # only place the suite reaches a provider. One call, roughly $0.0075.
+      # With the key guaranteed present by the step above, the test's skipif cannot
+      # fire -- so a green run here means the call was made, not merely not attempted.
+      - name: Live smoke test
+        run: uv run pytest -m tier3
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

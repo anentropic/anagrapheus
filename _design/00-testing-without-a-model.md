@@ -7,14 +7,20 @@ why the answer is mostly "it doesn't".
 
 ## 0. Status
 
-**Proposed when written; tiers 0–2 now exist.** The suite this note planned was
-built over milestones 1–4, and the plan survived contact: folds are tested without a
-model, the provider seam is tested with `FunctionModel`, and generation-replay is
-tested from recorded pins. It mints no rulings and binds nothing.
+**Proposed when written; all four tiers now exist.** The suite this note planned was
+built over milestones 1–7, and the plan survived contact: folds are tested without a
+model, the provider seam is tested with `FunctionModel`, generation-replay is tested
+from recorded pins, and one live call gates a release. It mints no rulings and binds
+nothing.
 
 *Amended 2026-08-29 (M4).* Two things the note asked for are now answered rather than
-proposed — see [§8](#8-open-questions). What has **not** been built is tier 3: no live
-smoke test exists.
+proposed — see [§8](#8-open-questions).
+
+*Amended 2026-08-31 (M7).* **Tier 3 exists**, six milestones after the other three, and
+it gates a release. The delay is worth recording rather than tidying away: tiers 0–2
+grew to nearly three hundred tests on synthetic response shapes alone, so until now
+nothing in this repository had ever confirmed the stack works against a real provider.
+See [note 06 §5](06-demo-agent.md).
 
 Facts with a shelf life are dated in [§7](#7-sources). Model prices and third-party
 free tiers move; the reasoning does not depend on their exact values, only on their
@@ -225,6 +231,8 @@ above should stand for a reader who does not follow them.
   point of preferring pins to a mock library in the first place. Tests do not get a
   looser policy; they get the one the application ships.
   See [note 04 §3](04-provider-layer.md).
-- **Does tier 3 gate a release?** A nightly that nobody reads is not a smoke test.
-  Still open, and now overdue: tiers 0–2 are built and tier 3 is not, so the question
-  has stopped being hypothetical.
+- ~~**Does tier 3 gate a release?**~~ **Answered in M7: it does.** `release.yml`'s
+  `publish` job needs it, so a broken provider seam stands between the tag and PyPI
+  rather than sitting in a notification nobody reads. It runs on `workflow_dispatch`
+  and on a release tag, never on a pull request — §5's fork-secrets constraint again.
+  See [note 06 §5](06-demo-agent.md).
