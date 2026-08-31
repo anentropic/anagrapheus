@@ -5,11 +5,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
+from examples.negotiation.table import Table
 
 from anagrapheus.beliefs import BeliefIndexFold, SQLiteBeliefIndexStore
 from anagrapheus.identity import IdentityFold
 from anagrapheus.timeline import Projector
-from examples.negotiation.table import Table
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

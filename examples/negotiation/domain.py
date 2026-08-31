@@ -86,7 +86,8 @@ PREDICATES = (
 
 
 def predicates() -> PredicateRegistry:
-    """The registry every scope in this example mints through.
+    """
+    The registry every scope in this example mints through.
 
     §6c's divergence query works *only* if both scopes minted their ids through the
     same registry, which is the argument for there being exactly one of these.

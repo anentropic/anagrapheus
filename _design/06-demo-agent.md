@@ -127,6 +127,25 @@ model would buy nothing and would test something a consumer is less likely to be
 Skipped rather than failed without a key, so a contributor never meets a red test they
 cannot fix.
 
+## 5a. A gate that silently skipped the new code — [ours]
+
+Worth recording because it is not a Python problem and will recur on any repository
+using pre-commit-style hooks.
+
+`prek run --all-files` means **all files git knows about**, not all files on disk. The
+whole of `examples/` and `tests/negotiation/` was still untracked when the gates were
+run, so ruff checked none of it, reported ten green hooks, and the eighteen violations
+surfaced only once CI ran over the committed tree.
+
+The failure mode is specific and nasty: the gate does not warn that it skipped anything.
+It reports success over a smaller set than the reader assumes, and the assumption is
+exactly the one the flag's name invites.
+
+**The habit that avoids it**: stage new files before running the gates, or run the
+underlying tool over explicit paths (`uv run ruff check examples/ tests/ src/`) when the
+change adds directories. The second is the one that would have caught this, because it
+names the paths rather than trusting a flag to find them.
+
 ## 6. Open questions
 
 - **Does the re-key loop belong in the library?** §3 above states the case both ways

@@ -1,5 +1,5 @@
 """
-Tier 3: does this still work against an actual provider?
+Tier 3: does this still work against an actual provider.
 
 Note 00 §3 planned four tiers and this is the one that never got built — six milestones
 running, while tiers 0–2 grew to nearly three hundred tests. §8 asked whether it gates

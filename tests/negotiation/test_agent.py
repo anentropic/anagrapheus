@@ -5,18 +5,17 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING
 
+from examples.negotiation.agent import Negotiator, brief_for
+from examples.negotiation.scopes import held, model_of, stated
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.models.function import FunctionModel
 
 from anagrapheus.timeline import PinLedger
-from examples.negotiation.agent import Negotiator, brief_for
-from examples.negotiation.scopes import held, model_of, stated
 
 if TYPE_CHECKING:
+    from examples.negotiation.table import Table
     from pydantic_ai.messages import ModelMessage
     from pydantic_ai.models.function import AgentInfo
-
-    from examples.negotiation.table import Table
 
 
 def _set_up(table: Table, *, believed: str) -> uuid.UUID:
@@ -49,8 +48,9 @@ def test_the_brief_carries_all_three_scopes(table: Table):
 
 def test_the_offer_changes_when_only_the_model_of_scope_changes(table: Table):
     """
-    **The milestone's behavioural claim.** Everything held fixed but our belief about
-    them, and the agent proposes differently.
+    The milestone's behavioural claim, as one comparison.
+
+    Everything held fixed but our belief about them, and the agent proposes differently.
 
     The model here is deterministic and reads the brief, so what varies is the input,
     not the sampling. A single-holder design has nowhere to make this change: it would
@@ -130,9 +130,7 @@ def test_text_output_is_not_what_the_agent_returns(table: Table):
         return ModelResponse(parts=[TextPart("I think we should concede, probably")])
 
     _set_up(table, believed="concede")
-    negotiator = Negotiator(
-        FunctionModel(prose), PinLedger(table.store, table.types), party="eu"
-    )
+    negotiator = Negotiator(FunctionModel(prose), PinLedger(table.store, table.types), party="eu")
 
     import pytest
     from pydantic_ai import UnexpectedModelBehavior

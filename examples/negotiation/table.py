@@ -11,10 +11,11 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from doxastica import InMemoryBackend, MemoryCore
+from examples.negotiation import domain
+from examples.negotiation.scopes import held, model_of, stated
 
 from anagrapheus import register_builtin_events
-from anagrapheus.beliefs import BeliefWriter, Disagreement, divergence
-from anagrapheus.beliefs import SQLiteBeliefIndexStore
+from anagrapheus.beliefs import BeliefWriter, Disagreement, SQLiteBeliefIndexStore, divergence
 from anagrapheus.identity import IdentityFold, SQLiteIdentityStore, establish
 from anagrapheus.timeline import (
     EventReader,
@@ -23,9 +24,6 @@ from anagrapheus.timeline import (
     SQLiteEventStore,
     UpcastRegistry,
 )
-
-from examples.negotiation import domain
-from examples.negotiation.scopes import held, model_of, stated
 
 if TYPE_CHECKING:
     from pathlib import Path

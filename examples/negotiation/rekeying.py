@@ -33,8 +33,9 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Sequence
     from uuid import UUID
 
-    from anagrapheus.beliefs import BeliefRekey
     from examples.negotiation.table import Table
+
+    from anagrapheus.beliefs import BeliefRekey
 
 __all__ = ["Applied", "apply_rekeys"]
 

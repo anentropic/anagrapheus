@@ -15,19 +15,19 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from examples.negotiation.scopes import held, model_of, stated
 from pydantic import BaseModel
 from pydantic_ai import Agent
 
 from anagrapheus.provider import PinnedModel
-from examples.negotiation.scopes import held, model_of, stated
 
 if TYPE_CHECKING:
     from uuid import UUID
 
+    from examples.negotiation.table import Table
     from pydantic_ai.models import Model
 
     from anagrapheus.timeline.pins import PinResolver
-    from examples.negotiation.table import Table
 
 __all__ = ["Offer", "Negotiator", "brief_for"]
 

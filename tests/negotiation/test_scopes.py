@@ -61,13 +61,15 @@ def test_the_own_gap_query_is_one_only_that_party_can_run(table: Table):
 
     assert table.own_gap("uk"), "the party itself sees the gap"
     # The EU's two available queries both compare against something the EU holds.
-    assert all(
-        d.held == "hold_firm" for d in table.misreading("eu", "uk")
-    ), "the EU can only ever measure from its own model outward"
+    assert all(d.held == "hold_firm" for d in table.misreading("eu", "uk")), (
+        "the EU can only ever measure from its own model outward"
+    )
 
 
 def test_a_belief_id_is_shared_across_scopes_deliberately(table: Table):
     """
+    One proposition, one belief id, however many holders.
+
     §6a: revision history keys on the belief id alone and is cross-scope, and *"for
     divergence queries that collision is the point."*
 

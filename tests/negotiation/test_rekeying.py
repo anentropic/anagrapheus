@@ -12,11 +12,11 @@ import uuid
 from typing import TYPE_CHECKING
 
 import pytest
+from examples.negotiation.rekeying import apply_rekeys
+from examples.negotiation.scopes import held, model_of, stated
 
 from anagrapheus.beliefs import BeliefIndex, plan_rekeys
 from anagrapheus.identity import merge, split
-from examples.negotiation.rekeying import apply_rekeys
-from examples.negotiation.scopes import held, model_of, stated
 
 if TYPE_CHECKING:
     from examples.negotiation.table import Table
@@ -24,12 +24,14 @@ if TYPE_CHECKING:
 
 def _plans(table: Table):
     assert table.index_store is not None
-    return plan_rekeys(table.identity.rekeys_since(0), BeliefIndex(table.index_store), table.predicates)
+    return plan_rekeys(
+        table.identity.rekeys_since(0), BeliefIndex(table.index_store), table.predicates
+    )
 
 
 def test_one_plan_cascades_into_every_scope_that_held_it(table: Table):
     """
-    The shape of the gap, asserted as numbers: **one plan, three scopes.**
+    The shape of the gap, asserted as numbers: one plan, three scopes.
 
     `plan_rekeys` works from the entity→belief index, which records what was minted and
     is scope-free by construction. So a plan can say "belief id X becomes Y" and cannot
@@ -103,9 +105,7 @@ def test_a_split_leaves_the_choice_to_the_application(table: Table):
     table.projector.catch_up()
 
     norway, denmark = uuid.uuid7(), uuid.uuid7()
-    table.append(
-        split(table.types, bloc, [(norway, ["Norway"]), (denmark, ["Denmark"])])
-    )
+    table.append(split(table.types, bloc, [(norway, ["Norway"]), (denmark, ["Denmark"])]))
     table.projector.catch_up()
     plans = _plans(table)
     assert plans and len(plans[0].candidates) == 2

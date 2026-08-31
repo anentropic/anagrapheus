@@ -21,16 +21,16 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING
 
+from examples.negotiation.agent import Negotiator, record_offer
+from examples.negotiation.rekeying import apply_rekeys
+from examples.negotiation.scopes import held, model_of, stated
+from examples.negotiation.table import Table
 from pydantic_ai.messages import ModelResponse, ToolCallPart
 from pydantic_ai.models.function import FunctionModel
 
 from anagrapheus.beliefs import BeliefIndex, BeliefIndexFold, SQLiteBeliefIndexStore, plan_rekeys
 from anagrapheus.identity import IdentityFold, merge
 from anagrapheus.timeline import PinLedger, Projector, ReplayPins
-from examples.negotiation.agent import Negotiator, record_offer
-from examples.negotiation.rekeying import apply_rekeys
-from examples.negotiation.scopes import held, model_of, stated
-from examples.negotiation.table import Table
 
 if TYPE_CHECKING:
     from pathlib import Path
