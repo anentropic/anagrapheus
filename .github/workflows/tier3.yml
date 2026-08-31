@@ -1,0 +1,44 @@
+# Tier 3 -- the live smoke test. Note 00 §3's fourth tier, and §8's question answered:
+# it gates a release.
+#
+# Deliberately NOT on pull requests. Note 00 §5 records that repository secrets are
+# unavailable to workflows triggered by PRs from forks, so a PR trigger would fail
+# every outside contribution -- which is why free hosted inference was rejected as a
+# CI strategy in the first place.
+name: Tier 3
+
+on:
+  workflow_call:
+    secrets:
+      ANTHROPIC_API_KEY:
+        required: true
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Live smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+          python-version: "3.14"
+
+      - name: Sync dependencies
+        run: uv sync --locked --dev
+
+      # `-m tier3` opts in: the default addopts exclude the marker, so this is the
+      # only place the suite reaches a provider. One call, roughly $0.0075.
+      - name: Live smoke test
+        run: uv run pytest -m tier3
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

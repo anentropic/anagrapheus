@@ -14,6 +14,14 @@ jobs:
   quality:
     uses: ./.github/workflows/quality.yml
 
+  # Note 00 §8 asked whether tier 3 gates a release and answered its own objection --
+  # "a nightly that nobody reads is not a smoke test". It gates: `publish` needs it,
+  # so a broken provider seam stands between the tag and PyPI rather than sitting in
+  # a notification somebody has to remember to read.
+  tier3:
+    uses: ./.github/workflows/tier3.yml
+    secrets: inherit
+
   build:
     name: Build distributions
     runs-on: ubuntu-latest
@@ -106,7 +114,7 @@ jobs:
 
   publish:
     name: Publish to PyPI
-    needs: [quality, validate, changelog]
+    needs: [quality, tier3, validate, changelog]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     environment:
