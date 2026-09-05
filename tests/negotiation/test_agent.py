@@ -1,12 +1,19 @@
-"""The agent reads a model-of scope, and its offer moves when that model moves."""
+"""
+The agent reads a *derived* model of its counterpart, and its offer moves with it.
+
+Since M8 there is no `model-of` scope to read. R28 forbids storing one, so the third
+line of the brief is reconstructed from access-beliefs at assembly time and discarded
+with the brief. What the agent does is unchanged; where the belief comes from is not.
+"""
 
 from __future__ import annotations
 
 import uuid
 from typing import TYPE_CHECKING
 
+from examples.negotiation import domain
 from examples.negotiation.agent import Negotiator, brief_for
-from examples.negotiation.scopes import held, model_of, stated
+from examples.negotiation.scopes import held, stated
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.models.function import FunctionModel
 
@@ -19,34 +26,63 @@ if TYPE_CHECKING:
 
 
 def _set_up(table: Table, *, believed: str) -> uuid.UUID:
-    """The UK says `never`; the EU believes `believed`; the EU wants to settle."""
+    """
+    The UK says `never`; the EU comes to believe `believed`; the EU wants to settle.
+
+    The third of those is no longer a row the test writes. It is a remark the EU
+    overheard plus the EU's belief that the UK let it slip — and the model falls out of
+    those, freshly, every time it is asked for.
+    """
     fisheries = table.table_clause("fisheries")
     uk, eu = table.seats["uk"], table.seats["eu"]
     source = uuid.uuid7()
     table.believe(held("eu"), "position", (eu, fisheries), "settle", source)
     table.believe(stated("uk"), "position", (uk, fisheries), "never", source)
-    table.believe(model_of("eu", "uk"), "position", (uk, fisheries), believed, source)
+    _leak(table, clause=fisheries, suggests=believed)
+    table.projector.catch_up()
     return fisheries
 
 
-def test_the_brief_carries_all_three_scopes(table: Table):
+def _leak(table: Table, *, clause: uuid.UUID, suggests: str) -> uuid.UUID:
+    """A remark by the UK that the EU hears, and believes the UK knows it made."""
+    remark = table.types.pending(
+        domain.SideRemarkOverheard(
+            speaker="uk", overheard_by="eu", clause_id=clause, suggests=suggests
+        )
+    )
+    table.append(remark)
+    table.believe(
+        held("eu"),
+        "witnessed",
+        (table.seats["uk"], remark.envelope.event_id),
+        True,
+        uuid.uuid7(),
+    )
+    return remark.envelope.event_id
+
+
+def test_the_brief_carries_all_three_sources(table: Table):
     """
-    A brief built from one scope would read identically with or without a model.
+    A brief built from one source would read identically with or without a model.
 
     Asserting the three lines separately because that is what makes the next test
-    meaningful: if the model-of line were missing, the agent could not act on it and
+    meaningful: if the modelled line were missing, the agent could not act on it and
     the behavioural test would pass for the wrong reason.
+
+    Two lines come from stored scopes and one is derived per call. The brief cannot
+    tell them apart, which is the point — R28 changes where the belief lives, not what
+    an agent can be told.
     """
     _set_up(table, believed="concede")
 
-    brief = brief_for(table, "eu", "uk", "fisheries")
+    brief = brief_for(table.view("eu"), "uk", "fisheries")
 
     assert "Our position: settle" in brief
     assert "Their stated position: never" in brief
     assert "What we believe they actually want: concede" in brief
 
 
-def test_the_offer_changes_when_only_the_model_of_scope_changes(table: Table):
+def test_the_offer_changes_when_only_the_derived_model_changes(table: Table):
     """
     The milestone's behavioural claim, as one comparison.
 
@@ -75,17 +111,18 @@ def test_the_offer_changes_when_only_the_model_of_scope_changes(table: Table):
             ]
         )
 
-    _set_up(table, believed="concede")
+    fisheries = _set_up(table, believed="concede")
     hopeful = Negotiator(
-        FunctionModel(read_the_brief), PinLedger(table.store, table.types), party="eu"
-    ).propose(table, "uk", "fisheries")
+        FunctionModel(read_the_brief), PinLedger(table.store, table.types), view=table.view("eu")
+    ).propose("uk", "fisheries")
 
-    # Same table, same stated position, one belief revised.
-    uk, fisheries = table.seats["uk"], table.clauses["fisheries"]
-    table.believe(model_of("eu", "uk"), "position", (uk, fisheries), "hold_firm", uuid.uuid7())
+    # Same table, same stated position. A later remark the EU also believes the UK made
+    # supersedes the first in the fold -- no row is edited, because there is no row.
+    _leak(table, clause=fisheries, suggests="hold_firm")
+    table.projector.catch_up()
     wary = Negotiator(
-        FunctionModel(read_the_brief), PinLedger(table.store, table.types), party="eu"
-    ).propose(table, "uk", "fisheries")
+        FunctionModel(read_the_brief), PinLedger(table.store, table.types), view=table.view("eu")
+    ).propose("uk", "fisheries")
 
     assert hopeful.concede is True
     assert wary.concede is False
@@ -113,11 +150,15 @@ def test_a_round_replays_without_reaching_the_model(table: Table):
 
     _set_up(table, believed="concede")
     ledger = PinLedger(table.store, table.types)
-    live = Negotiator(FunctionModel(reply), ledger, party="eu").propose(table, "uk", "fisheries")
+    live = Negotiator(FunctionModel(reply), ledger, view=table.view("eu")).propose(
+        "uk", "fisheries"
+    )
     ledger.commit()
 
     replay = ReplayPins.from_events(list(table.store.read()), table.types, on_miss="strict")
-    again = Negotiator(FunctionModel(reply), replay, party="eu").propose(table, "uk", "fisheries")
+    again = Negotiator(FunctionModel(reply), replay, view=table.view("eu")).propose(
+        "uk", "fisheries"
+    )
 
     assert again == live
     assert len(calls) == 1, "the replayed round reached no model"
@@ -130,10 +171,12 @@ def test_text_output_is_not_what_the_agent_returns(table: Table):
         return ModelResponse(parts=[TextPart("I think we should concede, probably")])
 
     _set_up(table, believed="concede")
-    negotiator = Negotiator(FunctionModel(prose), PinLedger(table.store, table.types), party="eu")
+    negotiator = Negotiator(
+        FunctionModel(prose), PinLedger(table.store, table.types), view=table.view("eu")
+    )
 
     import pytest
     from pydantic_ai import UnexpectedModelBehavior
 
     with pytest.raises(UnexpectedModelBehavior):
-        negotiator.propose(table, "uk", "fisheries")
+        negotiator.propose("uk", "fisheries")

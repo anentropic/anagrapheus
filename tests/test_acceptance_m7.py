@@ -21,9 +21,10 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING
 
+from examples.negotiation import domain
 from examples.negotiation.agent import Negotiator, record_offer
 from examples.negotiation.rekeying import apply_rekeys
-from examples.negotiation.scopes import held, model_of, stated
+from examples.negotiation.scopes import held, stated
 from examples.negotiation.table import Table
 from pydantic_ai.messages import ModelResponse, ToolCallPart
 from pydantic_ai.models.function import FunctionModel
@@ -53,15 +54,18 @@ def test_milestone_7_acceptance(tmp_path: Path):
     table.believe(held("eu"), "position", (eu, fisheries), "settle", source)
     table.believe(held("uk"), "position", (hmg, fisheries), "concede", source)
     table.believe(stated("uk"), "position", (hmg, fisheries), "never", source)
-    table.believe(model_of("eu", "uk"), "position", (hmg, fisheries), "concede", source)
-    table.projector.catch_up()
 
-    # The three questions, and they are three different questions.
-    assert [(d.held, d.reference) for d in table.own_gap("uk")] == [("never", "concede")]
-    assert table.misreading("eu", "uk") == [], "the EU happens to have read them right"
-    assert [(d.held, d.reference) for d in table.taken_at_their_word("eu", "uk")] == [
-        ("concede", "never")
-    ], "and is right not to take them at their word"
+    # What the EU thinks the UK wants is **not** a fourth row. R28 forbids storing a
+    # nested belief, so it is an overheard remark plus the EU's belief that the UK let
+    # it slip -- and the model is rebuilt from those every time it is asked for.
+    leak = table.types.pending(
+        domain.SideRemarkOverheard(
+            speaker="HMG", overheard_by="eu", clause_id=fisheries, suggests="concede"
+        )
+    )
+    table.append(leak)
+    table.believe(held("eu"), "witnessed", (hmg, leak.envelope.event_id), True, source)
+    table.projector.catch_up()
 
     # -- the delegations turn out to be one party -------------------------------------
     # Before the round, deliberately: the brief looks a position up by its exact belief
@@ -74,16 +78,45 @@ def test_milestone_7_acceptance(tmp_path: Path):
     applied = apply_rekeys(table, plans, source_event=uuid.uuid7())
     table.projector.catch_up()
 
-    assert len(plans) == 1, "one belief id"
     assert [a.scope for a in applied] == [
+        held("eu"),
         held("uk"),
         stated("uk"),
-        model_of("eu", "uk"),
     ], "three scopes -- the plan cannot say where, so the application does"
+
+    # -- and only now can the three questions be asked ---------------------------------
+    #
+    # They come after the merge, and they have to. M7 already learned half of this --
+    # "reconciling identity is a precondition for briefing an agent, not a tidy-up
+    # afterwards" -- and M8 extends it to the queries themselves. A derived model binds
+    # a party *name* to an entity through `seats`, so while the delegation and the
+    # government are two entities, "the UK" names one of them and the EU's beliefs are
+    # about the other. Asking before the merge is not wrong; it is a question about a
+    # party that does not exist yet, and it correctly answers nothing.
+    #
+    # M7 could ask early only because both sides of every `divergence` were stored
+    # scopes keyed on the same absorbed entity, so the scope *name* and the entity were
+    # decoupled and the inconsistency stayed invisible.
 
     # The queries still answer, which is what makes the cascade correct rather than
     # merely complete: a partial re-key would report perfect agreement.
+    # The three questions, and they are three different questions.
     assert [(d.held, d.reference) for d in table.own_gap("uk")] == [("never", "concede")]
+    assert table.misreading("eu", "uk") == [], "the EU happens to have read them right"
+    assert [(d.held, d.reference) for d in table.taken_at_their_word("eu", "uk")] == [
+        ("concede", "never")
+    ], "and is right not to take them at their word"
+
+    # And the derived model still answers, which it does for a *different* reason and
+    # that difference is the M8 finding. The re-key moved the stored beliefs. It could
+    # not move the remark: the log is immutable, and that event still says `HMG`. What
+    # keeps the model aligned is the interpreter resolving every party reference through
+    # the merge chain at read time. A stored model of another mind is carried by the
+    # re-key; a derived one has to canonicalize itself.
+    assert (
+        table.model_held_by("eu", "uk").get(table.predicates.belief_id("position", uk, fisheries))
+        == "concede"
+    ), "same event, same log, and now keyed on the survivor"
 
     # -- a round: the agent proposes from its model, not from what was said ------------
     calls: list[str] = []
@@ -105,8 +138,8 @@ def test_milestone_7_acceptance(tmp_path: Path):
         )
 
     ledger = PinLedger(table.store, table.types)
-    offer = Negotiator(FunctionModel(negotiate), ledger, party="eu").propose(
-        table, "uk", "fisheries"
+    offer = Negotiator(FunctionModel(negotiate), ledger, view=table.view("eu")).propose(
+        "uk", "fisheries"
     )
     assert offer.concede is True
     assert "Their stated position: never" in calls[0], (
@@ -120,8 +153,8 @@ def test_milestone_7_acceptance(tmp_path: Path):
     drawn = len(calls)
     replay = ReplayPins.from_events(events, table.types, on_miss="strict")
 
-    again = Negotiator(FunctionModel(negotiate), replay, party="eu").propose(
-        table, "uk", "fisheries"
+    again = Negotiator(FunctionModel(negotiate), replay, view=table.view("eu")).propose(
+        "uk", "fisheries"
     )
 
     assert again == offer

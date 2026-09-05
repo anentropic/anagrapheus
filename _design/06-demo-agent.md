@@ -28,43 +28,132 @@ Checking the code turned the objection into a finding:
 
 So the demo's first job is not to show the stack off. It is to run §6c's claim.
 
-## 2. Higher-order belief is scope naming — [ours]
+## 2. Higher-order belief is **not** scope naming — [corrected 2026-09-05, M8a]
 
-A scope id is an arbitrary string, so three scopes per party are enough:
+**This section previously said the opposite, and it was wrong against a ratified NVM
+ruling.** It claimed *"higher-order belief is scope naming"* and shipped a third scope,
+`party:{a}:model-of:{b}`, holding what one party believed another wanted. Corrected
+forward rather than quietly reworded, because the wrong version is in a merged PR and in
+the M7 milestone record.
 
-| Scope | Holds |
-|---|---|
-| `party:{id}:held` | what they actually want — private |
-| `party:{id}:stated` | what they have said — public |
-| `party:{id}:model-of:{other}` | what they believe another party holds |
+### What the corpus says
 
-One three-line function then answers three different questions:
+[Doc 24](https://github.com/anentropic/narrative-vm/blob/main/_design/v2/24-nvm-higher-order-beliefs.md)
+exists for exactly this question, and §1 opens by naming the shipped design *"the wrong
+frame"*:
 
-- **`misreading(eu, uk)`** — how wrong we are about them. The agent acts on it.
-- **`own_gap(uk)`** — their distance between word and intent. **Nobody but that party
-  can ask this**, because nobody else holds their `held` scope. That asymmetry is what
-  makes the domain strategic rather than merely multi-party.
-- **`taken_at_their_word(eu, uk)`** — whether we believe what they said. Distinct from
-  the first: it measures scepticism, not error, and a holder can be *right* to
-  disbelieve.
+> **R28 — Higher-order belief is derived, never stored.** RATIFIED 2026-06-17. *"nested
+> mental-state beliefs are reconstructed on demand from access-beliefs (R27) and
+> discarded — abduction-on-demand applied to minds; **no `BeliefState` ever stores 'X
+> believes Y believes …'**."*
 
-§6a blesses the collision this rests on — revision history keys on the belief id alone
-and is cross-scope, and *"for divergence queries that collision is the point."* Three
-holders, one belief id, asserted directly because it looks like a bug from outside: if
-ids differed per scope, every divergence query would return nothing and report perfect
-agreement.
+Three more govern the shape:
 
-**Why the convention lives in the example and not the library.** §6b argues the
-predicate registry belongs in code because it is *schema*. Scope naming is not schema —
-it is a modelling choice about how many minds an application has and how they nest,
-which the library cannot know.
+- **R27 — Access is first-class observable content.** RATIFIED 2026-06-17. Actors form
+  *ordinary first-order* beliefs about the witness set, *"allowed to diverge from the
+  true witness set … The divergence **is** the deception/surprise engine."*
+- **R29 — Reconstruction reads only the observer's scope.** RATIFIED 2026-06-17. *"If
+  you peeked at B's actual scope you would get the true answer, not A's (possibly wrong)
+  model, and false belief becomes unrepresentable."*
+- **R30** caps realised depth at 3, raisable per query. **R50** (RATIFIED 2026-07-04)
+  keeps derivation to existing core *reads* — `query_scope`, `get_scope_at` — *"not a
+  `BeliefStore` op"*, building *"no throwaway core scope."*
+
+### Why the stored version breaks
+
+Not the content — a proposition may mention another mind, and nothing about the record
+is special. **The update trigger.** A first-order belief updates when its owner observes
+a *world* event; a higher-order belief updates when its owner observes a *meta* event, a
+change in what the other actor had access to. A flat stored row is driven by the wrong
+one.
+
+Doc 24 §1's case: a guard watches a courier stash a letter, watches the courier *leave*,
+then watches a thief move it. The guard's own belief updates on the move; the guard's
+belief about the *courier's* belief must specifically not. A stored row gets folded
+forward by the world event, *"and deception/surprise silently break."*
+
+The failure is silent and it flatters: a model that folds forward converges on the
+truth, so the agent looks perceptive and the misreading being measured quietly goes to
+zero.
+
+### In fairness to M7 — the exception it sat inside
+
+R28 carries one, and it applies:
+
+> **Exception:** a belief about another mind with *no witness trail* (a hunch about
+> motive — "A thinks C resents her") is a stored **first-order `Inferred` belief in A's
+> scope** … first-order content that merely *happens to be about another's
+> disposition*, **not** a *derived nested* belief.
+
+`position(uk, fisheries)` is a belief about the UK's **preference**, not about the UK's
+belief. The rows M7 wrote were legitimate. What was wrong was **calling them
+higher-order**, and building the demo so that the first belief about another's *belief*
+would have been stored the same way.
+
+### What replaces it
+
+Two stored scopes per party — `held`, `stated` — both first-order. The third is
+`examples/negotiation/nesting.py`: `reconstruct()` gates the log by the observer's own
+`witnessed(party, event)` beliefs, folds admitted events into a dict, answers, and is
+discarded. `Derived` is deliberately not a `BeliefState` and not scope-shaped, so it
+cannot be handed back to `doxastica` even by accident.
+
+`PartyView` (`view.py`) is R29 made structural: it holds no reference to the belief
+core, so the peek has nowhere to be written. That is the same move note 05 made with
+`Anchors`/`Prose` — replace a rule someone must remember with a shape that has no room
+for the mistake.
+
+**Both are asserted mechanically, not read for.** A recording wrapper proves a
+derivation calls no mutating op; the view is asserted to expose no core. Both were
+mutation-tested: making the gate admit everything (a stored model folding forward)
+fails four tests including the guard/courier case, and adding a memoising write fails
+the no-write test.
+
+## 2a. What R28 costs, which is not nothing — [ours]
+
+A stored model is carried along by a re-key like any other belief. A **derived** one is
+rebuilt from the log, and *the log is immutable*: a merge cannot reach into an event
+payload, so a remark by `HMG` still says `HMG` after HMG has been merged into the UK.
+
+So the interpreter canonicalizes every party reference at read time, through
+`IdentityRegistry.canonical`. Without it the derived model keys on an entity that names
+nothing and answers `None` — silently, and only after a merge.
+
+This asymmetry is invisible while nested beliefs are stored. It is a genuine cost of the
+ruling rather than a free consequence, and worth stating because the ruling's own
+write-up does not mention it: **derived reads must resolve identity themselves.**
+
+A second consequence, smaller: the derived model binds a party *name* to an entity, so
+it cannot answer about a party whose identity is unsettled. M7 already learned half of
+this — *"reconciling identity is a precondition for briefing an agent, not a tidy-up
+afterwards"* — and M8 extends it from the brief to the queries. M7 could ask early only
+because both sides of every `divergence` were stored scopes keyed on the same absorbed
+entity, which decoupled the scope *name* from the entity and kept the inconsistency
+invisible.
+
+## 2b. One simplification, declared — [ours]
+
+Doc 24 §3 step 3 filters the derived scope through *A's model of B's perspective lens*,
+carried in the portrait A holds of B. This demo has no portraits — that is NVM's
+characterological frame ([07](https://github.com/anentropic/narrative-vm/blob/main/_design/v2/07-nvm-npc-minds.md)),
+which the agent-core stack does not own — so **the step is absent rather than faked**.
+What remains is the access gate, which is the part carrying R27–R29. The lens is a
+fidelity refinement whose own accuracy is still open (U22).
 
 ## 3. The finding: a plan is per belief id, a belief lives in N scopes — [ours]
 
-`plan_rekeys` returns **one plan** for a merged entity's belief. That belief was held in
-**three scopes**. The plan cannot say which, because it is computed from the
-entity→belief index, which records what was *minted* and is scope-free by construction.
-Nothing can enumerate scopes either: `MemoryCore` has `query_scope` and no `scopes()`.
+`plan_rekeys` returns **one plan** for a merged entity's belief. That belief is held in
+**as many scopes as there are holders**. The plan cannot say which, because it is
+computed from the entity→belief index, which records what was *minted* and is scope-free
+by construction. Nothing can enumerate scopes either: `MemoryCore` has `query_scope` and
+no `scopes()`.
+
+*(M8a note: this used to say "three scopes" — two per party plus a `model-of`. The
+`model-of` scope is gone, but the finding is unchanged and if anything sharper, because
+the scopes that remain are all genuinely first-order. What a re-key must now also carry
+is the **access-beliefs** the derived model is built from: R27 makes those ordinary
+first-order beliefs precisely so they ride the normal pipeline, and a test asserts a
+merge moves them.)*
 
 With one scope this is invisible. With several it is a loop, and
 `examples/negotiation/rekeying.py` is that loop.
@@ -200,9 +289,19 @@ Three more, each a real defect:
   and deliberately does not decide it.
 - **Nothing enumerates scopes.** The application supplies the list, which is fine while
   the parties are known up front and gets harder if scopes are created dynamically.
-- **The demo has one round.** The chronicle's recency/depth split is exercised in M6's
-  own suite but not here, so a long negotiation — the case the chronicle exists for —
-  is still only tested against synthetic units.
+- **The demo has one round, one agent, and no pinned tool.** M7.3 claimed all three and
+  delivered only the pinned model; the task is reopened. The chronicle's recency/depth
+  split is exercised in M6's own suite but not here, so a long negotiation — the case
+  the chronicle exists for — is still only tested against synthetic units, and
+  `RoundClosed` is defined but never emitted. **M8b** is the two-agent, multi-round
+  version; M8a shipped only the rulings.
+- **Nothing here forms a belief about another party's *belief*.** The derived read
+  supports it — that is what the `chain` argument and the depth cap are for — but the
+  domain's events carry preferences and access, not beliefs-about-beliefs. So R28 is
+  honoured by construction rather than under pressure, and the tower is exercised at
+  depth 2 by a test rather than by the demo. Until an agent actually needs `belief_of`
+  at depth, the strongest claim available is that storing it is now impossible, not
+  that deriving it is load-bearing.
 - **Tier 3 tests one call.** Structured output, tool calls and streaming against a real
   provider are all still unproven; the pins that cover them are synthetic. Widening it
   costs cents, and the reason not to is that each addition is another thing that can

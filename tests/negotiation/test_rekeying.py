@@ -12,8 +12,9 @@ import uuid
 from typing import TYPE_CHECKING
 
 import pytest
+from examples.negotiation import domain
 from examples.negotiation.rekeying import apply_rekeys
-from examples.negotiation.scopes import held, model_of, stated
+from examples.negotiation.scopes import held, stated
 
 from anagrapheus.beliefs import BeliefIndex, plan_rekeys
 from anagrapheus.identity import merge, split
@@ -44,7 +45,7 @@ def test_one_plan_cascades_into_every_scope_that_held_it(table: Table):
     for scope, position in (
         (held("uk"), "concede"),
         (stated("uk"), "never"),
-        (model_of("eu", "uk"), "hold_firm"),
+        (held("eu"), "hold_firm"),
     ):
         table.believe(scope, "position", (absorbed, fisheries), position, source)
     table.projector.catch_up()
@@ -57,10 +58,10 @@ def test_one_plan_cascades_into_every_scope_that_held_it(table: Table):
 
     assert len(plans) == 1, "one belief id, so one plan"
     assert [(a.scope, a.moved) for a in applied] == [
+        (held("eu"), 1),
         (held("uk"), 1),
         (stated("uk"), 1),
-        (model_of("eu", "uk"), 1),
-    ], "and three scopes to carry it into"
+    ], "and three scopes to carry it into -- in `table.scopes()` order, by party"
 
 
 def test_the_queries_still_answer_after_the_merge(table: Table):
@@ -74,17 +75,37 @@ def test_the_queries_still_answer_after_the_merge(table: Table):
     fisheries = table.table_clause("fisheries")
     kept, absorbed = table.seats["uk"], table.seat("HMG")
     source = uuid.uuid7()
-    for scope, position in (
-        (held("uk"), "concede"),
-        (model_of("eu", "uk"), "hold_firm"),
-    ):
-        table.believe(scope, "position", (absorbed, fisheries), position, source)
+    table.believe(held("uk"), "position", (absorbed, fisheries), "concede", source)
+
+    # The EU's model of the UK is not a scope any more (R28), so what has to survive
+    # the merge is the **access-belief** it is derived from -- and that belief names
+    # the absorbed entity. R27 makes these ordinary first-order beliefs precisely so
+    # they ride the normal pipeline, and this is what that buys: they re-key like
+    # anything else, with no machinery of their own.
+    remark = table.types.pending(
+        domain.SideRemarkOverheard(
+            speaker="uk", overheard_by="eu", clause_id=fisheries, suggests="hold_firm"
+        )
+    )
+    table.append(remark)
+    table.believe(held("eu"), "witnessed", (absorbed, remark.envelope.event_id), True, source)
     table.projector.catch_up()
+
+    position = table.predicates.belief_id("position", kept, fisheries)
+    assert table.model_held_by("eu", "uk").get(position) is None, (
+        "before the merge the access-belief names HMG, so the gate does not fire for "
+        "the UK and the EU models nothing -- which is correct, not a failure"
+    )
+
     table.append(merge(table.types, kept=kept, absorbed=absorbed))
     table.projector.catch_up()
 
     apply_rekeys(table, _plans(table), source_event=uuid.uuid7())
+    table.projector.catch_up()
 
+    assert table.model_held_by("eu", "uk").get(position) == "hold_firm", (
+        "the access-belief moved with the merge, so the derived model answers again"
+    )
     assert [(d.held, d.reference) for d in table.misreading("eu", "uk")] == [
         ("hold_firm", "concede")
     ]
