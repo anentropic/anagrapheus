@@ -15,7 +15,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from examples.negotiation.scopes import held, model_of, stated
+from examples.negotiation.nesting import reconstruct
+from examples.negotiation.scopes import stated
 from pydantic import BaseModel
 from pydantic_ai import Agent
 
@@ -25,6 +26,7 @@ if TYPE_CHECKING:
     from uuid import UUID
 
     from examples.negotiation.table import Table
+    from examples.negotiation.view import PartyView
     from pydantic_ai.models import Model
 
     from anagrapheus.timeline.pins import PinResolver
@@ -40,63 +42,89 @@ class Offer(BaseModel):
     because: str
 
 
-def brief_for(table: Table, holder: str, other: str, clause: str) -> str:
+def brief_for(view: PartyView, other: str, clause: str) -> str:
     """
-    What ``holder`` knows going into a round about ``other``'s position on ``clause``.
+    What ``view``'s party knows going into a round about ``other``'s position.
 
-    Three lines from three scopes, and the difference between them is the whole brief:
+    Three lines from three sources, and the difference between them is the whole brief:
     what we want, what they said, and what we think they actually want. A brief built
-    from one scope would read identically whether or not we had any model of them.
+    from one source would read identically whether or not we had any model of them.
 
-    Each line is looked up by its **exact belief id**. Taking the first belief in the
-    scope instead reads correctly while a scope holds one thing and starts answering
-    with an unrelated clause -- or with a `red_line` rather than a `position` -- the
-    moment it holds two. The agent would then negotiate confidently about the wrong
-    proposition, which is the kind of wrong that never raises.
+    **The third line is derived, not read.** Since M8 there is no
+    ``party:{a}:model-of:{b}`` scope to query — R28 forbids storing it — so it is
+    reconstructed from this party's access-beliefs at the moment the brief is assembled
+    and discarded with the brief. Doc 24 calls that abduction on demand applied to
+    minds: never materialise the whole tower of what everyone could think about
+    everyone, reconstruct the one nested query actually asked.
+
+    Everything here comes through the :class:`~examples.negotiation.view.PartyView`, so
+    the brief physically cannot include the other side's private beliefs. That is R29
+    holding by construction rather than by care — and it matters most here, because the
+    brief is exactly where a peek would be invisible and devastating: an agent handed
+    the truth about its counterpart looks like an agent that reads them well.
+
+    Each line is looked up by its **exact belief id**. Taking the first belief in a
+    scope reads correctly while a scope holds one thing and starts answering with an
+    unrelated clause the moment it holds two, at which point the agent negotiates
+    confidently about the wrong proposition — the kind of wrong that never raises. It
+    has happened here once; note 06 §5b records it.
     """
-    from doxastica import BeliefFilter
+    wanted = view.position_id(view.party, clause)
+    theirs = view.position_id(other, clause)
 
-    clause_id = table.clauses[clause]
-
-    def position_of(scope: str, party: str) -> str:
-        wanted = table.predicates.belief_id("position", table.seats[party], clause_id)
-        found = next(
-            (
-                state
-                for state in table.core.query_scope(scope, BeliefFilter())
-                if state.belief_id == wanted
-            ),
-            None,
-        )
-        return str(found.value) if found is not None else "unknown"
+    ours = view.own_belief(wanted)
+    said = view.public_belief(other, theirs)
+    modelled = reconstruct(
+        view,
+        (other,),
+        interpret=view.interpret,
+    ).get(theirs)
 
     return (
         f"Clause: {clause}\n"
-        f"Our position: {position_of(held(holder), holder)}\n"
-        f"Their stated position: {position_of(stated(other), other)}\n"
-        f"What we believe they actually want: "
-        f"{position_of(model_of(holder, other), other)}"
+        f"Our position: {'unknown' if ours is None else ours.value}\n"
+        f"Their stated position: {'unknown' if said is None else said.value}\n"
+        f"What we believe they actually want: {'unknown' if modelled is None else modelled}"
     )
 
 
 class Negotiator:
-    """One party's agent. Pinned, so a round replays without reaching a model."""
+    """
+    One party's agent. Pinned, so a round replays without reaching a model.
 
-    def __init__(self, model: Model, resolver: PinResolver, *, party: str) -> None:
+    Constructed with a :class:`~examples.negotiation.view.PartyView` rather than the
+    table. That is the whole of R29 on the reasoning path: an agent holding the table
+    could read its counterpart's private scope in one line and would look better for
+    it, so it is never handed one.
+    """
+
+    def __init__(self, model: Model, resolver: PinResolver, *, view: PartyView) -> None:
         self._agent = Agent(model=PinnedModel(model, resolver), output_type=Offer)
-        self._party = party
+        self._view = view
 
-    def propose(self, table: Table, other: str, clause: str) -> Offer:
+    @property
+    def party(self) -> str:
+        """Who this agent negotiates for."""
+        return self._view.party
+
+    def propose(self, other: str, clause: str) -> Offer:
         """Read the brief and offer a move. The model call is pinned like any other."""
         return self._agent.run_sync(
             "You are negotiating for "
-            f"{self._party}. Given the brief, propose whether to concede this clause.\n\n"
-            + brief_for(table, self._party, other, clause)
+            f"{self.party}. Given the brief, propose whether to concede this clause.\n\n"
+            + brief_for(self._view, other, clause)
         ).output
 
 
 def record_offer(table: Table, offer: Offer, *, party: str, clause_id: UUID, source: UUID) -> None:
-    """Put the offer into the party's stated scope — what it has now said in the room."""
+    """
+    Put the offer into the party's stated scope — what it has now said in the room.
+
+    Takes the table, not a view: writing is the composition root's job. A view is a
+    read surface by construction, which is why an agent cannot record its own offer and
+    the round loop has to do it — the same split that keeps `Table.believe`'s
+    mint-and-append pairing in one place (note 06 §4).
+    """
     table.believe(
         stated(party),
         "position",

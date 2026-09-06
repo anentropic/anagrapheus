@@ -9,6 +9,15 @@ The domain is a multilateral negotiation: several parties, a set of clauses, and
 record of who proposed what and who said what about it. It was chosen because §10 Q4
 asks for a second consumer that resembles NVM as little as possible, and because it is
 the smallest domain in which parties must model *each other* rather than only the world.
+
+**A belief about access names an event by its envelope id, not by a minted entity.**
+Parties are identity-layer entities because they can *merge* -- two names turning out
+to be one negotiator is the whole of note 06 §4. Events cannot merge, so minting a
+parallel entity for each one would add machinery no capability could ever use. The
+envelope id is already a stable UUID naming exactly one event, and
+`PredicateRegistry.belief_id` takes UUIDs rather than entities, so `witnessed(party,
+event)` keys on it directly. A re-key never touches these: plans are computed from
+identity decisions, and no decision ever names an event.
 """
 
 from __future__ import annotations
@@ -20,6 +29,11 @@ from anagrapheus.beliefs import Predicate, PredicateKind, PredicateRegistry
 from anagrapheus.timeline import DomainEvent, EventKey
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping, Sequence
+    from typing import Any
+
+    from examples.negotiation.nesting import Interpret
+
     from anagrapheus.timeline import EventTypeRegistry
 
 __all__ = [
@@ -29,6 +43,7 @@ __all__ = [
     "PositionStated",
     "RoundClosed",
     "SideRemarkOverheard",
+    "interpreter",
     "predicates",
     "register",
 ]
@@ -56,10 +71,16 @@ class SideRemarkOverheard(DomainEvent, frozen=True):
     """
     Something a party let slip that bears on what it *actually* wants.
 
-    The domain's whole asymmetry in one event: a stated position updates a public
-    scope, a side remark updates somebody's **model of** another party. Two parties
-    overhearing the same remark can still end up with different models of the speaker,
-    which is the case a single-holder design cannot express at all.
+    The domain's whole asymmetry in one event. A stated position is public and cheap
+    to make; a remark not meant to be heard is worth more precisely because of that,
+    and it is the only evidence here about what a party *actually* wants.
+
+    It also carries **who overheard it**, which is what makes the domain strategic
+    rather than merely informational. That field is not a gate — per R27 a party acts
+    on its *belief* about who heard, which may be wrong, and a party mis-tracking that
+    is a party that can be played. Two parties told about the same remark can still
+    end up modelling the speaker differently, which is the case a single-holder design
+    cannot express at all.
     """
 
     speaker: str
@@ -74,14 +95,25 @@ class RoundClosed(DomainEvent, frozen=True):
     round_number: int
 
 
-#: The negotiation's predicates. `position` is functional -- a party holds one position
-# on a clause at a time, and revising supersedes correctly. §6a's trap is the other
-# kind: a relational predicate must put every argument in the id, or revising silently
-# retracts. Neither predicate here is relational, and that is worth stating rather than
-# leaving to be inferred from their absence.
+#: The negotiation's predicates. `position` and `red_line` are functional -- a party
+# holds one position on a clause at a time, and revising supersedes correctly.
+#
+# `witnessed` is the other kind, and it is the one this domain turns on. §6a: a
+# relational predicate must put *every* argument in the id and use a boolean as the
+# value, or revising silently retracts. `witnessed(party, event)` does exactly that --
+# both arguments in the id, `True`/`False` as the value, and the uncertainty carried by
+# stance rather than smuggled into the value.
+#
+# **It is the engine, not bookkeeping.** NVM R27 (RATIFIED 2026-06-17) makes access
+# first-class observable content: actors form *ordinary first-order* beliefs about who
+# witnessed what, and those beliefs are **allowed to diverge from the true witness
+# set** -- *"the divergence is the deception/surprise engine."* A party that
+# mis-tracks who overheard a remark is a party that can be played, and everything the
+# derived read in `nesting.py` can say about another mind is gated by these.
 PREDICATES = (
     Predicate("position", 2, PredicateKind.FUNCTIONAL),
     Predicate("red_line", 2, PredicateKind.FUNCTIONAL),
+    Predicate("witnessed", 2, PredicateKind.RELATIONAL),
 )
 
 
@@ -101,3 +133,89 @@ def register(types: EventTypeRegistry) -> None:
     types.register(EventKey(NAMESPACE, "PositionStated", 1), PositionStated)
     types.register(EventKey(NAMESPACE, "SideRemarkOverheard", 1), SideRemarkOverheard)
     types.register(EventKey(NAMESPACE, "RoundClosed", 1), RoundClosed)
+
+
+def interpreter(
+    registry: PredicateRegistry,
+    seats: Mapping[str, UUID],
+    canonical: Callable[[UUID], UUID],
+) -> Interpret:
+    """
+    How this domain reads an event as the beliefs it would give a witness.
+
+    Supplied to :func:`~examples.negotiation.nesting.reconstruct`, because §8 puts the
+    vocabulary with whoever owns the domain: the library ships the shape, the
+    application says what its events *mean*.
+
+    Two events carry belief, and the asymmetry between them is the domain:
+
+    - **`PositionStated`** — a witness learns what a party said. Public, and cheap to
+      say, so it is only ever evidence about the party's *stated* position.
+    - **`SideRemarkOverheard`** — a witness learns what a party appears to *want*, which
+      is worth more precisely because it was not meant to be heard.
+
+    Both map to the same belief id, so a remark heard after a statement supersedes it in
+    the fold. That is not a rule written anywhere: it falls out of later events winning,
+    which is the only revision a derived view is allowed.
+
+    **A remark also names who else overheard it**, and a witness who learns that forms an
+    ordinary access-belief about the third party (R27). Without that, a modelled mind
+    could never have a model of its own, and the tower would stop at depth 1 for want of
+    the gate rather than by design.
+
+    **Every entity reference is canonicalized at read time -- clauses as much as
+    parties.** Clauses are identity entities too (`Table.table_clause` establishes one),
+    so two names for one clause can merge, and the immutable event keeps naming the
+    absorbed id. Missing that on the clause leaves the derived model keyed differently
+    from the re-keyed stored beliefs, so a comparison reports no overlap and a brief
+    line reads `unknown` -- silently, and only after a merge. A merge
+    re-keys stored beliefs, but it cannot reach into an event payload -- the log is
+    immutable, and a party named in a remark stays named there forever. A *stored*
+    model of another mind is carried along by the re-key; a *derived* one is rebuilt
+    from events that still say `HMG` after HMG has been merged into the UK, and would
+    key on an entity that no longer names anything. So every party reference goes
+    through `canonical`, which follows the merge chain to the id that survives.
+
+    That asymmetry is invisible while nested beliefs are stored, and it is a real cost
+    of R28 rather than a free consequence: derived reads must resolve identity
+    themselves. Note 06 records it.
+
+    **What this deliberately does not do is consult the truth.** `overheard_by` is used
+    here only to say what a *witness of this event* comes to believe about who else
+    heard it. Nothing gates on it. Whether a party actually heard something is a fact;
+    whether another party believes they heard it is a belief, may be wrong, and is the
+    only thing the reconstruction is allowed to use.
+    """
+
+    def read(event_id: UUID, payload: DomainEvent) -> Sequence[tuple[str, Any]]:
+        if isinstance(payload, PositionStated):
+            return (
+                (
+                    registry.belief_id(
+                        "position",
+                        canonical(seats[payload.party]),
+                        canonical(payload.clause_id),
+                    ),
+                    payload.position,
+                ),
+            )
+        if isinstance(payload, SideRemarkOverheard):
+            return (
+                (
+                    registry.belief_id(
+                        "position",
+                        canonical(seats[payload.speaker]),
+                        canonical(payload.clause_id),
+                    ),
+                    payload.suggests,
+                ),
+                (
+                    registry.belief_id(
+                        "witnessed", canonical(seats[payload.overheard_by]), event_id
+                    ),
+                    True,
+                ),
+            )
+        return ()
+
+    return read

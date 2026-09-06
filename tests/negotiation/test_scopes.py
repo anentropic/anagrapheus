@@ -12,31 +12,50 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING
 
-from examples.negotiation.scopes import held, model_of, party_of, stated
+from examples.negotiation import domain
+from examples.negotiation.scopes import held, party_of, stated
 
 if TYPE_CHECKING:
     from examples.negotiation.table import Table
 
 
 def _positions(table: Table, clause: str = "fisheries") -> tuple[uuid.UUID, uuid.UUID]:
-    """One clause, and the UK's three positions on it: wanted, said, and assumed."""
+    """
+    One clause, and the UK's three positions on it: wanted, said, and assumed.
+
+    The first two are stored, first-order and the UK's own. **The third is not stored
+    at all** — since M8 it is derived from what the EU believes the UK let slip, per
+    R28. So the setup that used to be a third `table.believe` is now an event plus an
+    access-belief, which is the whole difference the ruling makes to a consumer.
+    """
     fisheries = table.table_clause(clause)
     uk = table.seats["uk"]
     source = uuid.uuid7()
     table.believe(held("uk"), "position", (uk, fisheries), "concede", source)
     table.believe(stated("uk"), "position", (uk, fisheries), "never", source)
-    table.believe(model_of("eu", "uk"), "position", (uk, fisheries), "hold_firm", source)
+
+    remark = table.types.pending(
+        domain.SideRemarkOverheard(
+            speaker="uk", overheard_by="eu", clause_id=fisheries, suggests="hold_firm"
+        )
+    )
+    table.append(remark)
+    table.believe(held("eu"), "witnessed", (uk, remark.envelope.event_id), True, uuid.uuid7())
+    table.projector.catch_up()
     return uk, fisheries
 
 
-def test_three_scopes_answer_three_different_questions(table: Table):
+def test_three_questions_from_two_stored_scopes_and_one_derived_model(table: Table):
     """
     The point of the whole domain, in one assertion.
 
-    One belief id, three scopes, and a single three-line function separating *being
-    wrong about someone*, *their own gap between word and intent*, and *whether you
-    believe what they said*. A design with one believer cannot state any of the three,
-    because it has nowhere to put the other two positions.
+    One belief id, and a single comparison separating *being wrong about someone*,
+    *their own gap between word and intent*, and *whether you believe what they said*.
+    A design with one believer cannot state any of the three.
+
+    Two of the three sides are stored scopes; the third is reconstructed per call and
+    discarded (R28). That the queries read the same afterwards is the point — the
+    ruling changes where the model lives, not what can be asked of it.
     """
     _positions(table)
 
@@ -81,12 +100,24 @@ def test_a_belief_id_is_shared_across_scopes_deliberately(table: Table):
 
     _positions(table)
 
-    ids = {
+    stored = {
         state.belief_id
-        for scope in (held("uk"), stated("uk"), model_of("eu", "uk"))
+        for scope in (held("uk"), stated("uk"))
         for state in table.core.query_scope(scope, BeliefFilter())
     }
-    assert len(ids) == 1, "one proposition, one id, however many holders"
+    derived = set(table.model_held_by("eu", "uk").beliefs)
+
+    assert len(stored) == 1, "one proposition, one id, however many stored holders"
+    assert stored <= derived, (
+        "and the derived model mints through the same registry, which is what lets a "
+        "reconstruction be compared against a stored scope at all -- if ids differed "
+        "per holder every divergence query would return nothing and report agreement"
+    )
+    assert len(derived) > len(stored), (
+        "the derived mind holds more than the proposition asked about: the remark "
+        "named who overheard it, so a witness also forms an access-belief about that "
+        "third party (R27). That is what lets the next rung of the tower gate at all."
+    )
 
 
 def test_a_scope_that_never_held_the_belief_is_absent_not_disagreeing(table: Table):
@@ -100,4 +131,4 @@ def test_a_scope_that_never_held_the_belief_is_absent_not_disagreeing(table: Tab
 def test_scope_names_round_trip_to_their_party(table: Table):
     """`party_of` is what makes a re-key able to report which holder it touched."""
     assert party_of(held("uk")) == "uk"
-    assert party_of(model_of("eu", "uk")) == "eu", "a model-of scope belongs to its holder"
+    assert party_of(stated("eu")) == "eu"

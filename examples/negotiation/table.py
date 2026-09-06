@@ -10,9 +10,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from doxastica import InMemoryBackend, MemoryCore
+from doxastica import BeliefFilter, InMemoryBackend, MemoryCore
 from examples.negotiation import domain
-from examples.negotiation.scopes import held, model_of, stated
+from examples.negotiation.nesting import DEFAULT_DEPTH, Derived, Interpret, reconstruct
+from examples.negotiation.scopes import held, stated
+from examples.negotiation.view import PartyView
 
 from anagrapheus import register_builtin_events
 from anagrapheus.beliefs import (
@@ -22,7 +24,12 @@ from anagrapheus.beliefs import (
     SQLiteBeliefIndexStore,
     divergence,
 )
-from anagrapheus.identity import IdentityFold, SQLiteIdentityStore, establish
+from anagrapheus.identity import (
+    IdentityFold,
+    IdentityRegistry,
+    SQLiteIdentityStore,
+    establish,
+)
 from anagrapheus.timeline import (
     EventReader,
     EventTypeRegistry,
@@ -145,19 +152,35 @@ class Table:
         self.append(written.minted)
 
     # ---- the three questions ---------------------------------------------------------
+    #
+    # Asked from the *table*, which is omniscient by necessity: somebody has to seed both
+    # sides and somebody has to score the result. A party could never compute
+    # `misreading` about itself -- that is the whole point of it -- so these are the
+    # analyst's queries, not an agent's. An agent sees only its `PartyView`.
 
-    def misreading(self, holder: str, other: str) -> list[Disagreement]:
+    def misreading(
+        self, holder: str, other: str, *, depth: int = DEFAULT_DEPTH
+    ) -> list[Disagreement]:
         """
         How wrong ``holder`` is about ``other`` — the game-theoretic quantity.
 
-        The agent acts on this: a concession is sized by what it believes the other side
-        actually wants, so an error here is an error in the offer.
+        The left-hand side is **derived, not stored** (R28): what ``holder`` would
+        conclude about ``other`` from the events it believes ``other`` witnessed. The
+        right-hand side is ``other``'s real private scope, which only the table can see.
+
+        M7 computed this as `divergence` between two stored scopes. That version could
+        not go wrong in the way this one can, which sounds like a virtue and is the
+        opposite: a stored model folds forward on world events, so it silently converged
+        on the truth and the misreading it was built to measure quietly went to zero.
         """
-        return divergence(self.core, model_of(holder, other), held(other))
+        return _disagreements(self.model_held_by(holder, other, depth=depth), held(other), self)
 
     def own_gap(self, party: str) -> list[Disagreement]:
         """
         The distance between what ``party`` says and what it wants.
+
+        Both sides are stored, first-order and real, so this stays an ordinary
+        :func:`~anagrapheus.beliefs.divergence` — the M8 correction does not touch it.
 
         **Nobody but that party can ask this**, because nobody else has its ``held``
         scope. That asymmetry is what makes the domain strategic rather than merely
@@ -165,14 +188,49 @@ class Table:
         """
         return divergence(self.core, stated(party), held(party))
 
-    def taken_at_their_word(self, holder: str, other: str) -> list[Disagreement]:
+    def taken_at_their_word(
+        self, holder: str, other: str, *, depth: int = DEFAULT_DEPTH
+    ) -> list[Disagreement]:
         """
         Where ``holder``'s model of ``other`` departs from what ``other`` has said.
 
         Distinct from :meth:`misreading`: this measures scepticism, not error. A holder
         can be right to disbelieve a stated position, and this query does not know which.
         """
-        return divergence(self.core, model_of(holder, other), stated(other))
+        return _disagreements(self.model_held_by(holder, other, depth=depth), stated(other), self)
+
+    def model_held_by(self, holder: str, target: str, *, depth: int = DEFAULT_DEPTH) -> Derived:
+        """
+        Reconstruct ``holder``'s model of ``target``. Ephemeral — never stored.
+
+        Goes through the holder's own :class:`~examples.negotiation.view.PartyView`, so
+        R29 holds here too: the table may be omniscient, but the reconstruction it asks
+        for is still built from what the holder alone can see.
+        """
+        return reconstruct(
+            self.view(holder),
+            (target,),
+            interpret=self.interpret(),
+            depth=depth,
+        )
+
+    def interpret(self) -> Interpret:
+        """
+        How this table reads its events as beliefs, with identity resolved.
+
+        Built fresh rather than cached: `seats` grows as parties are seated and the
+        merge chain moves under it, so a closure captured once would go stale exactly
+        when a merge made it matter.
+        """
+        return domain.interpreter(
+            self.predicates, self.seats, IdentityRegistry(self.identity).canonical
+        )
+
+    # ---- what each party may see -------------------------------------------------------
+
+    def view(self, party: str) -> PartyView:
+        """One party's information set — the only thing an agent is ever handed."""
+        return PartyView(self, party)
 
     # ---- scope enumeration -----------------------------------------------------------
 
@@ -183,10 +241,39 @@ class Table:
         Derived from the parties, **not** from the belief store, which cannot enumerate
         scopes — a limitation that matters as soon as a re-key has to visit all of them.
         See :mod:`examples.negotiation.rekeying`.
+
+        Two per party since M8, not three. The `model-of` scope is gone: what a party
+        believes another holds is derived on demand and never written, so there is
+        nothing for a re-key to visit. That is a real consequence of R28 rather than a
+        tidy-up — a stored model of another mind would have to be re-keyed like anything
+        else, and now cannot fall out of step because it does not persist.
         """
-        found = [f(p) for p in self.parties for f in (held, stated)]
-        found += [model_of(a, b) for a in self.parties for b in self.parties if a != b]
-        return found
+        return [f(p) for p in self.parties for f in (held, stated)]
 
     def close(self) -> None:
         self.store.close()
+
+
+def _disagreements(model: Derived, reference: str, table: Table) -> list[Disagreement]:
+    """
+    Compare a *derived* model against a real scope.
+
+    :func:`~anagrapheus.beliefs.divergence` takes two scope ids and cannot be used here:
+    since R28 one side of these queries has no scope to name. It is a dict that existed
+    for the duration of a call.
+
+    The semantics are deliberately identical to the library's, and for the library's
+    reason: **only beliefs both sides hold are compared.** A belief one side has and the
+    other has never had is an absence, not a disagreement, and conflating them would
+    report every gap in a party's knowledge as a contradiction — which for a derived
+    model would be most of it, since the access gate keeps the modelled mind small on
+    purpose.
+
+    Sorted, because a dict's key order is not a contract worth asserting against.
+    """
+    known = {s.belief_id: s.value for s in table.core.query_scope(reference, BeliefFilter())}
+    return [
+        Disagreement(belief_id, model.beliefs[belief_id], known[belief_id])
+        for belief_id in sorted(model.beliefs.keys() & known.keys())
+        if model.beliefs[belief_id] != known[belief_id]
+    ]

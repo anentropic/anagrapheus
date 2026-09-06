@@ -1,5 +1,5 @@
 """
-Scope naming: how several actors hold beliefs about each other.
+Scope naming: two scopes per party, and the one that was a mistake.
 
 Doc 00 §6 keeps beliefs **per scope**, so *"several holders can believe contradictory
 things at once and where they diverge is a query"*, and §6c calls
@@ -9,24 +9,34 @@ Until this example, nothing exercised that. Every use in the library's own suite
 ``"agent"`` against ``"world"`` — one believer measured against ground truth, which is
 the degenerate case of a multi-holder design.
 
-**Higher-order belief needs no new machinery.** A scope id is an arbitrary string, so
-three scopes per party are enough to say what a party wants, what it has said, and what
-it thinks another party wants:
+**Two scopes per party**, both first-order, both stored:
 
 - ``party:{id}:held`` — what they actually want. Private.
 - ``party:{id}:stated`` — what they have said in the room. Public.
-- ``party:{id}:model-of:{other}`` — what they think another party holds.
 
-That yields three genuinely different questions from one three-line function, and the
-difference between them is the whole reason this domain was chosen:
+``own_gap(uk)`` — the distance between the two — is the query nobody but that party can
+ask, because nobody else has their ``held`` scope. That asymmetry is what makes the
+domain strategic rather than merely multi-party.
 
->>> divergence(store, model_of("eu", "uk"), held("uk"))     # how wrong are we about them
->>> divergence(store, stated("uk"), held("uk"))             # their own gap, word vs intent
->>> divergence(store, model_of("eu", "uk"), stated("uk"))   # do we take them at their word
+**There was a third, and removing it is the point of M8.** M7 added
+``party:{a}:model-of:{b}`` — what one party believes another holds — and claimed
+*"higher-order belief is scope naming"*. NVM had already ruled that shape out:
 
-The second is the one nobody but that party can ask, because nobody else has their
-``held`` scope. That asymmetry is what makes the domain strategic rather than merely
-multi-party.
+> **R28 — Higher-order belief is derived, never stored.** RATIFIED 2026-06-17. *"no
+> `BeliefState` ever stores 'X believes Y believes …'."*
+
+A stored nested record updates on the wrong event class — world events fold it forward
+when it must be gated by A's model of B's **access** — so deception and surprise break
+silently. It now lives in :mod:`examples.negotiation.nesting`, derived on demand from
+access-beliefs and discarded, which is what R27–R30 require.
+
+**R28 does carry an exception, and M7 sat inside it**, which is worth stating plainly
+rather than claiming more of a mistake than there was: a belief about another mind with
+*no witness trail* — a hunch about disposition, *"A thinks C resents her"* — **is** a
+stored first-order belief in A's scope. ``position(uk, fisheries)`` is a belief about
+the UK's *preference*, not about the UK's belief, so the rows M7 wrote were legitimate.
+What was wrong was calling them higher-order, and building the demo so that the moment a
+party formed a belief about another's *belief* it would have kept storing it.
 
 **Why this convention lives here and not in the library.** §6b argues the predicate
 registry belongs in code because it is *schema*. Scope naming is not schema — it is a
@@ -40,7 +50,7 @@ scopes holding ``position(uk, fisheries)`` differently is exactly the intended s
 
 from __future__ import annotations
 
-__all__ = ["held", "model_of", "party_of", "stated"]
+__all__ = ["held", "party_of", "stated"]
 
 
 def held(party: str) -> str:
@@ -51,11 +61,6 @@ def held(party: str) -> str:
 def stated(party: str) -> str:
     """What ``party`` has said publicly. Visible to everyone."""
     return f"party:{party}:stated"
-
-
-def model_of(holder: str, other: str) -> str:
-    """What ``holder`` believes ``other`` holds — the higher-order scope."""
-    return f"party:{holder}:model-of:{other}"
 
 
 def party_of(scope: str) -> str:
