@@ -2,9 +2,10 @@
 A model that plays this negotiation without a provider, and says how it decided.
 
 Doc 00 §2 makes the model call one seam, and this is what that buys: the whole demo —
-three rounds, twelve agent calls, three consolidations and a tool loop — runs in
-milliseconds with nothing on the network, and the *same* code path runs against a real
-provider when ``--live`` swaps this out.
+four rounds, sixteen agent calls and four consolidations, twenty-eight model requests
+once the tool loop's continuations are counted — runs in milliseconds with nothing on
+the network, and the *same* code path runs against a real provider when ``--live`` swaps
+this out.
 
 **It is not a stub and it is not a mock.** It reads the brief it is given and decides
 from it, so changing what an agent believes changes what it offers. A stub returning a
@@ -33,7 +34,7 @@ if TYPE_CHECKING:
     from pydantic_ai.models import Model
     from pydantic_ai.models.function import AgentInfo
 
-__all__ = ["scripted"]
+__all__ = ["respond", "scripted"]
 
 #: What the brief says when a party has no read of the other at all.
 UNKNOWN = "unknown"
@@ -51,19 +52,31 @@ def scripted(record: Callable[[str], None] | None = None) -> Model:
     the count is wanted after it.
     """
 
-    def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
-        prompt = _prompt(messages)
+    def recorded(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         if record is not None:
-            record(prompt)
-        if not info.output_tools:
-            # No structured output: the chronicle's summarizer.
-            return ModelResponse(parts=[TextPart(_consolidate(prompt))])
-        fields = info.output_tools[0].parameters_json_schema.get("properties", {})
-        if "concede" in fields:
-            return _offer(messages, info, prompt)
-        return _reading(prompt)
+            record(_prompt(messages))
+        return respond(messages, info)
 
-    return FunctionModel(respond)
+    return FunctionModel(recorded)
+
+
+def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+    """
+    One scripted response, as a plain function.
+
+    Exposed separately from :func:`scripted` so a test can wrap it — override the one
+    call it wants to go wrong and let every other call in the round behave normally.
+    Reaching into ``FunctionModel.function`` to do that works and types as ``Unknown``,
+    which is a way of being told the seam should be a function rather than an attribute.
+    """
+    prompt = _prompt(messages)
+    if not info.output_tools:
+        # No structured output: the chronicle's summarizer.
+        return ModelResponse(parts=[TextPart(_consolidate(prompt))])
+    fields = info.output_tools[0].parameters_json_schema.get("properties", {})
+    if "concede" in fields:
+        return _offer(messages, info, prompt)
+    return _reading(prompt)
 
 
 def _offer(messages: list[ModelMessage], info: AgentInfo, prompt: str) -> ModelResponse:

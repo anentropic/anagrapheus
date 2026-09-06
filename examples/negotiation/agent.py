@@ -37,7 +37,6 @@ belief whose value was prose would be a belief nothing could ever compare.
 
 from __future__ import annotations
 
-import uuid
 from typing import TYPE_CHECKING, Literal
 
 from doxastica import EdgeType
@@ -63,10 +62,11 @@ __all__ = [
     "Negotiator",
     "Offer",
     "Reading",
-    "UnrecordableReading",
+    "UnrecordableOutput",
     "brief_for",
     "precedent_tool",
     "record_offer",
+    "check_reading",
     "record_reading",
 ]
 
@@ -106,25 +106,32 @@ class Reading(BaseModel):
     because: str
 
 
-class UnrecordableReading(ValueError):
+class UnrecordableOutput(ValueError):
     """
-    A reading named a party or a clause that is not at the table.
+    A model's structured output named something the round cannot record.
 
-    Raised rather than allowed to fall through as a ``KeyError``, because the two read
-    very differently at three in the morning: a ``KeyError`` on ``seats`` looks like a
-    bug in the round loop, and this is a model naming something that does not exist —
-    an ordinary and expected thing for a model to do, and the application's job to
-    catch. The same reasoning as the rest of this repository's error types: the failure
-    that is quiet is the one that costs an hour.
+    A party or clause that is not at the table, or a clause other than the one under
+    negotiation. Raised rather than allowed to fall through as a ``KeyError`` — or,
+    worse, silently ignored — because the three read very differently at three in the
+    morning. A ``KeyError`` on ``seats`` looks like a bug in the round loop; a dropped
+    field looks like nothing at all; and this is a model naming something that does not
+    fit, which is an ordinary and expected thing for a model to do and the
+    application's job to catch.
+
+    **The silent case was the real one, and review found it.** ``record_offer`` took
+    the round's clause and never looked at ``offer.clause``, so a model proposing on a
+    different clause produced a ``Turn`` whose offer disagreed with the event
+    persisted for it — a disagreement nothing would ever surface.
     """
 
-    def __init__(self, kind: str, name: str, known: tuple[str, ...]) -> None:
+    def __init__(self, what: str, named: str, expected: tuple[str, ...]) -> None:
         super().__init__(
-            f"the update call named {kind} {name!r}, which is not at the table. "
-            f"Known: {', '.join(known) or '(none)'}."
+            f"the model named {what} {named!r}, which this round cannot record. "
+            f"Expected one of: {', '.join(expected) or '(none)'}."
         )
-        self.kind = kind
-        self.name = name
+        self.what = what
+        self.named = named
+        self.expected = expected
 
 
 def brief_for(view: PartyView, other: str, clause: str) -> str:
@@ -303,7 +310,14 @@ def record_offer(
     learns the content of and nothing about who else knows it, and the second rung of
     the tower goes quiet over public events. See
     :class:`~examples.negotiation.domain.PositionStated`.
+
+    **``offer.clause`` is checked against the clause being negotiated**, and used to be
+    ignored. A model proposing on some other clause had its answer recorded under this
+    one, so the returned :class:`Offer` and the ``PositionStated`` written for it
+    disagreed — and nothing anywhere compared them.
     """
+    if offer.clause != clause:
+        raise UnrecordableOutput("clause", offer.clause, (clause,))
     said = table.types.pending(
         domain.PositionStated(
             party=party,
@@ -322,8 +336,32 @@ def record_offer(
     )
 
 
+def check_reading(table: Table, reading: Reading, *, about: str, clause: str) -> None:
+    """
+    Whether ``reading`` is recordable, without writing anything.
+
+    Separate from :func:`record_reading` so a round can validate **every** party's
+    output before it writes **any** of it. Validating inside the write loop leaves the
+    first party's conclusion persisted when the second party's is rejected, and a round
+    that never closes — a half-written round is worse than a rejected one, because the
+    log then says something happened that did not.
+
+    It also checks the reading is about the party this agent was briefed on. Without it
+    a model answering about *itself* is a perfectly valid ``Reading`` that gets stored
+    as a belief about the wrong mind.
+    """
+    if reading.about != about:
+        raise UnrecordableOutput("party", reading.about, (about,))
+    if reading.clause != clause:
+        raise UnrecordableOutput("clause", reading.clause, (clause,))
+    if reading.about not in table.seats:
+        raise UnrecordableOutput("party", reading.about, table.parties)
+    if reading.clause not in table.clauses:
+        raise UnrecordableOutput("clause", reading.clause, tuple(table.clauses))
+
+
 def record_reading(
-    table: Table, reading: Reading, *, party: str, premise: BeliefState | None = None
+    table: Table, reading: Reading, *, party: str, premise: BeliefState
 ) -> BeliefState:
     """
     Write what ``party`` concluded into its own ``held`` scope, and say why.
@@ -333,12 +371,24 @@ def record_reading(
     what the UK wants lives in the EU's head, and writing it into the UK's scope would
     be the EU editing the UK's mind.
 
-    **``premise`` is the observation this rests on**, and the edge is the point of
-    taking it. ``add_edge(reading, premise, DERIVED_FROM)`` records the dependency, so
-    when the premise turns out to have been a bluff and is retracted,
+    **``premise`` is the observation this rests on, and is required.** The edge is half
+    the point of taking it: ``add_edge(reading, premise, DERIVED_FROM)`` records the
+    dependency, so when the premise turns out to have been a bluff and is retracted,
     ``core.get_impact(premise.state_id)`` reports exactly what it compromised rather
     than leaving a conclusion standing on a retracted fact. That query is doxastica's,
     reached around this library — see note 06 §7.
+
+    The other half is **provenance**, and it is why the parameter stopped being
+    optional. The belief's ``source_event_id`` is the premise's, so it names a real
+    event; the earlier fallback minted a bare ``uuid7()``, which
+    :mod:`~anagrapheus.beliefs.writer` is explicit about — the envelope id is *"exactly
+    the handle worth supplying"*, it makes "which event caused this belief" answerable,
+    and because doxastica orders states by ``source_event_id`` in UUID7 byte order it
+    makes the as-of cut agree with the log's own order. A phantom id answers that
+    question with an event that never happened, and sorts wherever it happens to land.
+
+    A conclusion in this domain always rests on something observed, so requiring it
+    costs nothing and closes both holes at once.
 
     **Every entity reference is canonicalized**, for the third time in this example and
     the second time it was nearly missed: `seats` and `clauses` keep the pre-merge names,
@@ -346,9 +396,9 @@ def record_reading(
     nothing. Note 06 §2a.
     """
     if reading.about not in table.seats:
-        raise UnrecordableReading("party", reading.about, table.parties)
+        raise UnrecordableOutput("party", reading.about, table.parties)
     if reading.clause not in table.clauses:
-        raise UnrecordableReading("clause", reading.clause, tuple(table.clauses))
+        raise UnrecordableOutput("clause", reading.clause, tuple(table.clauses))
     state = table.believe(
         held(party),
         reading.predicate,
@@ -357,12 +407,11 @@ def record_reading(
             table.canonical(table.clauses[reading.clause]),
         ),
         reading.value,
-        premise.source_event_id if premise is not None else uuid.uuid7(),
+        premise.source_event_id,
     )
-    if premise is not None:
-        # dependent -> source: `get_impact` walks against the arrows, so this is the
-        # direction that makes retracting the premise report the reading.
-        table.core.add_edge(state.state_id, premise.state_id, EdgeType.DERIVED_FROM)
+    # dependent -> source: `get_impact` walks against the arrows, so this is the
+    # direction that makes retracting the premise report the reading.
+    table.core.add_edge(state.state_id, premise.state_id, EdgeType.DERIVED_FROM)
     return state
 
 

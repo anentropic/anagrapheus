@@ -13,7 +13,7 @@ exists to show — each side deciding under uncertainty about the other — coll
 one side deciding under certainty. The cost is one extra pass over the parties. It buys
 the only thing that makes the plural interesting.
 
-**Four steps, and the middle two are the ones M7 could not reach:**
+**Five steps, and the middle three are the ones M7 could not reach:**
 
 1. **Act.** Each party's :meth:`~examples.negotiation.agent.Negotiator.propose` — a
    pinned call, which may reach the archive through a pinned tool.
@@ -39,7 +39,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from examples.negotiation import domain
-from examples.negotiation.agent import record_offer, record_reading
+from examples.negotiation.agent import check_reading, record_offer, record_reading
 from examples.negotiation.scopes import held
 
 if TYPE_CHECKING:
@@ -168,6 +168,12 @@ def play_round(
         )
         for party, agent in agents.items()
     }
+    # Validate every party's output before writing any of it. Checking inside the write
+    # loop leaves the first party's conclusion persisted when the second's is rejected,
+    # and a round that never closes -- a half-written round is worse than a rejected
+    # one, because the log then says something happened that did not.
+    for party, reading in readings.items():
+        check_reading(table, reading, about=opponents[party], clause=clause)
     concluded = {
         # The premise is what the *other* side said this round, which is the observation
         # the conclusion rests on. Retract it -- a bluff, withdrawn -- and `get_impact`

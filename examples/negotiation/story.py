@@ -1,5 +1,5 @@
 """
-The demo, as a story that runs: three rounds, two agents, and no model on replay.
+The demo, as a story that runs: four rounds, two agents, and no model on replay.
 
 ``python -m examples.negotiation`` prints what this yields, and
 ``tests/test_acceptance_m8.py`` asserts on the same object. So the demo **is** what is
@@ -22,11 +22,19 @@ otherwise. The EU wants a settlement. Three rounds:
    the UK was always going to — holds firm and takes the clause.
 
 Round 4 is the one worth the milestone. The UK reads the *world* correctly — the EU
-really will not move — while reading the *other mind* wrongly throughout, still
-believing its round-1 slip went unheard, and it settles because of the first and gets
-nothing for the second. Doc 24 §5's second-order point, in the story rather than only in
-a unit test: a party right about the world can be wrong about a belief, and the error
-lives at a level no first-order record can reach.
+really will not move — and settles because of it, while holding a **false belief about
+what the EU knows** from round one onwards: it thinks its slip went unheard, and it did
+not. Doc 24 §5's second-order point, in the story rather than only in a unit test: a
+party right about the world can be wrong about a belief, and the error lives at a level
+no first-order record can reach.
+
+**Be precise about how long the two levels stay apart**, because it is easy to overclaim
+and this docstring did. The *measured* mismatch — what the EU concludes about the UK
+against what the UK imagines it concludes — is wide after round one and closes in round
+two, when the UK states its position publicly and last-evidence-wins re-buries the leak.
+What persists throughout is the **false access-belief** the mismatch came from. Those
+are two claims, only the second holds all the way, and :class:`Mismatch` records the
+first round by round so the difference is visible rather than asserted.
 
 **A public statement re-buries a leak**, and that falls out rather than being decided:
 the fold is last-evidence-wins, so a party that states a position after letting
@@ -49,12 +57,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from examples.negotiation.agent import Negotiator
-from examples.negotiation.domain import (
-    ClauseTabled,
-    PositionStated,
-    RoundClosed,
-    SideRemarkOverheard,
-)
+from examples.negotiation.domain import ClauseTabled, PositionStated, RoundClosed
 from examples.negotiation.nesting import belief_of
 from examples.negotiation.rounds import Leak, play_round
 from examples.negotiation.scopes import held
@@ -365,11 +368,28 @@ def _who_heard(leak: Leak) -> str:
 
 def _render(event: StoredEvent) -> str:
     """
-    One event as a sentence, or nothing.
+    One event as a sentence, or nothing — the minutes of the room, and only those.
 
     Only the domain's own events, and no identifiers — see :class:`RoundSummary`. An
     unrecognised event is skipped rather than rendered generically: a summary listing
     ``BeliefMinted`` fourteen times is noise the model then has to be told to ignore.
+
+    **``SideRemarkOverheard`` is skipped, and that is a constraint rather than a
+    choice.** A chronicle is *one* projection, and its prose is appended to every
+    party's brief. There is no vantage point from which a shared summary can describe a
+    private event, because a party that must not know it is one of the readers — and
+    here it is the *speaker*, who believes the remark went unheard.
+
+    Rendering it was a real defect, caught in review: from round two the UK's own brief
+    read "uk let slip they would concede, overheard by eu", handing it the exact truth
+    its access-belief denies and that
+    :class:`~examples.negotiation.view.PartyView` raises rather than answer. R29 held on
+    the belief path and broke one layer below it, in the prompt. The scripted
+    counterpart reads the belief lines and ignores the prose, so nothing failed.
+
+    What a party believes it overheard still reaches it — through
+    :func:`~examples.negotiation.rounds._observed`, which is built per party from that
+    party's own beliefs. Note 06 §9a.
     """
     payload = event.payload
     match event.envelope.type:
@@ -377,11 +397,6 @@ def _render(event: StoredEvent) -> str:
             return f"the clause {payload['title']!r} was tabled"
         case PositionStated.__name__:
             return f"{payload['party']} stated {payload['position']}"
-        case SideRemarkOverheard.__name__:
-            return (
-                f"{payload['speaker']} let slip they would {payload['suggests']}, "
-                f"overheard by {payload['overheard_by']}"
-            )
         case RoundClosed.__name__:
             return f"round {payload['round_number']} closed"
         case _:

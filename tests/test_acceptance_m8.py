@@ -14,16 +14,23 @@ is **right about the world and wrong about another mind**, and it is wrong at a 
 first-order record anywhere can express.
 
 The UK lets something slip in round one and believes it went unheard. It did not go
-unheard. From then on the UK's model of the EU's model of the UK is wrong — and stays
-wrong while the world moves, which is exactly what
+unheard, and it goes on believing that for the rest of the negotiation. Round one is
+where the two levels are measurably apart: the EU's model of the UK reads ``concede``
+while the UK's model of *that model* reads ``hold_firm``. The gap closes in round two,
+when the UK states its position publicly and last-evidence-wins re-buries the leak — so
+what persists is the false **access-belief**, not the measured mismatch, and the test
+below asserts exactly that pair rather than the stronger thing it is tempting to say.
+
+A *stored* nested record could not even open that gap for one round, which is what
 [doc 24 §1](https://github.com/anentropic/narrative-vm/blob/main/_design/v2/24-nvm-higher-order-beliefs.md)
 says a *stored* nested belief cannot do: it would be folded forward on the next world
 event and quietly converge on the truth, *"and deception/surprise silently break."*
 
 **And the whole thing replays with no model reached — on a fresh store.** Not the one it
 recorded into: a different database, built by running the same story again, with every
-draw answered from the first run's log. Twelve agent calls, four consolidations and a
-tool loop, all pinned, all reused.
+draw answered from the first run's log. Sixteen agent calls and four consolidations —
+twenty-eight model requests once the tool loop's continuations are counted — all pinned,
+all reused.
 """
 
 from __future__ import annotations
@@ -162,11 +169,13 @@ def _gap_at(table: Table, party: str, as_of: UUID) -> list[str]:
 
 def test_the_demo_is_what_is_tested(tmp_path: Path):
     """
-    ``python -m examples.negotiation`` prints these steps and nothing else.
+    ``python -m examples.negotiation`` prints these steps, then what the replay cost.
 
     A demo that renders its own narration separately from what is asserted drifts within
     a milestone or two into describing behaviour the code no longer has. Both read the
-    same object, so this is the assertion that keeps them one thing.
+    same object, so this is the assertion that keeps them one thing. The CLI adds two
+    lines of its own after the steps — the replay's model-call count and its divergence
+    — which is why this does not say "and nothing else", as it did until review.
     """
     run = negotiate(tmp_path / "printed.db", model=scripted())
     try:

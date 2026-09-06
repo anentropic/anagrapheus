@@ -453,6 +453,62 @@ fall out of the same place:
   better summary. This is what makes the acceptance test's real claim possible: the
   whole negotiation replays **on a fresh store**, not the one it recorded into.
 
+## 9a. What a shared projection may contain — [ours, M8b review]
+
+The chronicle was rendered from the omniscient log and appended to **both** agents'
+prompts, so from round two the UK's own brief read:
+
+> Earlier rounds, as summarised (advisory prose, not canon):
+> - the clause 'fisheries' was tabled; eu stated hold_firm; uk stated hold_firm; **uk
+>   let slip they would concede, overheard by eu**; round 1 closed
+
+That is the exact truth the UK's access-belief denies, and the exact question
+`PartyView` raises rather than answer. **R29 held on the belief path and broke one layer
+below it, in the prompt.** The scripted counterpart reads the belief lines and ignores
+the prose, so all 339 tests passed while a live model was being handed the answer.
+
+The general statement is worth more than the fix: **a chronicle is one projection, and
+its prose reaches every reader, so it can only ever carry public content.** There is no
+vantage point from which a shared summary describes a private event correctly, because a
+party that must not know it is one of the readers — here, the speaker. So the chronicle
+became the minutes of the room: what was said, and nothing that was let slip. What a
+party believes it overheard still reaches it, through the per-party `_observed` built
+from that party's own beliefs.
+
+This is also the **fifth** instance of §2e's shape, and the first that a mutant would not
+have caught, because the leak was in a prompt rather than in a value any assertion
+compared. The test added for it reads the prompts.
+
+## 9b. Four more from the same review, and one that has no test — [ours, M8b review]
+
+- **`offer.clause` was never checked.** The event and belief took the round's clause, so
+  a model proposing on another one had its answer filed under this one and the returned
+  `Offer` disagreed with the `PositionStated` written for it. Nothing compared them.
+- **Conclusions were written as they were validated.** The first party's reading was
+  persisted before the second's was rejected, leaving a round that never closed and a log
+  saying something had happened that had not. Validation is now a pass over every party's
+  output *before* any write.
+- **A reading about the wrong party was recordable.** `record_reading` accepted any
+  seated party, so a model answering about *itself* stored a belief about the wrong mind.
+  `check_reading` now takes the party the agent was briefed on.
+- **`record_reading`'s premise was optional, with a `uuid7()` fallback.** Note 03 is
+  explicit that the envelope id is the handle worth supplying; a phantom id answers
+  "which event caused this" with an event that never happened, and sorts wherever it
+  lands under `get_scope_at`'s byte-order cut. **No mutant demonstrates this one** — the
+  round loop always passed a premise, so the bad path was reachable only by a caller that
+  did not exist yet. The fix is the required parameter, which is the §8 move again: put
+  the bad call out of the type system's reach rather than out of the tests'. The test
+  added asserts the invariant, not the mutant, and says so.
+
+**And four stale counts and two overstatements**, all correct as reported: three rounds
+where there are four, twelve agent calls where there are sixteen (twenty-eight requests
+with the tool loop), a "four steps" heading over five, an assertion message stating the
+opposite of its assertion, "and nothing else" where the CLI prints two more lines, and —
+the one worth noticing — *"reading the other mind wrongly throughout"* when the measured
+mismatch closes after round one. What persists is the false **access-belief**; the
+measured gap does not. That is the §2 error in miniature, committed in the PR that exists
+to correct it.
+
 ## 10. Open questions
 
 - **Does the re-key loop belong in the library?** §3 above states the case both ways
@@ -479,8 +535,9 @@ fall out of the same place:
 - **`--live` is unexercised by any test.** The flag swaps the scripted counterpart for
   `AnthropicModel` and the import is lazy, so an offline run never needs the SDK
   configured — but nothing in tiers 0–2 can run it, and tier 3 deliberately does not,
-  because a four-round negotiation against a real provider is fifteen calls a release
-  rather than one. So the claim available is that the *seam* is right (the model is a
+  because a four-round negotiation against a real provider is twenty-eight requests a
+  release rather than one — sixteen agent calls, four consolidations, and eight tool-loop
+  continuations. So the claim available is that the *seam* is right (the model is a
   parameter and everything downstream is pinned), not that a live run works. Somebody
   has to type it.
 - **The scripted counterpart decides from the brief, which is a smaller claim than it

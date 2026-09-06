@@ -16,16 +16,18 @@ from examples.negotiation.agent import (
     Negotiator,
     Offer,
     Reading,
-    UnrecordableReading,
+    UnrecordableOutput,
     record_offer,
     record_reading,
 )
 from examples.negotiation.rounds import Leak, play_round
 from examples.negotiation.scopes import held, stated
-from examples.negotiation.scripted import scripted
+from examples.negotiation.scripted import respond, scripted
 from examples.negotiation.story import CLAUSE, RoundSummary
 from examples.negotiation.table import Table
 from pydantic import ValidationError
+from pydantic_ai.messages import ModelResponse, ToolCallPart
+from pydantic_ai.models.function import FunctionModel
 
 from anagrapheus.chronicle import Anchors
 from anagrapheus.timeline import PinLedger, ReplayPins
@@ -34,7 +36,9 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
+    from pydantic_ai.messages import ModelMessage
     from pydantic_ai.models import Model
+    from pydantic_ai.models.function import AgentInfo
 
 
 def _agents(
@@ -113,11 +117,124 @@ def test_a_reading_cannot_name_a_nested_predicate():
 def test_a_reading_naming_nobody_raises_rather_than_keyerrors(table: Table):
     """A model naming a party that is not at the table is ordinary, and caught."""
     _opened(table)
+    premise = record_offer(
+        table, Offer(clause=CLAUSE, concede=False, because="opening"), party="uk", clause=CLAUSE
+    )
     reading = Reading(
         about="norway", clause=CLAUSE, predicate="red_line", value="never", because="a guess"
     )
-    with pytest.raises(UnrecordableReading, match="norway"):
-        record_reading(table, reading, party="eu")
+    with pytest.raises(UnrecordableOutput, match="norway"):
+        record_reading(table, reading, party="eu", premise=premise)
+
+
+def test_an_offer_on_another_clause_is_refused(table: Table):
+    """
+    ``offer.clause`` is checked against the clause being negotiated.
+
+    Review finding. It was ignored entirely: the event and the belief took the round's
+    clause, so a model proposing on something else had its answer filed under this one
+    and the returned ``Offer`` disagreed with the ``PositionStated`` written for it.
+    Nothing compared them, so nothing failed.
+    """
+    _opened(table)
+    table.table_clause("quotas")
+    with pytest.raises(UnrecordableOutput, match="quotas"):
+        record_offer(
+            table,
+            Offer(clause="quotas", concede=True, because="wrong clause"),
+            party="eu",
+            clause=CLAUSE,
+        )
+
+
+def test_a_conclusion_cites_a_real_event(table: Table):
+    """
+    A belief's ``source_event_id`` names an event that is actually in the log.
+
+    Review finding: ``record_reading``'s premise used to be optional and the fallback
+    minted a bare ``uuid7()``. :mod:`anagrapheus.beliefs.writer` is explicit that the
+    envelope id is the handle worth supplying — it makes "which event caused this
+    belief" answerable, and because doxastica orders states by ``source_event_id`` in
+    UUID7 byte order it makes the as-of cut agree with the log's own order. A phantom
+    id answers with an event that never happened and sorts wherever it lands.
+
+    **This test does not kill that mutant, and saying so is the point.** Restoring the
+    optional parameter and the fallback leaves the whole suite green, because the round
+    loop always passed a premise and the phantom path was only ever reachable by a
+    caller that did not yet exist. So the fix is not this assertion — it is making the
+    parameter required, which puts the bad call out of reach of the type system rather
+    than merely out of reach of the tests. What this asserts is the *invariant* the fix
+    protects, over every belief the round writes, which is worth having on its own and
+    is the thing a future caller would break.
+    """
+    _opened(table)
+    ledger = PinLedger(table.store, table.types)
+    played = play_round(table, _agents(table, scripted(), ledger), clause=CLAUSE, number=1)
+
+    in_the_log = {stored.envelope.event_id for stored in table.store.read()}
+    for turn in played.turns:
+        assert turn.concluded.source_event_id in in_the_log, (
+            "a conclusion cited an event that is nowhere in the log"
+        )
+        assert turn.said.source_event_id in in_the_log
+
+
+def test_no_conclusion_is_written_when_another_party_output_is_invalid(table: Table):
+    """
+    A round validates every party's output before writing any of it.
+
+    Review finding. Recording inside the loop left the first party's conclusion
+    persisted when the second's was rejected — and the round never closed, so the log
+    said something had happened that had not. A half-written round is worse than a
+    rejected one.
+    """
+    _opened(table)
+    ledger = PinLedger(table.store, table.types)
+
+    def astray(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        """The UK's update names a party that is not at the table; the EU's is fine."""
+        prompt = str(messages[-1].parts[-1].content)  # type: ignore[union-attr]
+        if "negotiating for uk" in prompt and "Record one conclusion" in prompt:
+            return ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        "final_result",
+                        {
+                            "about": "norway",
+                            "clause": CLAUSE,
+                            "predicate": "red_line",
+                            "value": "never",
+                            "because": "a party that is not here",
+                        },
+                    )
+                ]
+            )
+        return respond(messages, info)
+
+    agents = {
+        party: Negotiator(FunctionModel(astray), ledger, view=table.view(party))
+        for party in ("eu", "uk")
+    }
+    before = {scope: len(table.core.query_scope(scope, BeliefFilter())) for scope in table.scopes()}
+
+    with pytest.raises(UnrecordableOutput, match="norway"):
+        play_round(table, agents, clause=CLAUSE, number=1)
+
+    after = {scope: len(table.core.query_scope(scope, BeliefFilter())) for scope in table.scopes()}
+    concluded = {
+        scope: len(
+            [
+                s
+                for s in table.core.query_scope(scope, BeliefFilter())
+                if ":red_line(" in s.belief_id
+            ]
+        )
+        for scope in table.scopes()
+    }
+    assert concluded == dict.fromkeys(table.scopes(), 0), (
+        "the EU's conclusion was written before the UK's was rejected"
+    )
+    assert after.keys() == before.keys()
 
 
 def test_a_conclusion_records_what_it_rests_on(table: Table):
@@ -167,11 +284,15 @@ def test_a_conclusion_lands_in_the_concluding_party_own_scope(table: Table):
     in a docstring and asserted nowhere.
     """
     _opened(table)
+    premise = record_offer(
+        table, Offer(clause=CLAUSE, concede=False, because="opening"), party="uk", clause=CLAUSE
+    )
     before = table.core.query_scope(held("uk"), BeliefFilter())
     state = record_reading(
         table,
         Reading(about="uk", clause=CLAUSE, predicate="red_line", value="never", because="a read"),
         party="eu",
+        premise=premise,
     )
 
     assert state.scope_id == held("eu")
@@ -302,8 +423,63 @@ def test_the_archive_is_drawn_once_and_replayed(table: Table):
     )
 
     assert again == live
-    assert reached == [CLAUSE], "the replay reached the archive again"
+    assert reached == [CLAUSE], "the replay ran the archive lookup a second time"
     assert replay.divergence is None
+
+
+def test_the_chronicle_never_carries_a_private_event_to_a_party(tmp_path: Path):
+    """
+    A shared projection cannot describe a private event, because everyone reads it.
+
+    **Review finding, and the worst kind this PR could have had**: the chronicle was
+    rendered from the omniscient log and appended to *both* agents' prompts, so from
+    round two the UK's own brief read *"uk let slip they would concede, overheard by
+    eu"* — the exact truth its access-belief denies, and the one thing
+    :class:`~examples.negotiation.view.PartyView` raises rather than answer.
+
+    R29 held on the belief path and was broken one layer below it, in the prompt. The
+    scripted counterpart masked it completely: it reads the belief lines and ignores the
+    prose, so every test passed while a live model was being handed the answer.
+
+    The fix is a constraint on what may enter a *shared* generative projection at all.
+    There is no vantage point from which one chronicle can summarize a private event
+    for every reader, because a party that must not know it is one of the readers. So
+    the chronicle is the minutes of the room: what was said, and nothing that was let
+    slip.
+    """
+    summary = RoundSummary(scripted())
+    table = Table.open(tmp_path / "leak.db", "eu", "uk", summarize=summary)
+    try:
+        ledger = PinLedger(table.store, table.types)
+        summary.draws_through(ledger)
+        _opened(table)
+        prompts: list[str] = []
+        agents = _agents(table, scripted(prompts.append), ledger)
+        play_round(
+            table,
+            agents,
+            clause=CLAUSE,
+            number=1,
+            leak=Leak(
+                speaker="uk",
+                overheard_by="eu",
+                clause=CLAUSE,
+                suggests="concede",
+                believed_by={"eu": ("eu", "uk")},
+            ),
+        )
+        play_round(table, agents, clause=CLAUSE, number=2)
+
+        assert not any("let slip" in section.prose for section in table.chronicle.sections()), (
+            "a section describing a remark reaches every party, the speaker included"
+        )
+        for prompt in prompts:
+            if "negotiating for uk" in prompt:
+                assert "let slip" not in prompt, (
+                    "the UK was handed its own slip, which it believes went unheard"
+                )
+    finally:
+        table.close()
 
 
 def test_everything_said_is_believed_to_have_been_heard(table: Table):
