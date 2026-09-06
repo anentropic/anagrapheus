@@ -140,6 +140,32 @@ which the agent-core stack does not own — so **the step is absent rather than 
 What remains is the access gate, which is the part carrying R27–R29. The lens is a
 fidelity refinement whose own accuracy is still open (U22).
 
+## 2c. Absence of an attribute is not absence of a path — [ours, review round 1]
+
+The first `PartyView` bound `self._query = table.core.query_scope` and the module
+docstring claimed it "holds no reference to the belief core at all". **That was false.**
+A bound method carries `__self__`, so:
+
+- `view._query(held("uk"), …)` returned another party's private beliefs, and
+- `view._query.__self__` *was* the `MemoryCore` — reads and **writes** both, which is
+  worse than the review reported.
+
+The test written to prove the claim asserted `not hasattr(view, "core")`. It passed
+throughout, because it checked for a *name* while the reachability ran through a value.
+The same shape as the M7 error it was meant to prevent: an assertion that looks like
+evidence and is not.
+
+Now the view reads through one guarded function that raises `ScopeNotVisible` for any
+scope outside its information set — own `held`, anybody's `stated`. Mutation-tested:
+restoring the alias fails the test.
+
+**"Unwritable" was also the wrong word**, and the docstring no longer uses it. Python
+cannot make a value unreachable — the guard closes over `query_scope` and
+`read.__closure__` still finds it. The claim that survives is narrower and true: every
+*ordinary* read is checked, and a mistake fails loudly instead of answering plausibly.
+Deliberate introspection defeats it, and that is fine, because this was never security
+(§2 above) — it is a constraint on the reasoning path.
+
 ## 3. The finding: a plan is per belief id, a belief lives in N scopes — [ours]
 
 `plan_rekeys` returns **one plan** for a merged entity's belief. That belief is held in

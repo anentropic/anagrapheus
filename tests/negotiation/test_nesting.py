@@ -21,6 +21,7 @@ from doxastica import BeliefFilter
 from examples.negotiation import domain
 from examples.negotiation.nesting import DEFAULT_DEPTH, belief_of, reconstruct
 from examples.negotiation.scopes import held, stated
+from examples.negotiation.view import ScopeNotVisible
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -110,20 +111,26 @@ def test_a_view_cannot_reach_another_partys_private_scope(table: Table):
 
     view = table.view("eu")
 
-    # There is no belief store to reach, so there is no peek to write.
-    assert not hasattr(view, "core")
-    assert not hasattr(view, "table")
-
     # What the EU can read: its own beliefs, and what the UK has said publicly.
     assert [s.value for s in view.own()] == ["settle"]
     assert [s.value for s in view.public("uk")] == ["never"]
 
-    # What it cannot: the UK privately wants to concede, and nothing on this object
-    # returns that. The table can see it, which is why the assertion is worth making --
-    # the value is right there, one attribute away on an object the view refuses to hold.
-    assert "concede" not in [s.value for s in view.own()]
-    assert not any(hasattr(view, name) for name in ("private", "held", "query_scope"))
+    # What it cannot. The UK privately wants to concede -- the table can see that, which
+    # is what makes the next assertion worth making rather than vacuous.
     assert table.core.query_scope(held("uk"), BeliefFilter())[0].value == "concede"
+    assert "concede" not in [s.value for s in view.own()]
+
+    # The reader **refuses** a scope outside this party's information set. An earlier
+    # version asserted only `not hasattr(view, "core")`, which passed while `_query`
+    # was `core.query_scope` bound -- so `view._query(held("uk"), ...)` answered, and
+    # `view._query.__self__` was the whole MemoryCore. Absence of an attribute is not
+    # absence of a path; see note 06 §2c.
+    with pytest.raises(ScopeNotVisible, match="party:uk:held"):
+        view.read(held("uk"))
+
+    # And the one route that made writes reachable is gone: nothing this view holds is
+    # a bound method of the core.
+    assert not any(getattr(value, "__self__", None) is table.core for value in vars(view).values())
 
 
 # -- the case the stored design could not represent --------------------------------------

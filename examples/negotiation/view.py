@@ -12,15 +12,29 @@ Nothing in ``doxastica`` enforces that. ``MemoryCore.query_scope`` takes any str
 that returns a plausible answer and quietly destroys the thing the demo exists to show.
 Worse, it destroys it *invisibly*: a peeking agent looks like a well-informed agent.
 
-So the guarantee is built rather than documented. A :class:`PartyView` exposes its
-party's own scope, the public log, and every other party's **stated** scope — and holds
-no reference to the belief core at all, so there is nothing to reach through. Reading
-another party's private beliefs is not "avoided by discipline"; it is unwritable.
+So the guarantee is enforced rather than documented. A :class:`PartyView` reads through
+one guarded function that **refuses** any scope outside this party's information set —
+its own ``held`` and anybody's ``stated`` — raising :class:`ScopeNotVisible` rather than
+answering. A peek becomes a loud failure instead of a plausible value.
 
 This is the same move the chronicle made in note 05: :class:`~anagrapheus.chronicle.
 reading.Anchors` and ``Prose`` are separate objects so that a binding read *cannot*
 reach generated prose by accident. Both replace a rule someone must remember with a
-shape that has no room for the mistake.
+shape that pushes back.
+
+**The first attempt at this did not work, and the failure is worth keeping.** It bound
+``self._query = table.core.query_scope`` and claimed the view "holds no reference to the
+belief core at all". That is false: a bound method carries ``__self__``, so
+``view._query(held("uk"), …)`` answered with another party's private beliefs and
+``view._query.__self__`` was the entire ``MemoryCore`` — writes included. The test that
+was supposed to prove the claim asserted ``not hasattr(view, "core")``, which passed
+throughout. **Absence of an attribute is not absence of a path.** Note 06 §2c.
+
+**And "unwritable" was the wrong word.** Python has no way to make a value unreachable:
+this guard closes over ``query_scope``, and ``read.__closure__`` still finds it. What is
+true, and all that is claimed now, is that every *ordinary* read goes through a check
+that fails loudly on a scope this party may not see. Deliberate introspection defeats
+it; a mistake does not.
 
 **What this is not.** It is not security — a caller holding the ``Table`` can read
 whatever it likes, and should be able to: the composition root is omniscient by
@@ -38,6 +52,7 @@ from examples.negotiation.scopes import held, stated
 from anagrapheus.identity import IdentityRegistry
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
     from uuid import UUID
 
     from doxastica import BeliefState
@@ -45,7 +60,21 @@ if TYPE_CHECKING:
 
     from anagrapheus.timeline import DomainEvent
 
-__all__ = ["PartyView"]
+__all__ = ["PartyView", "ScopeNotVisible"]
+
+
+class ScopeNotVisible(LookupError):
+    """A party tried to read a scope outside its information set."""
+
+    def __init__(self, scope: str, party: str) -> None:
+        super().__init__(
+            f"{party!r} may not read {scope!r}: a view reads its own `held` scope and "
+            f"anybody's `stated` scope, and nothing else (R29). Reading another party's "
+            f"private beliefs would yield the *true* answer rather than this party's "
+            f"possibly-wrong model, and false belief would stop being representable."
+        )
+        self.scope = scope
+        self.party = party
 
 
 class PartyView:
@@ -61,11 +90,11 @@ class PartyView:
         self.predicates = table.predicates
         self.seats = dict(table.seats)
         self.clauses = dict(table.clauses)
-        # Deliberately bound as methods of the table rather than keeping the table --
-        # `self._table.core` would put the whole belief store one attribute away and
-        # give the guarantee back. A closure over the two reads this view is allowed
-        # leaves nothing to dereference.
-        self._query = table.core.query_scope
+        # A *guarded* reader, not `table.core.query_scope` bound. Aliasing the bound
+        # method was the first attempt and it left the guarantee entirely open: a bound
+        # method carries `__self__`, so the core -- reads and writes both -- came along
+        # with it. See the module docstring.
+        self.read = _guarded(table.core.query_scope, party)
         self._read = table.reader.read
         self._parties = table.parties
         #: How to read an event as beliefs, with identity already resolved. Bound
@@ -82,7 +111,7 @@ class PartyView:
 
     def own(self) -> list[BeliefState]:
         """Everything this party holds. Its own scope, so all of it is legible."""
-        return list(self._query(held(self.party), BeliefFilter()))
+        return self.read(held(self.party))
 
     def own_belief(self, belief_id: str) -> BeliefState | None:
         """One belief this party holds, by exact id, or ``None``."""
@@ -96,7 +125,7 @@ class PartyView:
         what you have committed to publicly is part of your own information set, and is
         exactly what :meth:`~examples.negotiation.table.Table.own_gap` measures against.
         """
-        return list(self._query(stated(party), BeliefFilter()))
+        return self.read(stated(party))
 
     def public_belief(self, party: str, belief_id: str) -> BeliefState | None:
         """One thing ``party`` has said, by exact id, or ``None``."""
@@ -144,3 +173,22 @@ class PartyView:
     def witnessed_id(self, party: str, event_id: UUID) -> str:
         """The belief id for "``party`` witnessed this event"."""
         return self.predicates.belief_id("witnessed", self._canonical(self.seats[party]), event_id)
+
+
+def _guarded(
+    query: Callable[[str, BeliefFilter], Sequence[BeliefState]], party: str
+) -> Callable[[str], list[BeliefState]]:
+    """
+    A reader that answers only for scopes ``party`` may see.
+
+    Own ``held``, anybody's ``stated``, nothing else. `stated` needs no party list --
+    those scopes are public by definition, and enumerating the seated parties here would
+    only go stale the moment another is seated mid-negotiation.
+    """
+
+    def read(scope: str) -> list[BeliefState]:
+        if scope != held(party) and not scope.endswith(":stated"):
+            raise ScopeNotVisible(scope, party)
+        return list(query(scope, BeliefFilter()))
+
+    return read
