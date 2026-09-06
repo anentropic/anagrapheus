@@ -12,6 +12,7 @@ import uuid
 from typing import TYPE_CHECKING
 
 import pytest
+from doxastica import BeliefFilter
 from examples.negotiation import domain
 from examples.negotiation.rekeying import apply_rekeys
 from examples.negotiation.scopes import held, stated
@@ -273,3 +274,49 @@ def test_a_rekey_carries_the_original_stance(table: Table):
 
     moved = next(iter(table.core.query_scope(held("uk"), BeliefFilter())))
     assert moved.stance is Stance.suspected, "the hedge survived the re-key"
+
+
+def test_a_clause_merge_moves_the_derived_model_too(table: Table):
+    """
+    A clause merge moves the derived model too, not only the stored beliefs.
+
+    Clauses are identity entities as much as parties are, and the derived read must
+    canonicalize both.
+
+    Note 06 §2a was written about exactly this -- a merge re-keys stored beliefs but
+    cannot reach into an immutable event payload, so a derived model has to resolve
+    identity at read time -- and the first implementation applied it to the *party*
+    reference only. Review round 2 caught the half. A stored position moves to the
+    surviving clause while the remark still names the absorbed one, so the two stop
+    intersecting: `misreading` reports perfect agreement and a brief line reads
+    `unknown`, both silently and both only after a merge.
+    """
+    kept = table.table_clause("fisheries")
+    absorbed = table.table_clause("Fisheries Annex")  # the same clause, tabled twice
+    source = uuid.uuid7()
+
+    table.believe(held("uk"), "position", (table.seats["uk"], absorbed), "concede", source)
+    remark = table.types.pending(
+        domain.SideRemarkOverheard(
+            speaker="uk", overheard_by="eu", clause_id=absorbed, suggests="concede"
+        )
+    )
+    table.append(remark)
+    table.believe(
+        held("eu"), "witnessed", (table.seats["uk"], remark.envelope.event_id), True, source
+    )
+    table.projector.catch_up()
+
+    table.append(merge(table.types, kept=kept, absorbed=absorbed))
+    table.projector.catch_up()
+    apply_rekeys(table, _plans(table), source_event=uuid.uuid7())
+    table.projector.catch_up()
+
+    survivor = table.predicates.belief_id("position", table.seats["uk"], kept)
+    assert any(
+        s.belief_id == survivor for s in table.core.query_scope(held("uk"), BeliefFilter())
+    ), "sanity: the stored belief was re-keyed to the surviving clause"
+    assert table.model_held_by("eu", "uk").get(survivor) == "concede", (
+        "and the derived model followed it, because the interpreter canonicalizes the "
+        "clause reference as well as the party one"
+    )

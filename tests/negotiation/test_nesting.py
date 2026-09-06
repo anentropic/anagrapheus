@@ -94,13 +94,16 @@ def test_deriving_a_model_writes_nothing(table: Table):
 
 def test_a_view_cannot_reach_another_partys_private_scope(table: Table):
     """
-    R29, structural rather than conventional.
+    R29, enforced rather than conventional.
 
     *"If you peeked at B's actual scope you would get the true answer, not A's
-    (possibly wrong) model, and false belief becomes unrepresentable."* A `PartyView`
-    holds no reference to the belief core, so the peek has nothing to be written
-    through — asserted as an attribute error, because a convention nobody can violate
-    is worth more than one everybody is told about.
+    (possibly wrong) model, and false belief becomes unrepresentable."*
+
+    What is asserted, and it is narrower than an earlier version of this docstring
+    claimed: the guarded reader **raises** on a scope outside the party's information
+    set, and no attribute of the view is a bound method of the core. Not that the core
+    is unreachable — it is, through `read.__closure__`, and Python offers no way to
+    prevent that. Ordinary reads are checked; that is the claim.
     """
     fisheries = table.table_clause("fisheries")
     source = uuid.uuid7()
@@ -131,6 +134,28 @@ def test_a_view_cannot_reach_another_partys_private_scope(table: Table):
     # And the one route that made writes reachable is gone: nothing this view holds is
     # a bound method of the core.
     assert not any(getattr(value, "__self__", None) is table.core for value in vars(view).values())
+
+
+def test_a_view_sees_parties_and_clauses_seated_after_it_was_built(table: Table):
+    """
+    A view reads live tables, not a snapshot of them.
+
+    The first version took `dict(table.seats)` and `dict(table.clauses)` at
+    construction. Belief and log reads stayed live, so a `Negotiator` built before a
+    party was seated became *partly* stale — `others()` quietly omitted the newcomer and
+    `position_id` raised `KeyError` for a name the table knew perfectly well. Review
+    round 2. A negotiation that seats a party mid-round is ordinary, and the guarded
+    reader already accounts for it by allowing any `stated` scope without a party list.
+    """
+    view = table.view("eu")
+
+    table.seat("norway")
+    quotas = table.table_clause("quotas")
+
+    assert "norway" in view.others(), "seated after construction, and visible"
+    assert view.position_id("norway", "quotas") == table.predicates.belief_id(
+        "position", table.seats["norway"], quotas
+    )
 
 
 # -- the case the stored design could not represent --------------------------------------
@@ -229,13 +254,28 @@ def test_second_order_is_not_reducible_to_first(table: Table):
     """
     Doc 24 §5: a party can be right about the world and wrong about another's belief.
 
-    The EU knows what the UK wants *and* believes the UK never learned that the EU
-    knows. Depth 1 and depth 2 disagree, and no first-order record can express the
-    difference — which is why the literature builds the second-order Sally-Anne task.
+    **The first version of this test proved the opposite of its name.** It used a side
+    remark, which names who overheard it — so the modelled UK was handed an access-belief
+    about the EU, both levels answered `"concede"`, and the assertion recorded that they
+    *agree*. Deleting the recursion entirely passed all eleven tests. Review round 2.
+
+    The levels have to be able to disagree, so the evidence is a `PositionStated`, which
+    carries no access-belief at all:
+
+    - **depth 1** — the EU believes the UK witnessed its own statement, so the EU's model
+      of the UK holds that position.
+    - **depth 2** — what the EU thinks the UK thinks *the EU* witnessed. The gate at that
+      level reads the level-1 model, which has no `witnessed(eu, …)` in it, so the EU's
+      model of the UK's model of the EU is empty.
+
+    Right about the world, wrong (or blank) about another's belief, and the error lives
+    at a level no first-order record can express — which is why the literature builds
+    the *second*-order Sally-Anne task. A recursion that collapsed the levels would make
+    these two equal, so this now fails against that mutant.
     """
     fisheries = table.table_clause("fisheries")
-    leak = _remark(table, speaker="uk", overheard_by="eu", clause=fisheries, suggests="concede")
-    _saw(table, believer="eu", party="uk", event=leak, it_happened=True)
+    said = _stated(table, party="uk", clause=fisheries, position="never")
+    _saw(table, believer="eu", party="uk", event=said, it_happened=True)
     table.projector.catch_up()
 
     position = table.predicates.belief_id("position", table.seats["uk"], fisheries)
@@ -245,12 +285,35 @@ def test_second_order_is_not_reducible_to_first(table: Table):
     first = belief_of(view, ("uk",), position, interpret=interpret)
     second = belief_of(view, ("uk", "eu"), position, interpret=interpret)
 
-    assert first == "concede", "the EU thinks the UK knows its own mind"
-    assert second == "concede", (
-        "and thinks the UK knows the EU overheard -- the remark names who overheard it, "
-        "so a witness forms an access-belief about that third party (R27)"
+    assert first == "never", "the EU knows what the UK said, and thinks the UK knows it"
+    assert second is None, (
+        "but nothing told the modelled UK that the EU was there, so the EU's model of "
+        "the UK's model of the EU is empty -- a level the first-order answer cannot "
+        "express, and the whole point of the tower"
     )
-    assert first is not None and second is not None
+    assert first != second, "the two levels genuinely disagree"
+
+
+def test_a_remark_carries_access_so_the_second_level_can_fill(table: Table):
+    """
+    The complement, and why the level-2 blank above is a gate and not a dead end.
+
+    A `SideRemarkOverheard` names who overheard it, so a witness forms an access-belief
+    about that third party (R27) — and *that* is what lets the next rung gate at all.
+    Same shape as the test above, one event type different, and the second level fills.
+    """
+    fisheries = table.table_clause("fisheries")
+    leak = _remark(table, speaker="uk", overheard_by="eu", clause=fisheries, suggests="concede")
+    _saw(table, believer="eu", party="uk", event=leak, it_happened=True)
+    table.projector.catch_up()
+
+    position = table.predicates.belief_id("position", table.seats["uk"], fisheries)
+    view, interpret = table.view("eu"), _interpret(table)
+
+    assert belief_of(view, ("uk",), position, interpret=interpret) == "concede"
+    assert belief_of(view, ("uk", "eu"), position, interpret=interpret) == "concede", (
+        "the remark told the modelled UK that the EU overheard, so the level-2 gate admits it too"
+    )
 
 
 def test_depth_bottoms_out_at_the_cap(table: Table):

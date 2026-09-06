@@ -98,16 +98,19 @@ Two stored scopes per party — `held`, `stated` — both first-order. The third
 discarded. `Derived` is deliberately not a `BeliefState` and not scope-shaped, so it
 cannot be handed back to `doxastica` even by accident.
 
-`PartyView` (`view.py`) is R29 made structural: it holds no reference to the belief
-core, so the peek has nowhere to be written. That is the same move note 05 made with
-`Anchors`/`Prose` — replace a rule someone must remember with a shape that has no room
-for the mistake.
+`PartyView` (`view.py`) enforces R29 rather than documenting it: reads go through a
+guard that raises `ScopeNotVisible` for any scope outside the party's information set —
+own `held`, anybody's `stated`. An accidental peek fails loudly instead of answering
+plausibly. That is the same *spirit* as note 05's `Anchors`/`Prose` split, but a weaker
+guarantee, and §2c below is the whole story of why: this section claimed the stronger
+one until review round 1 proved it false.
 
 **Both are asserted mechanically, not read for.** A recording wrapper proves a
-derivation calls no mutating op; the view is asserted to expose no core. Both were
-mutation-tested: making the gate admit everything (a stored model folding forward)
-fails four tests including the guard/courier case, and adding a memoising write fails
-the no-write test.
+derivation calls no mutating op; the guarded reader is asserted to *raise*, and no
+attribute of the view to be a bound method of the core. Mutation-tested: making the gate
+admit everything (a stored model folding forward) fails four tests including the
+guard/courier case, a memoising write fails the no-write test, and re-aliasing
+`core.query_scope` fails the R29 test.
 
 ## 2a. What R28 costs, which is not nothing — [ours]
 
@@ -165,6 +168,47 @@ cannot make a value unreachable — the guard closes over `query_scope` and
 *ordinary* read is checked, and a mistake fails loudly instead of answering plausibly.
 Deliberate introspection defeats it, and that is fine, because this was never security
 (§2 above) — it is a constraint on the reasoning path.
+
+## 2d. Review round 2 — a lesson applied by halves, and a test that proved its own negation — [ours]
+
+Five findings, all real, and two of them sharper than the round-1 one.
+
+**The depth-2 test proved the opposite of its name.** `test_second_order_is_not_reducible_to_first`
+asserted that depth 1 and depth 2 both answered `"concede"` — i.e. that the levels
+*agree*, which is reducibility. It used a side remark, and a remark names who overheard
+it, so the modelled UK was handed the access-belief that made level 2 fill. **Deleting
+the recursion entirely passed all eleven tests.** Now the evidence is a `PositionStated`,
+which carries no access-belief: depth 1 answers, depth 2 is empty, and the collapse
+mutant fails. A second test keeps the remark case, so the *reason* the two differ is
+visible rather than incidental.
+
+Three times now the same failure has appeared in this milestone: an assertion that reads
+like evidence and constrains nothing. §2c was the second. This is the third, and it was
+in the test for the tower — the one piece of M8a with no consumer yet exercising it,
+which is exactly where a weak test survives longest.
+
+**The clause reference was never canonicalized.** §2a above was written about precisely
+this — a merge re-keys stored beliefs but cannot reach into an immutable event payload,
+so a derived read must resolve identity itself — and the implementation applied it to
+the *party* reference only. Clauses are identity entities too (`Table.table_clause`
+establishes one). After a clause merge the stored position moved to the survivor while
+the interpreter kept minting the absorbed id, so the two stopped intersecting:
+`misreading` reported perfect agreement and a brief line read `unknown`. Silently, and
+only after a merge. Writing the lesson down did not make it applied.
+
+**A view was half-live.** `dict(table.seats)` and `dict(table.clauses)` froze at
+construction while belief and log reads stayed live, so a `Negotiator` built before a
+party was seated raised `KeyError` for a name the table knew and `others()` omitted it.
+Now read-only live mappings. A negotiation that seats a party mid-round is ordinary.
+
+**And two claims were still overstated** after §2c had already retracted the same
+overstatement elsewhere: `nesting.py` said the view "cannot reach another party's
+private scope at all", and §2 above said it "holds no reference to the belief core".
+Both corrected to the guarantee that actually holds.
+
+All three code fixes are mutation-tested. Two of them — the clause and the live
+mappings — initially had no failing test, which is how it was found that the fixes were
+unverified rather than merely unproven.
 
 ## 3. The finding: a plan is per belief id, a belief lives in N scopes — [ours]
 

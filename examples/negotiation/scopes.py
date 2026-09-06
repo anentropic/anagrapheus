@@ -20,7 +20,7 @@ domain strategic rather than merely multi-party.
 
 **There was a third, and removing it is the point of M8.** M7 added
 ``party:{a}:model-of:{b}`` — what one party believes another holds — and claimed
-*"higher-order belief is scope naming"*. NVM had ruled that shape out a year earlier:
+*"higher-order belief is scope naming"*. NVM had already ruled that shape out:
 
 > **R28 — Higher-order belief is derived, never stored.** RATIFIED 2026-06-17. *"no
 > `BeliefState` ever stores 'X believes Y believes …'."*

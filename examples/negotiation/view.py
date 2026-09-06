@@ -44,6 +44,7 @@ path*, which is where the modelling claim lives.
 
 from __future__ import annotations
 
+from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 from doxastica import BeliefFilter
@@ -88,15 +89,19 @@ class PartyView:
     def __init__(self, table: Table, party: str) -> None:
         self.party = party
         self.predicates = table.predicates
-        self.seats = dict(table.seats)
-        self.clauses = dict(table.clauses)
+        # Read-only *live* views, not snapshots. `dict(...)` froze the tables at
+        # construction, so a `Negotiator` built before `Table.seat()` or
+        # `table_clause()` raised `KeyError` for the new name and `others()` quietly
+        # omitted the new party -- a stale view that still read live beliefs, which is
+        # the worst of both. A negotiation that seats a party mid-round is ordinary.
+        self.seats = MappingProxyType(table.seats)
+        self.clauses = MappingProxyType(table.clauses)
         # A *guarded* reader, not `table.core.query_scope` bound. Aliasing the bound
         # method was the first attempt and it left the guarantee entirely open: a bound
         # method carries `__self__`, so the core -- reads and writes both -- came along
         # with it. See the module docstring.
         self.read = _guarded(table.core.query_scope, party)
         self._read = table.reader.read
-        self._parties = table.parties
         #: How to read an event as beliefs, with identity already resolved. Bound
         #: here so a reconstruction from this view cannot be handed a different
         #: reading of the same events than the table's own queries use.
@@ -152,8 +157,8 @@ class PartyView:
         return [(stored.envelope.event_id, decoded) for stored, decoded in self._read(since_seq)]
 
     def others(self) -> tuple[str, ...]:
-        """Every party but this one."""
-        return tuple(p for p in self._parties if p != self.party)
+        """Every party but this one, as of now — not as of construction."""
+        return tuple(p for p in self.seats if p != self.party)
 
     def position_id(self, party: str, clause: str) -> str:
         """
@@ -167,7 +172,14 @@ class PartyView:
         §5b records it.
         """
         return self.predicates.belief_id(
-            "position", self._canonical(self.seats[party]), self.clauses[clause]
+            "position",
+            self._canonical(self.seats[party]),
+            # The clause is canonicalized too. Clauses are identity entities as much as
+            # parties are (`Table.table_clause` establishes one), so two names for one
+            # clause can merge, and a lookup on the absorbed id would miss every
+            # re-keyed belief -- silently, returning `unknown` in a brief. Note 06 §2a
+            # was written about exactly this and then applied to parties only.
+            self._canonical(self.clauses[clause]),
         )
 
     def witnessed_id(self, party: str, event_id: UUID) -> str:

@@ -3,7 +3,8 @@ What one party thinks another believes — derived on demand, never stored.
 
 This module is the correction at the centre of M8. The M7 demo stored
 ``party:{a}:model-of:{b}`` as an ordinary scope and note 06 §2 called that *"higher-
-order belief is scope naming"*. **NVM ruled against that shape a year earlier**, and
+order belief is scope naming"*. **NVM had already ruled that shape out** (R28,
+RATIFIED 2026-06-17), and
 [doc 24 §1](https://github.com/anentropic/narrative-vm/blob/main/_design/v2/24-nvm-higher-order-beliefs.md)
 opens by naming it *"the wrong frame"*:
 
@@ -30,8 +31,12 @@ thrown away.
 **The hard constraint (R29).** The reconstruction reads only the observer's scope,
 never the target's. Peeking at the target would yield the *true* answer rather than the
 observer's possibly-wrong model, and false belief would be unrepresentable. Here that
-is not a rule to remember: :class:`~examples.negotiation.view.PartyView` cannot reach
-another party's private scope at all, so the peek has nowhere to be written.
+is not left to discipline: :class:`~examples.negotiation.view.PartyView` reads through
+a guard that raises :class:`~examples.negotiation.view.ScopeNotVisible` for any scope
+outside this party's information set, so an accidental peek fails loudly instead of
+answering. It is not *unreachable* — the guard closes over ``query_scope`` and
+``read.__closure__`` still finds it, and Python offers no way to change that. Ordinary
+reads are checked; deliberate introspection is not, and does not need to be.
 
 **The seam (R50, RATIFIED 2026-07-04).** Derivation is orchestration over existing core
 *reads* — ``query_scope`` and ``get_scope_at``, both reads. The fold is example-side,

@@ -163,7 +163,12 @@ def interpreter(
     could never have a model of its own, and the tower would stop at depth 1 for want of
     the gate rather than by design.
 
-    **Entity references are canonicalized at read time, and they have to be.** A merge
+    **Every entity reference is canonicalized at read time -- clauses as much as
+    parties.** Clauses are identity entities too (`Table.table_clause` establishes one),
+    so two names for one clause can merge, and the immutable event keeps naming the
+    absorbed id. Missing that on the clause leaves the derived model keyed differently
+    from the re-keyed stored beliefs, so a comparison reports no overlap and a brief
+    line reads `unknown` -- silently, and only after a merge. A merge
     re-keys stored beliefs, but it cannot reach into an event payload -- the log is
     immutable, and a party named in a remark stays named there forever. A *stored*
     model of another mind is carried along by the re-key; a *derived* one is rebuilt
@@ -187,7 +192,9 @@ def interpreter(
             return (
                 (
                     registry.belief_id(
-                        "position", canonical(seats[payload.party]), payload.clause_id
+                        "position",
+                        canonical(seats[payload.party]),
+                        canonical(payload.clause_id),
                     ),
                     payload.position,
                 ),
@@ -196,7 +203,9 @@ def interpreter(
             return (
                 (
                     registry.belief_id(
-                        "position", canonical(seats[payload.speaker]), payload.clause_id
+                        "position",
+                        canonical(seats[payload.speaker]),
+                        canonical(payload.clause_id),
                     ),
                     payload.suggests,
                 ),
