@@ -190,6 +190,38 @@ Three smaller ones, each a real defect:
 - **`chronicle` was missing from the package root**, so `import anagrapheus;
   anagrapheus.chronicle` did not work and root API discovery omitted the new layer.
 
+## 7b. The first consumer outside this suite — [ours, M8b]
+
+The negotiation demo installs `ChronicleFold` with `RoundClosed` as its unit boundary,
+and three things only a real consumer surfaces came out of it.
+
+**The unit vocabulary really is the application's.** A negotiation's unit is a *round* —
+not a turn, not a session, and nothing the library could have guessed. `EventTypes` was
+enough; no consumer has yet wanted a boundary that is a predicate over payload rather
+than a type.
+
+**A generative fold cannot be wired like a pure one.** Every other fold in `anagrapheus`
+is constructed with the stores it writes and nothing else. This one needs a summarizer,
+the summarizer needs the pin ledger, and the ledger needs the store the composition root
+has not opened yet. The demo resolves it by binding the resolver after construction and
+raising if a draw arrives before one — see [note 06 §9](06-demo-agent.md). It is the one
+fold whose installation is opt-in there, for the same reason: it bills a model call on
+every boundary, so a table opened to ask belief questions is not billed for prose nobody
+reads.
+
+**§5's rule about where the key is built has a second edge.** Building the key inside the
+summarizer is necessary so a rewritten prompt is noticed — that is R61 clause 5. What the
+demo added is the converse obligation on the *prompt*: it may not contain an identifier.
+A consolidation prompt rendering an entity id, a minted belief id or an event id keys
+differently on every run, so every pin misses and the fold silently re-draws. The demo's
+renderer therefore reads its four domain events by their human fields and skips the
+bookkeeping — which is what makes its acceptance test able to claim the stronger thing:
+the whole run replays on a **fresh store**, not the one that recorded it.
+
+**What is still not exercised.** Four rounds is not the case this layer exists for. The
+recency/depth split is wired and read, but nothing yet runs long enough for consolidated
+prose to be doing work that the verbatim tail could not.
+
 ## 8. Open questions
 
 - **Nothing enforces the no-binding-read rule across a process boundary.** The API split

@@ -60,11 +60,27 @@ class ClauseTabled(DomainEvent, frozen=True):
 
 
 class PositionStated(DomainEvent, frozen=True):
-    """A party says, in the room, what it wants on a clause."""
+    """
+    A party says, in the room, what it wants on a clause.
+
+    ``heard_by`` is who was in the room, and it is what makes a *modelled* mind able to
+    model a third. Without it a derived mind knows what was said and nothing about who
+    else knows it, so the tower stops at depth 1 over public events and only an
+    overheard remark can carry the next rung — a limit of this event's shape rather than
+    of the design. The same field `SideRemarkOverheard.overheard_by` is, for the case
+    where the room is one person.
+
+    It is still not a gate. A witness who learns of this event forms an *ordinary
+    first-order belief* about who else was there (R27), and that belief may be wrong
+    like any other; nothing here consults it to decide what anybody actually saw.
+    """
 
     party: str
     clause_id: UUID
     position: str
+    #: Who the event says was in the room. Defaults to nobody, which is honest for an
+    #: event constructed without saying — an empty room carries no access.
+    heard_by: tuple[str, ...] = ()
 
 
 class SideRemarkOverheard(DomainEvent, frozen=True):
@@ -149,8 +165,11 @@ def interpreter(
 
     Two events carry belief, and the asymmetry between them is the domain:
 
-    - **`PositionStated`** — a witness learns what a party said. Public, and cheap to
-      say, so it is only ever evidence about the party's *stated* position.
+    - **`PositionStated`** — a witness learns what a party said, **and who else was in
+      the room**. Public, and cheap to say, so it is only ever evidence about the
+      party's *stated* position — but the room is what lets a modelled mind hold a model
+      of a third, so a public statement carries the tower's next rung as much as a
+      remark does.
     - **`SideRemarkOverheard`** — a witness learns what a party appears to *want*, which
       is worth more precisely because it was not meant to be heard.
 
@@ -158,10 +177,17 @@ def interpreter(
     the fold. That is not a rule written anywhere: it falls out of later events winning,
     which is the only revision a derived view is allowed.
 
-    **A remark also names who else overheard it**, and a witness who learns that forms an
-    ordinary access-belief about the third party (R27). Without that, a modelled mind
-    could never have a model of its own, and the tower would stop at depth 1 for want of
-    the gate rather than by design.
+    **Both events name who else was there**, and a witness who learns that forms an
+    ordinary access-belief about each of them (R27). Without it a modelled mind could
+    never have a model of its own, and the tower would stop at depth 1 for want of the
+    gate rather than by design.
+
+    ``heard_by`` was added to `PositionStated` in M8b and needs no upcast, for one
+    reason worth naming rather than assuming: **no `PositionStated` had ever been
+    persisted**. M7 defined the event and never emitted it. Had any log held one, a
+    defaulted field would still have deserialized, but the honest move would have been a
+    version bump and an upcast that says what the old rooms are taken to have contained
+    -- because "nobody was there" is a claim about those events, not an absence of one.
 
     **Every entity reference is canonicalized at read time -- clauses as much as
     parties.** Clauses are identity entities too (`Table.table_clause` establishes one),
@@ -197,6 +223,13 @@ def interpreter(
                         canonical(payload.clause_id),
                     ),
                     payload.position,
+                ),
+                *(
+                    (
+                        registry.belief_id("witnessed", canonical(seats[heard]), event_id),
+                        True,
+                    )
+                    for heard in payload.heard_by
                 ),
             )
         if isinstance(payload, SideRemarkOverheard):
