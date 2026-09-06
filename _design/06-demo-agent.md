@@ -1,7 +1,9 @@
 # The demo agent, and tier 3
 
 **Created 2026-08-31.** The second consumer doc 00 §10 Q4 asks for, and the live smoke
-test note 00 planned six milestones ago and never built. Spec authority is
+test note 00 planned six milestones ago and never built. **M8a** corrected what the demo
+claimed about higher-order belief (§2); **M8b** built the two-agent, multi-round version
+that puts the correction under load (§§7–9). Spec authority is
 [`agent-core` doc 00 §6 and §10](https://github.com/anentropic/narrative-vm/blob/main/_design/agent-core/00-agent-core-architecture.md)
 and [note 00](00-testing-without-a-model.md).
 
@@ -210,6 +212,25 @@ All three code fixes are mutation-tested. Two of them — the clause and the liv
 mappings — initially had no failing test, which is how it was found that the fixes were
 unverified rather than merely unproven.
 
+## 2e. The fourth instance, and the shape it always has — [ours, M8b]
+
+`record_reading` writes what one party concluded into a scope. Swapping `held(party)`
+for `held(reading.about)` — the EU writing its read of the UK into *the UK's private
+beliefs* — **left all 338 tests green**, including the M8 acceptance test with its four
+rounds and its second-order assertions. Every subsequent `misreading` and `own_gap`
+would then have been measuring something the EU had put there itself.
+
+That is the fourth time in this example. §2c was the first, §2d the second and third.
+The shape has been identical every time:
+
+- the claim is stated in a docstring, clearly and correctly;
+- the test named after the claim asserts something adjacent that happens to hold;
+- the mutant that breaks the claim passes the whole suite.
+
+What catches it is never reading. It is asking, for each load-bearing sentence, *what
+line would I change to make this false* — and then changing it. Everything in M8b was
+checked that way: nine mutants, and the one that survived is the one written up here.
+
 ## 3. The finding: a plan is per belief id, a belief lives in N scopes — [ours]
 
 `plan_rekeys` returns **one plan** for a merged entity's belief. That belief is held in
@@ -353,25 +374,177 @@ Three more, each a real defect:
   the projector to add the belief index. That duplication was the smell; both tests now
   patch nothing.
 
-## 6. Open questions
+## 7. Reaching around the library — [ours, M8b]
+
+Three of doxastica's operations are used in this example and wrapped nowhere in
+`anagrapheus`:
+
+| call | what it buys here |
+| --- | --- |
+| `add_edge(reading, premise, DERIVED_FROM)` | why a conclusion was written |
+| `get_impact(premise)` | what a withdrawn bluff compromises |
+| `get_scope_at(scope, event)` | what a party believed at a round's close |
+
+**The direction is not arbitrary and cost a reading of the source to get right.** The
+core stores edges dependent → source and `get_impact` walks *against* the arrows, so
+`add_edge(conclusion, premise, …)` is what makes retracting the premise report the
+conclusion. Reversed, the query comes back empty and every test but one still passes.
+
+NVM **R50 (RATIFIED 2026-07-04)** blesses the read half outright — derivation is
+orchestration over `query_scope` and `get_scope_at`, both reads. The write half
+(`add_edge`) is not covered by any ruling and is used here on the demo's own judgment.
+
+**This stays a finding rather than a fix.** Widening the library on the say-so of its
+only consumer is how a library grows a surface nobody else asked for, and note 06 §3
+already declined the same invitation for the re-key loop. The right time to wrap these
+is when a *second* consumer wants them; the wrong time is now, when one does.
+
+## 8. What a round turned out to require — [ours, M8b]
+
+Four things the single-turn demo never had to decide.
+
+**Simultaneity.** Every party proposes before any offer is recorded. Record as you go —
+the obvious implementation — and the second party negotiates against a counterpart whose
+move it has already seen. That is not a round; it is two half-rounds, and it silently
+deletes the uncertainty the whole demo is about.
+
+**Access on public events.** `PositionStated` gained a `heard_by` field, because a
+derived mind that learns *what was said* and nothing about *who else knows it* cannot
+model a third party. Without it the tower stops at depth 1 over public statements and
+only an overheard remark can carry the next rung — a limit of the event's shape rather
+than of the design. It needed no upcast for one reason worth stating rather than
+assuming: no `PositionStated` had ever been persisted, because M7 defined the event and
+never emitted it.
+
+**A schema, not a prompt, is what forbids a nested belief.** The update call's output
+type has a `Literal` predicate naming `position` and `red_line`. There is no predicate
+that says *what they believe*, so R28 is enforced by the type. A prompt asking a model
+not to store something is a request; a type it cannot express is a wall. This is also
+the constructive half of the M8 correction — R28's own exception is a disposition held
+with no witness trail, and that **is** an ordinary first-order belief, so M8b writes
+exactly the rows M8a was careful to say were legitimate.
+
+**A public statement re-buries a leak.** The fold is last-evidence-wins, so a party that
+states a position after letting something slip is modelled on the statement again. Doc
+24 §4 is explicit that this is allowed — a model of another mind is *"deliberately
+best-effort"* and the core's revision operator stays out of it — but it is why a leak
+has to be *acted on* in the round after it lands, and why the demo runs four rounds
+rather than three.
+
+## 9. The composition root's one ordering knot — [ours, M8b]
+
+`Table.open` constructs the chronicle fold; the fold's summarizer draws through the same
+`PinLedger` as the agents; that ledger needs the store the table has not opened yet. So
+`RoundSummary` takes its resolver *after* construction, and drawing before it does
+raises rather than quietly making an unpinned call.
+
+Every other fold in this library is pure and has no such dependency. The generative one
+has, and the knot is what the fold that spends money costs. Two smaller consequences
+fall out of the same place:
+
+- **The chronicle fold is opt-in and every other fold is not.** Note 06 §5a records that
+  a half-wired `Table.open` was a smell; this is the exception, and the reason is that
+  installing this fold bills a model call on every `RoundClosed`. The *store* is always
+  present; the *fold* is asked for.
+- **A consolidation prompt may not contain an identifier.** A pin keys on what the model
+  is asked (§4c), so a prompt carrying an entity id, a minted belief id or an event id
+  keys differently on every run and every pin misses. The renderer therefore reads the
+  domain's own four events and skips the bookkeeping — which also happens to be the
+  better summary. This is what makes the acceptance test's real claim possible: the
+  whole negotiation replays **on a fresh store**, not the one it recorded into.
+
+## 9a. What a shared projection may contain — [ours, M8b review]
+
+The chronicle was rendered from the omniscient log and appended to **both** agents'
+prompts, so from round two the UK's own brief read:
+
+> Earlier rounds, as summarised (advisory prose, not canon):
+> - the clause 'fisheries' was tabled; eu stated hold_firm; uk stated hold_firm; **uk
+>   let slip they would concede, overheard by eu**; round 1 closed
+
+That is the exact truth the UK's access-belief denies, and the exact question
+`PartyView` raises rather than answer. **R29 held on the belief path and broke one layer
+below it, in the prompt.** The scripted counterpart reads the belief lines and ignores
+the prose, so all 339 tests passed while a live model was being handed the answer.
+
+The general statement is worth more than the fix: **a chronicle is one projection, and
+its prose reaches every reader, so it can only ever carry public content.** There is no
+vantage point from which a shared summary describes a private event correctly, because a
+party that must not know it is one of the readers — here, the speaker. So the chronicle
+became the minutes of the room: what was said, and nothing that was let slip. What a
+party believes it overheard still reaches it, through the per-party `_observed` built
+from that party's own beliefs.
+
+This is also the **fifth** instance of §2e's shape, and the first that a mutant would not
+have caught, because the leak was in a prompt rather than in a value any assertion
+compared. The test added for it reads the prompts.
+
+## 9b. Four more from the same review, and one that has no test — [ours, M8b review]
+
+- **`offer.clause` was never checked.** The event and belief took the round's clause, so
+  a model proposing on another one had its answer filed under this one and the returned
+  `Offer` disagreed with the `PositionStated` written for it. Nothing compared them.
+- **Conclusions were written as they were validated.** The first party's reading was
+  persisted before the second's was rejected, leaving a round that never closed and a log
+  saying something had happened that had not. Validation is now a pass over every party's
+  output *before* any write.
+- **A reading about the wrong party was recordable.** `record_reading` accepted any
+  seated party, so a model answering about *itself* stored a belief about the wrong mind.
+  `check_reading` now takes the party the agent was briefed on.
+- **`record_reading`'s premise was optional, with a `uuid7()` fallback.** Note 03 is
+  explicit that the envelope id is the handle worth supplying; a phantom id answers
+  "which event caused this" with an event that never happened, and sorts wherever it
+  lands under `get_scope_at`'s byte-order cut. **No mutant demonstrates this one** — the
+  round loop always passed a premise, so the bad path was reachable only by a caller that
+  did not exist yet. The fix is the required parameter, which is the §8 move again: put
+  the bad call out of the type system's reach rather than out of the tests'. The test
+  added asserts the invariant, not the mutant, and says so.
+
+**And four stale counts and two overstatements**, all correct as reported: three rounds
+where there are four, twelve agent calls where there are sixteen (twenty-eight requests
+with the tool loop), a "four steps" heading over five, an assertion message stating the
+opposite of its assertion, "and nothing else" where the CLI prints two more lines, and —
+the one worth noticing — *"reading the other mind wrongly throughout"* when the measured
+mismatch closes after round one. What persists is the false **access-belief**; the
+measured gap does not. That is the §2 error in miniature, committed in the PR that exists
+to correct it.
+
+## 10. Open questions
 
 - **Does the re-key loop belong in the library?** §3 above states the case both ways
   and deliberately does not decide it.
 - **Nothing enumerates scopes.** The application supplies the list, which is fine while
   the parties are known up front and gets harder if scopes are created dynamically.
-- **The demo has one round, one agent, and no pinned tool.** M7.3 claimed all three and
-  delivered only the pinned model; the task is reopened. The chronicle's recency/depth
-  split is exercised in M6's own suite but not here, so a long negotiation — the case
-  the chronicle exists for — is still only tested against synthetic units, and
-  `RoundClosed` is defined but never emitted. **M8b** is the two-agent, multi-round
-  version; M8a shipped only the rulings.
-- **Nothing here forms a belief about another party's *belief*.** The derived read
-  supports it — that is what the `chain` argument and the depth cap are for — but the
-  domain's events carry preferences and access, not beliefs-about-beliefs. So R28 is
-  honoured by construction rather than under pressure, and the tower is exercised at
-  depth 2 by a test rather than by the demo. Until an agent actually needs `belief_of`
-  at depth, the strongest claim available is that storing it is now impossible, not
-  that deriving it is load-bearing.
+- ~~**The demo has one round, one agent, and no pinned tool.**~~ **Closed by M8b.** Four
+  rounds, two agents, two pinned calls each, a pinned tool in the loop and `RoundClosed`
+  as the chronicle's unit boundary — note 05's first consumer outside its own suite.
+- ~~**Nothing here forms a belief about another party's *belief*.**~~ **Closed by M8b.**
+  The demo now turns on one: the UK lets something slip in round one and believes it went
+  unheard, so its model of the EU's model of the UK reads `hold_firm` while the EU's own
+  model reads `concede`. Both derived from the same log, differing only in which access
+  beliefs gate them, and neither ever stored. The claim available today is the one M8a
+  could not make — deriving it is load-bearing, not merely possible.
+- **The chronicle is consumed but not yet *needed*.** Four rounds consolidate to four
+  sections and the sections reach the next round's prompt, which is more than M6's own
+  suite exercised. It is still not the case the chronicle exists for: nothing here runs
+  long enough for the recency/depth split to be doing real work rather than being wired
+  correctly.
+- **A round is pairwise, and says so by raising.** With three parties a round has a shape
+  this code has not decided on — simultaneous pairwise briefs, or one offer to the table
+  — and guessing would have shipped a plural case nobody thought about.
+- **`--live` is unexercised by any test.** The flag swaps the scripted counterpart for
+  `AnthropicModel` and the import is lazy, so an offline run never needs the SDK
+  configured — but nothing in tiers 0–2 can run it, and tier 3 deliberately does not,
+  because a four-round negotiation against a real provider is twenty-eight requests a
+  release rather than one — sixteen agent calls, four consolidations, and eight tool-loop
+  continuations. So the claim available is that the *seam* is right (the model is a
+  parameter and everything downstream is pinned), not that a live run works. Somebody
+  has to type it.
+- **The scripted counterpart decides from the brief, which is a smaller claim than it
+  looks.** It reads one line of the brief and branches on it, so changing a belief
+  changes an offer and the demo is not a fixture. It is still not a model: nothing here
+  shows that a *real* model given this brief would use the third line at all, which is
+  an eval question and note 00 §6 keeps evals out of the test suite.
 - **Tier 3 tests one call.** Structured output, tool calls and streaming against a real
   provider are all still unproven; the pins that cover them are synthetic. Widening it
   costs cents, and the reason not to is that each addition is another thing that can

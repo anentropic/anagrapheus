@@ -145,7 +145,7 @@ def test_milestone_7_acceptance(tmp_path: Path):
     assert "Their stated position: never" in calls[0], (
         "the agent saw the public position and moved on the private one anyway"
     )
-    record_offer(table, offer, party="eu", clause_id=fisheries, source=uuid.uuid7())
+    record_offer(table, offer, party="eu", clause="fisheries")
     ledger.commit()
 
     # -- and the round replays with no model reached ----------------------------------
