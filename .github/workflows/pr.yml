@@ -34,7 +34,7 @@ jobs:
         run: uv run pytest --cov=src/anagrapheus --cov-report=xml --cov-report=term
 
       - name: Post coverage comment
-        uses: MishaKav/pytest-coverage-comment@v1.11.0
+        uses: MishaKav/pytest-coverage-comment@v1.12.2
         with:
           pytest-coverage-path: coverage.xml
           github-token: ${{ secrets.GITHUB_TOKEN }}
