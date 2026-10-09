@@ -40,6 +40,7 @@ __all__ = ["respond", "scripted"]
 UNKNOWN = "unknown"
 
 _MODELLED = "What we believe they actually want: "
+_CONCLUDED = "Our read of their bottom line: "
 
 
 def scripted(record: Callable[[str], None] | None = None) -> Model:
@@ -91,16 +92,18 @@ def _offer(messages: list[ModelMessage], info: AgentInfo, prompt: str) -> ModelR
     if any(name == "precedent" for name in _tools_offered(info)) and not _already_asked(messages):
         return ModelResponse(parts=[ToolCallPart("precedent", {"clause": _clause(prompt)})])
     theirs = _line(prompt, _MODELLED)
+    concluded = _line(prompt, _CONCLUDED)
     return ModelResponse(
         parts=[
             ToolCallPart(
                 "final_result",
                 {
                     "clause": _clause(prompt),
-                    # Concede only against a side believed immovable. An opening round,
-                    # where the model of the other is empty, holds firm: `unknown` is
-                    # not `never`, and treating it as one would make ignorance concede.
-                    "concede": theirs == "never",
+                    # Concede only against a side believed immovable -- by what we derive
+                    # they want, or by what we concluded about them last round. An
+                    # opening round, where both are empty, holds firm: `unknown` is not
+                    # `never`, and treating it as one would make ignorance concede.
+                    "concede": "never" in (theirs, concluded),
                     "because": f"we read their position as {theirs}",
                 },
             )

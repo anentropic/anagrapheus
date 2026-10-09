@@ -12,8 +12,16 @@ import uuid
 from typing import TYPE_CHECKING
 
 from examples.negotiation import domain
-from examples.negotiation.agent import Negotiator, brief_for
+from examples.negotiation.agent import (
+    Negotiator,
+    Offer,
+    Reading,
+    brief_for,
+    record_offer,
+    record_reading,
+)
 from examples.negotiation.scopes import held, stated
+from examples.negotiation.scripted import scripted
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.models.function import FunctionModel
 
@@ -129,6 +137,72 @@ def test_the_offer_changes_when_only_the_derived_model_changes(table: Table):
     assert all("Their stated position: never" in prompt for prompt in seen), (
         "the public position never changed -- only what we believed about them"
     )
+
+
+def _concluded(table: Table, *, about_them: str) -> None:
+    """The EU's update call has concluded ``about_them`` is the UK's bottom line."""
+    premise = record_offer(
+        table,
+        Offer(clause="fisheries", concede=False, because="opening"),
+        party="uk",
+        clause="fisheries",
+    )
+    record_reading(
+        table,
+        Reading(
+            about="uk",
+            clause="fisheries",
+            predicate="red_line",
+            value=about_them,
+            because="what their opening told us",
+        ),
+        party="eu",
+        premise=premise,
+    )
+    table.projector.catch_up()
+
+
+def test_the_brief_carries_what_the_update_call_concluded(table: Table):
+    """
+    The fourth line: what this party concluded about the other last round.
+
+    **It was missing, and nothing noticed.** M8b added a second pinned call per party
+    per round, writing a ``red_line`` reading into the party's own scope, and nothing
+    read it back: not the brief, not ``misreading``, not ``own_gap``. The update call
+    ran, was pinned, replayed perfectly, and could not affect a single offer. Swapping
+    its model for a better one or a worse one would have changed nothing measurable,
+    and an evaluation would have scored every model an equally good updater.
+    """
+    _set_up(table, believed="hold_firm")
+    _concluded(table, about_them="never")
+
+    brief = brief_for(table.view("eu"), "uk", "fisheries")
+
+    assert "Our read of their bottom line: never" in brief
+
+
+def test_the_offer_changes_when_only_the_reading_changes(table: Table):
+    """
+    M7's behavioural test, for the update call instead of the derived model.
+
+    Everything held fixed — what we want, what they said, what we derive they want —
+    except what we concluded about them last round, and the demo's own proposer offers
+    differently. That is what makes the update role's model worth choosing: until now
+    nothing it produced could reach a decision.
+    """
+    _set_up(table, believed="hold_firm")
+    _concluded(table, about_them="hold_firm")
+    steady = Negotiator(
+        scripted(), PinLedger(table.store, table.types), view=table.view("eu")
+    ).propose("uk", "fisheries")
+
+    _concluded(table, about_them="never")
+    moved = Negotiator(
+        scripted(), PinLedger(table.store, table.types), view=table.view("eu")
+    ).propose("uk", "fisheries")
+
+    assert steady.concede is False
+    assert moved.concede is True, "a party read as immovable is one worth conceding to"
 
 
 def test_a_round_replays_without_reaching_the_model(table: Table):

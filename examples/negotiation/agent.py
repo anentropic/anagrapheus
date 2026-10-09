@@ -138,9 +138,15 @@ def brief_for(view: PartyView, other: str, clause: str) -> str:
     """
     What ``view``'s party knows going into a round about ``other``'s position.
 
-    Three lines from three sources, and the difference between them is the whole brief:
-    what we want, what they said, and what we think they actually want. A brief built
-    from one source would read identically whether or not we had any model of them.
+    Four lines from four sources, and the difference between them is the whole brief:
+    what we want, what they said, what we derive they actually want, and what we
+    concluded about their bottom line last round. A brief built from one source would
+    read identically whether or not we had any model of them.
+
+    **The fourth line closes a loop M8b left open.** The update call writes a
+    ``red_line`` reading every round, and until note 06 §11 nothing read it back — so
+    the second pinned call ran, replayed, and could not affect a single offer. A model
+    swapped into that role would have changed nothing measurable.
 
     **The third line is derived, not read.** Since M8 there is no
     ``party:{a}:model-of:{b}`` scope to query — R28 forbids storing it — so it is
@@ -171,12 +177,15 @@ def brief_for(view: PartyView, other: str, clause: str) -> str:
         (other,),
         interpret=view.interpret,
     ).get(theirs)
+    # Our own scope, so readable; a belief *about* them, so R28's exception applies.
+    concluded = view.own_belief(view.red_line_id(other, clause))
 
     return (
         f"Clause: {clause}\n"
         f"Our position: {'unknown' if ours is None else ours.value}\n"
         f"Their stated position: {'unknown' if said is None else said.value}\n"
-        f"What we believe they actually want: {'unknown' if modelled is None else modelled}"
+        f"What we believe they actually want: {'unknown' if modelled is None else modelled}\n"
+        f"Our read of their bottom line: {'unknown' if concluded is None else concluded.value}"
     )
 
 
