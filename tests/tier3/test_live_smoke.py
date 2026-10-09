@@ -79,11 +79,19 @@ ROUTES = (
     Route(
         name="openrouter",
         key="OPENROUTER_API_KEY",
-        # Claude again, so the only thing that differs from the route above is the route.
-        # And cheap on purpose, which the direct route deliberately is not: through
-        # OpenRouter the response shape is the router's whichever model answers, so the
-        # model choice stops carrying the argument it carries there.
-        default_model="openrouter:anthropic/claude-haiku-5.5",
+        # The cheapest model that passes all four checks: free, at $0 a token. Cheap on
+        # purpose, which the direct route deliberately is not -- through OpenRouter the
+        # response shape is the router's whichever model answers, so the model choice
+        # stops carrying the argument it carries there.
+        #
+        # Free models draw on a shared upstream pool, and that is their cost. When this
+        # default was chosen, two other free models (`google/gemma-4-31b-it:free`,
+        # `inclusionai/ling-3.1-flash`) were rate-limited before their first request
+        # completed; this one, on Nvidia's pool, passed. A 429 at release is the pool,
+        # not this library: set TIER3_OPENROUTER_MODEL to a cheap paid model --
+        # `openrouter:mistralai/mistral-nemo` was about $0.03 per million tokens -- and
+        # re-run. The whole tier is a few thousand tokens.
+        default_model="openrouter:nvidia/nemotron-3-super-120b-a12b:free",
         # `OpenRouterModel`, which subclasses `OpenAIChatModel`. An earlier draft said
         # `OpenAIChatModel` -- true of a model built by hand over `OpenRouterProvider`,
         # not of what `infer_model` builds -- and the assertion below caught it.

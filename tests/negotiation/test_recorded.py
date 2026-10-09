@@ -20,7 +20,7 @@ from examples.negotiation.scripted import scripted
 from examples.negotiation.story import negotiate
 
 from anagrapheus.timeline import PinMiss, ReplayPins, UpcastRegistry, read_recording
-from tests.fixtures.record import NEGOTIATION
+from tests.fixtures.record import NEGOTIATION, NEGOTIATION_LIVE, replay_lineup
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -60,5 +60,56 @@ def test_the_committed_negotiation_replays_from_disk(tmp_path: Path):
         assert final.turn("uk").offer.concede and not final.turn("eu").offer.concede, (
             "and it is the same negotiation: the UK concedes in round four"
         )
+    finally:
+        run.table.close()
+
+
+def test_a_real_route_recording_replays_offline_without_its_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """
+    Real response shapes, in the default suite, on every commit, with no secret.
+
+    Every other pin in tiers 0–2 came from a ``FunctionModel``. This corpus was recorded
+    through OpenRouter on a real model, so replaying it runs the pin round trip over
+    shapes nothing synthetic produces — tier 3's question, asked continuously instead of
+    at release.
+
+    The keys are removed first, so "needs no key" is tested rather than assumed: the
+    recorded models are rebuilt with a placeholder credential that a strict replay never
+    sends, because it raises at the first miss before any request is made.
+    """
+    for key in ("OPENROUTER_API_KEY", "ANTHROPIC_API_KEY"):
+        monkeypatch.delenv(key, raising=False)
+    recording = read_recording(NEGOTIATION_LIVE)
+    responses = [
+        stored.payload["result"]
+        for stored in recording.events
+        if stored.payload.get("kind") == "model_call"
+    ]
+    assert responses and all(
+        isinstance(r, dict) and r.get("provider_name") == "openrouter" for r in responses
+    ), "every model call in this corpus came from a real provider, not a scripted one"
+
+    try:
+        run = negotiate(
+            tmp_path / "replay.db",
+            models=replay_lineup(recording.header),
+            resolver=lambda table: ReplayPins.from_events(
+                recording.events, table.types, upcasts=UpcastRegistry(), on_miss="strict"
+            ),
+        )
+    except PinMiss as miss:
+        pytest.fail(
+            f"{NEGOTIATION_LIVE.name} no longer replays: a request changed since it was "
+            f"recorded through {recording.header['lineup']}. If the change was deliberate, "
+            f"re-record with `{recording.header['rerecord']}` and commit the diff. "
+            f"First miss: {miss}"
+        )
+
+    try:
+        assert run.lineup.describe(run.table.parties) == recording.header["lineup"]
+        assert len(run.rounds) == 4
+        assert all(t.reading.predicate == "red_line" for r in run.rounds for t in r.turns)
     finally:
         run.table.close()

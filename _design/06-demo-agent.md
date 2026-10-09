@@ -535,6 +535,21 @@ the agents never acted on it. The brief now carries a fourth line, and the test 
 for the derived model was written again for the reading: hold everything else fixed,
 change only what the update call concluded, and the next offer changes.
 
+**The first real model to drive the harness reopened it through the predicate beside
+it.** The update call's schema allowed `position` as well as `red_line`, and its prompt
+asked "what {other} actually wants" — which *is* a position — while the brief read a
+bottom line. The scripted model always chose `red_line`, so every test passed. The real
+one chose `position` for seven of its eight conclusions, each stored and read by nothing:
+the fourth brief line's fix, bypassed by a model doing exactly what it was asked. The
+prompt now asks for the bottom line and the schema allows nothing else — the §8 rule
+again, a schema rather than a request. On the re-recorded run all eight conclusions were
+`red_line`, and the model cited them: *"their bottom line is concede, so holding firm is
+likely to elicit a concession"*.
+
+It is the plainest case in this note for running a real model at all. A scripted
+counterpart is written by the person who wrote the prompt, so it shares their reading of
+the prompt, and the ambiguity is invisible to it by construction.
+
 ## 12. A model per role, and what the pin key gives an evaluation for free — [ours, B]
 
 The negotiation makes three kinds of call — propose, update, summarize — and they all ran
@@ -593,11 +608,23 @@ word of the brief and it fails, naming the route and the command that re-records
 - **A round is pairwise, and says so by raising.** With three parties a round has a shape
   this code has not decided on — simultaneous pairwise briefs, or one offer to the table
   — and guessing would have shipped a plural case nobody thought about.
-- **No real key has run any of this yet.** `--live` became `--model`, and its failure
-  paths are tested offline. Tier 3 now runs four checks per route, and with a fake key a
-  request built, pinned and sent by this code reaches OpenRouter and is refused with a
-  401 — so everything up to the provider's door is exercised. Past the door is still
-  unproven, and the claim available is that the seam is right, not that a live run works.
+- ~~**No real key has run any of this yet.**~~ **Closed for one route.** Tier 3 passes
+  all four checks live through OpenRouter on `nvidia/nemotron-3-super-120b-a12b:free`, the
+  cheapest model that would — two other $0 models were rate-limited upstream before their
+  first request completed. The demo command ran four rounds live and replayed them on a
+  fresh store without reaching the model. Total spend: $0. The direct Anthropic route has
+  still never run; it needs its own key.
+- **With a real model, the demo's headline is not guaranteed.** The second-order error —
+  the EU reads `concede`, the UK imagines `hold_firm` — appears when the UK holds firm in
+  public while having let slip that it would concede. The recorded live run showed it.
+  The next live run did not: the UK conceded in public from round one, so there was
+  nothing to be wrong about. The scripted counterpart always shows it because it was
+  written to. Whether a real lineup produces the phenomenon is a property of the lineup,
+  which makes it an evaluation question rather than something to assert.
+- **A conclusion's value is free text.** The live model wrote `hold firm` where the domain
+  says `hold_firm`. Nothing compares conclusion values yet, so nothing broke; the first
+  evaluation that scores them will, silently, unless values get the vocabulary that
+  predicates already have.
 - **The scripted counterpart decides from the brief, which is a smaller claim than it
   looks.** It reads one line of the brief and branches on it, so changing a belief
   changes an offer and the demo is not a fixture. It is still not a model: nothing here
@@ -606,11 +633,13 @@ word of the brief and it fails, naming the route and the command that re-records
 - ~~**Tier 3 tests one call.**~~ **Closed by B.** Four checks — plain, structured, a
   forced tool call, a stream — on every route with a key, and the same bodies run offline
   on every commit so they cannot rot between releases.
-- **The committed corpus was recorded from the scripted model.** It proves recording,
-  loading and strict replay from disk, but its response shapes are synthetic, like every
-  other pin in tiers 0–2. A corpus recorded once through a real route and committed would
-  put real shapes in front of the default suite on every commit, with no key needed to
-  run it. That is the natural next step for the format, and it needs a key once.
+- ~~**The committed corpus was recorded from the scripted model.**~~ **Closed.**
+  `tests/fixtures/negotiation.openrouter.pins.jsonl` is a live run on a real model, and the
+  default suite replays it on every commit with every key removed from the environment:
+  the models are rebuilt with a placeholder credential a strict replay never sends.
+  What a replay provably needs is the model's id. The real class is rebuilt as well, as
+  the safe choice, but a mutant that swapped it for another class with the same id
+  replayed just as well — so that part is caution, not a demonstrated need.
 - **There is no evaluation runner.** The lineup, the controlled swap and the scores —
   concession round, `misreading`, `own_gap`, the second-order mismatch, `usage` on every
   pin — all exist. A grid over lineups and scenarios does not, and nor does a second

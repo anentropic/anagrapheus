@@ -192,12 +192,12 @@ def _other(prompt: str) -> str:
     """
     Who the brief is about, taken from the sentence that names them.
 
-    The update call ends with "Record one conclusion about what X actually wants", and
-    X is the only place in the prompt where the other party is named unambiguously —
+    The update call ends with "Record one conclusion about X: their bottom line ...",
+    and X is the only place in the prompt where the other party is named unambiguously —
     the belief lines say "they".
     """
-    marker = "Record one conclusion about what "
+    marker = "Record one conclusion about "
     for line in prompt.splitlines():
         if marker in line:
-            return line.split(marker, 1)[1].split(" ", 1)[0]
+            return line.split(marker, 1)[1].split(":", 1)[0]
     return UNKNOWN

@@ -114,6 +114,27 @@ def test_a_reading_cannot_name_a_nested_predicate():
         )
 
 
+def test_a_reading_can_only_conclude_what_the_brief_reads():
+    """
+    The update call may write only ``red_line``, because it is the only one read back.
+
+    **Found by the first real model to drive the harness.** The schema also allowed
+    ``position``, and the update prompt asked "what {other} actually wants" -- which *is*
+    a position -- while the brief read a bottom line. The scripted model always chose
+    ``red_line``, so nothing noticed; the real one chose ``position`` for seven of its
+    eight conclusions, and every one was stored and read by nothing. The gap the fourth
+    brief line closed, reopened through the predicate beside it.
+    """
+    with pytest.raises(ValidationError):
+        Reading(
+            about="uk",
+            clause=CLAUSE,
+            predicate="position",  # type: ignore[arg-type]
+            value="concede",
+            because="what they want, which nothing would read",
+        )
+
+
 def test_a_reading_naming_nobody_raises_rather_than_keyerrors(table: Table):
     """A model naming a party that is not at the table is ordinary, and caught."""
     _opened(table)

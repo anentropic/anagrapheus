@@ -83,10 +83,20 @@ class Reading(BaseModel):
     """
     What a party concludes about another after a round — first-order, by schema.
 
-    ``predicate`` is a ``Literal`` over the two predicates that describe another party's
-    *preferences*. Nothing here can say "what they believe": R28 forbids storing that,
-    and this type is where the forbidding happens, because a prompt asking a model not
-    to is a request and a schema is a wall.
+    ``predicate`` is a ``Literal`` with one member, ``red_line``: a disposition, held
+    with no witness trail, which is R28's exception and the one belief about another
+    party that may be stored. Nothing here can say "what they believe": R28 forbids
+    storing that, and this type is where the forbidding happens, because a prompt asking
+    a model not to is a request and a schema is a wall.
+
+    **It also allowed ``position``, and that was a second gap.** ``position`` is a
+    legitimate first-order belief, but nothing reads a stored ``position`` about the
+    other side — the brief derives that line instead — so a conclusion written there
+    reached no decision. The scripted model always chose ``red_line``; the first real
+    model to drive this harness chose ``position`` for seven of its eight conclusions,
+    because the prompt asked "what they actually want", which is a position. Note 06
+    §11. The prompt now asks for what the brief reads, and the schema allows nothing
+    else.
 
     The fields are the *arguments* to a belief id, never the id itself — §6a's
     mint-from-structured-data rule. ``because`` is the exception that proves it: it is
@@ -99,7 +109,7 @@ class Reading(BaseModel):
     about: str
     #: A tabled clause, by title.
     clause: str
-    predicate: Literal["position", "red_line"]
+    predicate: Literal["red_line"]
     #: The position itself — ``"concede"``, ``"never"``, whatever the domain says.
     value: str
     #: Why, in the model's words. For the reader, not for the store.
@@ -293,7 +303,8 @@ class Negotiator:
             f"You are negotiating for {self.party}. This round you observed:\n\n"
             f"{observed}\n\n"
             f"{brief_for(self._view, other, clause)}\n\n"
-            f"Record one conclusion about what {other} actually wants."
+            f"Record one conclusion about {other}: their bottom line, the furthest "
+            f"they will move on this clause."
         ).output
 
 
