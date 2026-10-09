@@ -23,3 +23,7 @@ docs-build:
 docs-serve port="8000":
     uvx git-cliff -o CHANGELOG.md
     uv run mkdocs serve --dev-addr 127.0.0.1:{{port}} --livereload
+
+# Re-record the committed pin corpora after a deliberate prompt change; commit the diff
+record-fixtures:
+    uv run python -m tests.fixtures.record

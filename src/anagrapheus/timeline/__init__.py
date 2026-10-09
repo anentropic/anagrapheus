@@ -33,6 +33,13 @@ from anagrapheus.timeline.pins import (
     pin_key,
     register_builtin_events,
 )
+from anagrapheus.timeline.recording import (
+    Recording,
+    RecordingError,
+    pin_events,
+    read_recording,
+    write_recording,
+)
 from anagrapheus.timeline.registry import RESERVED_NAMESPACE, EventKey, EventTypeRegistry
 from anagrapheus.timeline.replay import Divergence, PinMiss, ReplayPins
 from anagrapheus.timeline.sqlite import SQLiteEventStore
@@ -71,6 +78,8 @@ __all__ = [
     "GenerativeRebuild",
     "ProjectionFold",
     "Projector",
+    "Recording",
+    "RecordingError",
     "ReplayDiverged",
     "ReplayPins",
     "SQLiteEventStore",
@@ -84,7 +93,10 @@ __all__ = [
     "UpcastGap",
     "UpcastRegistry",
     "canonical_json",
+    "pin_events",
     "pin_key",
+    "read_recording",
     "register_builtin_events",
     "sha256_hex",
+    "write_recording",
 ]
