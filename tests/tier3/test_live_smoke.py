@@ -1,73 +1,106 @@
 """
-Tier 3: does this still work against an actual provider.
+Tier 3: does this still work against an actual provider — on every route with a key.
 
-Note 00 §3 planned four tiers and this is the one that never got built — six milestones
-running, while tiers 0–2 grew to nearly three hundred tests. §8 asked whether it gates
-a release and answered its own objection: *"a nightly that nobody reads is not a smoke
-test."* **Decided: it gates a release.** It runs on demand and on a release tag, never
-on a pull request — §5 records that fork PRs cannot see repository secrets, so a PR
-trigger would fail every outside contribution.
+Note 00 §3 planned four tiers and this is the one that took six milestones to build. §8
+asked whether it gates a release and answered its own objection: *"a nightly that
+nobody reads is not a smoke test."* **Decided: it gates a release.** It runs on demand
+and on a release tag, never on a pull request — §5 records that fork PRs cannot see
+repository secrets, so a PR trigger would fail every outside contribution.
 
-**What it asserts is wiring, not quality.** §6 keeps tests and evals apart: an eval
-measures the model's behaviour under change, a test measures ours holding the model
-fixed. Nothing here inspects what the model *said*.
+**What it asserts is wiring, not quality.** §6 keeps tests and evals apart. The checks
+themselves, and why there are these four, are in :mod:`tests.tier3.checks`.
 
-**Why it cannot be replaced by tiers 1–2.** Every recorded pin in this repository was
-produced by a `FunctionModel`, so every canonicalization test has only ever seen
-synthetic response shapes. This is the one place a pin is recorded from a real provider
-— and therefore the only place a policy bug that real shapes trigger can surface.
+**Routes, not a provider.** A pin stores pydantic-ai's normalized response, but the
+*parsing* that produces it is per model class: a direct Anthropic call goes through
+``AnthropicModel``, while OpenRouter — whichever model it routes to, Claude included —
+goes through ``OpenRouterModel``, a subclass of ``OpenAIChatModel``, and comes back
+OpenAI-shaped. Those are different real
+shapes, and each route covers one the other cannot. So every route with a key runs, and
+a route without one is skipped where everyone can see it.
 
-Cost: roughly 500 input and 200 output tokens, about $0.0075 a run.
+**And at least one must run.** Every route skipping is a green run that called nothing
+— a gate that passes by doing nothing, which is worse than no gate, because it is
+believed. That check lives here, beside the route list, rather than in the workflow, so
+adding a route cannot leave the guard behind and ``pytest -m tier3`` is as honest
+locally as in CI.
 """
 
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import pytest
-from pydantic_ai import Agent
-from pydantic_ai.models import override_allow_model_requests
-from pydantic_ai.models.anthropic import AnthropicModel
+from pydantic_ai.models import infer_model, override_allow_model_requests
 
-from anagrapheus import register_builtin_events
-from anagrapheus.provider import PIN_KIND, PinnedModel
-from anagrapheus.timeline import (
-    EventTypeRegistry,
-    PinLedger,
-    ReplayPins,
-    SQLiteEventStore,
-)
+from tests.tier3.checks import CHECKS
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
     from pathlib import Path
 
-pytestmark = [
-    pytest.mark.tier3,
-    pytest.mark.skipif(
-        not os.environ.get("ANTHROPIC_API_KEY"),
-        # Skipped rather than failed: a contributor running the suite locally must not
-        # meet a red test they have no way to fix.
-        reason="tier 3 needs ANTHROPIC_API_KEY",
-    ),
-]
+    from pydantic_ai.models import Model
 
-#: The library's documented default. Not downgraded for cost -- at this size the whole
-#: run is under a cent, so a cheaper model would buy nothing and test something the
-#: consumer is less likely to be using.
-MODEL = "claude-opus-5"
+pytestmark = pytest.mark.tier3
+
+
+@dataclass(frozen=True, slots=True)
+class Route:
+    """A way of reaching a model, and the key that opens it."""
+
+    name: str
+    key: str
+    #: A pydantic-ai model string. Overridable per route with ``TIER3_<NAME>_MODEL``,
+    #: so trying another model needs no edit to this file.
+    default_model: str
+    #: Which pydantic-ai model class parses the responses — what this route covers.
+    parses_with: str
+
+    @property
+    def model(self) -> str:
+        return os.environ.get(f"TIER3_{self.name.upper()}_MODEL", self.default_model)
+
+    @property
+    def configured(self) -> bool:
+        return bool(os.environ.get(self.key))
+
+
+ROUTES = (
+    Route(
+        name="anthropic",
+        key="ANTHROPIC_API_KEY",
+        # The library's documented default, and not downgraded for cost: on the direct
+        # route the model is what the consumer is most likely to be running, and the
+        # whole tier is a few cents.
+        default_model="anthropic:claude-opus-5",
+        parses_with="AnthropicModel",
+    ),
+    Route(
+        name="openrouter",
+        key="OPENROUTER_API_KEY",
+        # Claude again, so the only thing that differs from the route above is the route.
+        # And cheap on purpose, which the direct route deliberately is not: through
+        # OpenRouter the response shape is the router's whichever model answers, so the
+        # model choice stops carrying the argument it carries there.
+        default_model="openrouter:anthropic/claude-haiku-5.5",
+        # `OpenRouterModel`, which subclasses `OpenAIChatModel`. An earlier draft said
+        # `OpenAIChatModel` -- true of a model built by hand over `OpenRouterProvider`,
+        # not of what `infer_model` builds -- and the assertion below caught it.
+        parses_with="OpenRouterModel",
+    ),
+)
 
 
 @pytest.fixture
 def live_calls_allowed() -> Iterator[None]:
     """
-    Lift the suite-wide no-live-model guard, for this test only.
+    Lift the suite-wide no-live-model guard, for these tests only.
 
     `tests/conftest.py` sets `ALLOW_MODEL_REQUESTS = False` at import so a stray call
     in tiers 0-2 fails rather than silently billing anyone. That guard is right, and it
-    also silently disarmed this test: without lifting it the call is rejected before
-    Anthropic is reached, so the release gate exercised nothing and said so to nobody.
+    also silently disarmed this tier once: the call was rejected before any provider was
+    reached, so the release gate exercised nothing and said so to nobody.
 
     Scoped rather than flipped globally, and restored on the way out, so a tier-3 run in
     the same session cannot leave the guard down for anything that follows it.
@@ -76,41 +109,40 @@ def live_calls_allowed() -> Iterator[None]:
         yield
 
 
-def test_a_real_call_is_pinned_and_replays_offline(tmp_path: Path, live_calls_allowed: None):
-    """
-    One live call through `PinnedModel`, then the same run from the log with no provider.
+def test_at_least_one_route_is_configured():
+    """The guard: a tier-3 run where every route skipped must not report success."""
+    if not any(route.configured for route in ROUTES):
+        keys = ", ".join(route.key for route in ROUTES)
+        pytest.fail(
+            f"no route has a key, so every check would skip and tier 3 would pass having "
+            f"called nothing. Set at least one of: {keys}."
+        )
 
-    Deliberately **through** the wrapper: an unwrapped call would test pydantic-ai
-    rather than this library, and it is the wrapper's key-building and round-tripping
-    that tier 3 exists to check against real response shapes.
-    """
-    types = EventTypeRegistry()
-    register_builtin_events(types)
-    store = SQLiteEventStore(tmp_path / "tier3.db")
-    ledger = PinLedger(store, types)
 
-    agent = Agent(model=PinnedModel(AnthropicModel(MODEL), ledger))
-    live = agent.run_sync("Reply with exactly the word: acknowledged.")
-
-    # The only claim made about the content: something came back and validated. What it
-    # says is the model's business -- §6's tests-vs-evals line.
-    assert live.output, "a real response validated as a ModelResponse"
-
-    ledger.commit()
-    promoted = [e for e in store.read() if e.envelope.type == "PinPromoted"]
-    assert len(promoted) == 1
-    assert promoted[0].payload["kind"] == PIN_KIND
-
-    # -- replay: same key, same answer, provider never touched -------------------------
-    events = list(store.read())
-    store.close()
-    replay = ReplayPins.from_events(events, types, on_miss="strict")
-    replayed = Agent(model=PinnedModel(AnthropicModel(MODEL), replay))
-
-    again = replayed.run_sync("Reply with exactly the word: acknowledged.")
-
-    assert again.output == live.output
-    assert replay.divergence is None, (
-        "a real response shape must key identically on the way back in -- "
-        "this is the assertion no synthetic model can make"
+@pytest.mark.parametrize(
+    "route",
+    [
+        pytest.param(
+            route,
+            id=route.name,
+            marks=pytest.mark.skipif(not route.configured, reason=f"{route.key} not set"),
+        )
+        for route in ROUTES
+    ],
+)
+@pytest.mark.parametrize("check", CHECKS.values(), ids=CHECKS.keys())
+def test_against_a_real_provider(
+    route: Route,
+    check: Callable[[Model, Path], None],
+    tmp_path: Path,
+    live_calls_allowed: None,
+):
+    model = infer_model(route.model)
+    # What the route claims to cover, checked rather than trusted: an override such as
+    # TIER3_OPENROUTER_MODEL=anthropic:... would otherwise make the "openrouter" route
+    # test the other route's parser, and report it under the wrong name.
+    assert type(model).__name__ == route.parses_with, (
+        f"{route.name} is meant to cover {route.parses_with}; {route.model} parses with "
+        f"{type(model).__name__}"
     )
+    check(model, tmp_path)

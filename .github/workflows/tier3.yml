@@ -9,9 +9,13 @@ name: Tier 3
 
 on:
   workflow_call:
+    # One per route in tests/tier3/test_live_smoke.py. None is required on its own;
+    # the suite requires at least one -- see "Live smoke test" below.
     secrets:
       ANTHROPIC_API_KEY:
-        required: true
+        required: false
+      OPENROUTER_API_KEY:
+        required: false
   workflow_dispatch:
 
 permissions:
@@ -36,23 +40,18 @@ jobs:
       - name: Sync dependencies
         run: uv sync --locked --dev
 
-      # The test skips without a key, so without this check a dispatch with a missing
-      # or unavailable secret would exit green having called nothing -- a gate that
-      # passes by doing nothing is worse than no gate, because it is believed.
-      - name: Require the key
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: |
-          if [ -z "$ANTHROPIC_API_KEY" ]; then
-            echo "::error::ANTHROPIC_API_KEY is not set; tier 3 would skip and report success."
-            exit 1
-          fi
-
       # `-m tier3` opts in: the default addopts exclude the marker, so this is the
-      # only place the suite reaches a provider. One call, roughly $0.0075.
-      # With the key guaranteed present by the step above, the test's skipif cannot
-      # fire -- so a green run here means the call was made, not merely not attempted.
+      # only place the suite reaches a provider. Every route with a key runs four
+      # checks; a route without one skips, visibly.
+      #
+      # There is no "require the key" step here any more, deliberately. A run where
+      # every route skipped would exit green having called nothing -- a gate that
+      # passes by doing nothing is worse than no gate, because it is believed -- and
+      # `test_at_least_one_route_is_configured` fails that run from inside the suite,
+      # next to the route list. A guard here would have to repeat the list, and would
+      # be left behind the first time a route was added.
       - name: Live smoke test
-        run: uv run pytest -m tier3
+        run: uv run pytest -m tier3 -rs
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}

@@ -23,10 +23,14 @@ build-backend = "uv_build"
 # install so the library stays provider-agnostic: pydantic-ai is the seam, and which
 # provider sits behind it is the consumer's choice.
 anthropic = ["pydantic-ai-slim[anthropic]>=1.0"]
+# The OpenAI SDK, which pydantic-ai uses for OpenAI itself and for every
+# OpenAI-compatible route -- OpenRouter among them. Named for what it installs, as
+# pydantic-ai names its own extra, rather than for one provider that uses it.
+openai = ["pydantic-ai-slim[openai]>=1.0"]
 
 [dependency-groups]
 dev = [
-    "anagrapheus[anthropic]",
+    "anagrapheus[anthropic,openai]",
     "basedpyright>=1.38.0",
     "ipython>=9.10.0",
     "pdbpp>=0.12.0.post1",
@@ -84,5 +88,5 @@ addopts = "-v -m 'not tier3'"
 markers = [
     # Tier 3 costs money and needs a key, so it is excluded by default rather than
     # skipped noisily on every local run. `-m tier3` opts in.
-    "tier3: reaches a real provider; needs ANTHROPIC_API_KEY",
+    "tier3: reaches a real provider; needs a key for at least one route in tests/tier3",
 ]
