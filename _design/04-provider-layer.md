@@ -270,15 +270,14 @@ path. Both were invisible from inside the change and obvious from outside it.
 - **Does `model_settings` belong in the default key?** Left out on the argument that
   temperature is the application's judgment. A consumer who pins across a settings
   change and gets a stale answer would reasonably call that a bug in the default.
-- **Tier 3, the live smoke test**, still does not exist. Note 00 §8 asks whether it
-  gates a release; nothing here answers that, and a nightly nobody reads is not a smoke
-  test.
+- ~~**Tier 3, the live smoke test**, still does not exist.~~ **Built in M7, widened in
+  B.** It gates a release, and runs four checks — plain, structured, a forced tool call,
+  a stream — on every route with a key. See [note 06 §5 and §12](06-demo-agent.md).
 - **Does a replayed stream need to be paced?** It is delivered as fast as the consumer
   pulls. That is right for a test and for a debugging replay, and it is right for the
   Narrator case that motivated M5, where a replayed turn has no perceived latency to
   hide. It would be wrong if a replay were ever shown to a player as though live — and
   nothing currently stops that.
-- **The pin corpus as a fixture format** — note 00 §8's first open question, about where
-  recorded ledgers live and in what format. The acceptance test records and replays
-  within one test rather than from a committed fixture, so the question is still open in
-  practice as well as on paper.
+- ~~**The pin corpus as a fixture format.**~~ **Answered in B** — the log's own
+  serialization, committed under `tests/fixtures/` and replayed strictly from disk. See
+  note 00 §8.
