@@ -58,6 +58,7 @@ from typing import TYPE_CHECKING
 
 from examples.negotiation.agent import Negotiator
 from examples.negotiation.domain import ClauseTabled, PositionStated, RoundClosed
+from examples.negotiation.lineup import Lineup
 from examples.negotiation.nesting import belief_of
 from examples.negotiation.rounds import Leak, play_round
 from examples.negotiation.scopes import held
@@ -114,6 +115,9 @@ class Negotiation:
     steps: tuple[Step, ...]
     #: Where the round's draws went: a ledger on a live run, a replay source otherwise.
     pins: PinResolver
+    #: Which model filled which role. Recorded so a result can be attributed to the
+    #: models that produced it rather than to the ones somebody meant to pass.
+    lineup: Lineup
     #: One per round: what the EU thought the UK wanted, against what the UK thought the
     #: EU thought that. The milestone's claim, measured.
     second_order: tuple[Mismatch, ...] = ()
@@ -182,26 +186,36 @@ class RoundSummary:
 def negotiate(
     path: Path,
     *,
-    model: Model,
+    models: Model | Lineup,
     archive: Mapping[str, str] | None = None,
     resolver: Callable[[Table], PinResolver] | None = None,
 ) -> Negotiation:
     """
     Play the whole negotiation and hand back everything it produced.
 
+    ``models`` is one model for every role, or a
+    :class:`~examples.negotiation.lineup.Lineup` choosing one per role and per party.
+
     ``resolver`` builds the pin source from the opened table — a
     :class:`~anagrapheus.timeline.PinLedger` for a live run, a
     :class:`~anagrapheus.timeline.ReplayPins` for a replay. It takes the table because
-    both need the store, and the store is the table's.
+    both need the store, and the store is the table's. A replay in ``"record"`` mode
+    with a *different* lineup is how one role is evaluated with the rest held fixed;
+    see :mod:`examples.negotiation.lineup`.
     """
+    lineup = models if isinstance(models, Lineup) else Lineup.of(models)
     lookup = dict(ARCHIVE if archive is None else archive)
-    summary = RoundSummary(model)
+    summary = RoundSummary(lineup.model_for("summarize"))
     table = Table.open(path, "eu", "uk", summarize=summary)
+    lineup.check_parties(table.parties)
     pins = PinLedger(table.store, table.types) if resolver is None else resolver(table)
     summary.draws_through(pins)
 
     clause = table.table_clause(CLAUSE)
-    steps = [Step("tabled", f"{CLAUSE} is on the table")]
+    steps = [
+        Step("lineup", lineup.describe(table.parties)),
+        Step("tabled", f"{CLAUSE} is on the table"),
+    ]
 
     # -- what each side actually wants, before anyone says anything --------------------
     #
@@ -215,7 +229,11 @@ def negotiate(
 
     agents = {
         party: Negotiator(
-            model, pins, view=table.view(party), archive=lambda c: lookup.get(c, _NO_PRECEDENT)
+            lineup.model_for("propose", party),
+            pins,
+            view=table.view(party),
+            archive=lambda c: lookup.get(c, _NO_PRECEDENT),
+            update=lineup.model_for("update", party),
         )
         for party in ("eu", "uk")
     }
@@ -259,6 +277,7 @@ def negotiate(
         rounds=tuple(played),
         steps=tuple(steps),
         pins=pins,
+        lineup=lineup,
         second_order=tuple(errors),
     )
 

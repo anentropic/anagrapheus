@@ -226,14 +226,14 @@ class Negotiator:
     could read its counterpart's private scope in one line and would look better for
     it, so it is never handed one.
 
-    **Two agents over one pinned model.** Proposing and reading want different output
-    types, so they are different ``Agent`` objects, but they share one
-    :class:`~anagrapheus.provider.model.PinnedModel` and therefore one ledger. That is
-    safe for the reason §4a gives for keying per *request* rather than per run: the two
-    calls send different tool schemas and different prompts, so they key differently and
-    cannot collide. Giving each its own wrapper would have worked equally well and said
-    something false — that the pin's identity has anything to do with which object made
-    the call.
+    **Two calls, and a model for each if you want one.** ``model`` proposes and
+    ``update`` reads; ``update`` defaults to ``model``, which is what the demo did before
+    roles could differ. Each gets its own
+    :class:`~anagrapheus.provider.model.PinnedModel`, over one shared ledger. The pins
+    cannot collide whether or not the models are the same, for the reason §4a gives for
+    keying per *request*: the two calls send different tool schemas and prompts, so they
+    key differently — and when the models differ, their ids differ too. See
+    :mod:`examples.negotiation.lineup` for choosing them.
     """
 
     def __init__(
@@ -243,14 +243,16 @@ class Negotiator:
         *,
         view: PartyView,
         archive: Callable[[str], str] | None = None,
+        update: Model | None = None,
     ) -> None:
-        pinned = PinnedModel(model, resolver)
         # The tool is offered only when there is an archive to reach. An agent given a
         # tool that answers nothing is worse than an agent given none: it spends a turn
         # discovering that, and the discovery is pinned forever.
         tools = [] if archive is None else [precedent_tool(resolver, archive)]
-        self._propose = Agent(model=pinned, output_type=Offer, tools=tools)
-        self._read = Agent(model=pinned, output_type=Reading)
+        self._propose = Agent(model=PinnedModel(model, resolver), output_type=Offer, tools=tools)
+        self._read = Agent(
+            model=PinnedModel(model if update is None else update, resolver), output_type=Reading
+        )
         self._view = view
 
     @property

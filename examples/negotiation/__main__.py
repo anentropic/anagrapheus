@@ -48,7 +48,7 @@ def main() -> None:
     model = _live(args.model) if args.live else scripted(calls.append)
 
     with tempfile.TemporaryDirectory() as directory:
-        run = negotiate(Path(directory) / "summit.db", model=model)
+        run = negotiate(Path(directory) / "summit.db", models=model)
         for step in run.steps:
             print(f"{step.label:>24}  {step.detail}")
 
@@ -63,7 +63,7 @@ def main() -> None:
         # The same story, a *fresh* store, and every draw answered from the log.
         replayed = negotiate(
             Path(directory) / "replay.db",
-            model=model,
+            models=model,
             resolver=lambda table: ReplayPins.from_events(events, table.types, on_miss="strict"),
         )
         print()

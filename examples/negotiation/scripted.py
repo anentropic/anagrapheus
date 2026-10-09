@@ -43,7 +43,12 @@ _MODELLED = "What we believe they actually want: "
 _CONCLUDED = "Our read of their bottom line: "
 
 
-def scripted(record: Callable[[str], None] | None = None) -> Model:
+def scripted(
+    record: Callable[[str], None] | None = None,
+    *,
+    name: str = "scripted",
+    respond_with: Callable[[list[ModelMessage], AgentInfo], ModelResponse] | None = None,
+) -> Model:
     """
     The negotiation's scripted counterpart, as an ordinary pydantic-ai model.
 
@@ -51,14 +56,22 @@ def scripted(record: Callable[[str], None] | None = None) -> Model:
     reached a model — which is the only way to assert that a replay reached none. It is
     a callback rather than a returned list because the model is built before the run and
     the count is wanted after it.
+
+    ``name`` becomes the model's id, **and the id is part of every pin key.** Two
+    scripted models with one name are one model as far as the ledger is concerned,
+    which is right for a replay and fatal for a comparison: a role "swapped" to a second
+    copy would hit the first copy's pins and never draw. Give a model under evaluation a
+    name of its own. ``respond_with`` replaces the scripted behaviour, for a test that
+    needs one role to answer differently.
     """
+    answer = respond if respond_with is None else respond_with
 
     def recorded(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         if record is not None:
             record(_prompt(messages))
-        return respond(messages, info)
+        return answer(messages, info)
 
-    return FunctionModel(recorded)
+    return FunctionModel(recorded, model_name=name)
 
 
 def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:

@@ -54,7 +54,7 @@ if TYPE_CHECKING:
 
 def test_milestone_8_acceptance(tmp_path: Path):
     calls: list[str] = []
-    run = negotiate(tmp_path / "summit.db", model=scripted(calls.append))
+    run = negotiate(tmp_path / "summit.db", models=scripted(calls.append))
     table = run.table
 
     # -- four rounds, and the last one settles ----------------------------------------
@@ -138,7 +138,7 @@ def test_milestone_8_acceptance(tmp_path: Path):
     # -- the same story, a fresh store, and nothing reaches a model ---------------------
     replayed = negotiate(
         tmp_path / "replay.db",
-        model=scripted(calls.append),
+        models=scripted(calls.append),
         resolver=lambda t: ReplayPins.from_events(events, t.types, on_miss="strict"),
     )
     try:
@@ -177,12 +177,16 @@ def test_the_demo_is_what_is_tested(tmp_path: Path):
     lines of its own after the steps — the replay's model-call count and its divergence
     — which is why this does not say "and nothing else", as it did until review.
     """
-    run = negotiate(tmp_path / "printed.db", model=scripted())
+    run = negotiate(tmp_path / "printed.db", models=scripted())
     try:
         labels = [step.label for step in run.steps]
-        assert labels[:2] == ["tabled", "seeded"]
+        assert labels[:3] == ["lineup", "tabled", "seeded"], (
+            "the demo opens by saying which model filled each role -- what ran, not what "
+            "was meant to"
+        )
+        assert run.steps[0].detail == run.lineup.describe(("eu", "uk"))
         assert labels.count("round 1 / depth 2") == 1
         assert all(step.detail for step in run.steps), "every step says something"
-        assert f"{CLAUSE} is on the table" == run.steps[0].detail
+        assert f"{CLAUSE} is on the table" == run.steps[1].detail
     finally:
         run.table.close()
