@@ -173,9 +173,9 @@ def test_the_demo_is_what_is_tested(tmp_path: Path):
 
     A demo that renders its own narration separately from what is asserted drifts within
     a milestone or two into describing behaviour the code no longer has. Both read the
-    same object, so this is the assertion that keeps them one thing. The CLI adds two
-    lines of its own after the steps — the replay's model-call count and its divergence
-    — which is why this does not say "and nothing else", as it did until review.
+    same object, so this is the assertion that keeps them one thing. The CLI adds one
+    line of its own after the steps — what the strict replay proved — which is why this
+    does not say "and nothing else", as it did until review.
     """
     run = negotiate(tmp_path / "printed.db", models=scripted())
     try:

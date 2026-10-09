@@ -6,49 +6,72 @@ same :class:`~examples.negotiation.story.Negotiation`. A demo that renders its o
 narration separately from what is tested drifts within a milestone or two into
 describing behaviour the code no longer has.
 
-``--live`` swaps the scripted counterpart for a real provider. Worth having: *"the
-replay reached no model"* is unremarkable against a
-:class:`~pydantic_ai.models.function.FunctionModel` and striking against Anthropic, and
-it is the only way to see this stack's prompts meet response shapes nothing synthetic
-produces.
+With no ``--model`` it runs the scripted counterpart, offline. Each ``--model`` puts a
+real model in a slot, so the same command compares models per role::
+
+    python -m examples.negotiation --model anthropic:claude-opus-5
+    python -m examples.negotiation --model openrouter:openai/gpt-5 --model update=...
+    python -m examples.negotiation --model ... --model eu.propose=google:gemini-3-pro
+
+A bare spec is the default for every slot; ``role=`` and ``party.role=`` override it.
+Roles are ``propose``, ``update`` and ``summarize``. Model strings are pydantic-ai's,
+so any provider it knows works, and a missing API key is reported before anything runs.
+
+Worth running against a real model even once: *"the replay reached no model"* is
+unremarkable against a :class:`~pydantic_ai.models.function.FunctionModel` and striking
+against a provider, and it is the only way to see this stack's prompts meet response
+shapes nothing synthetic produces.
 """
 
 from __future__ import annotations
 
 import argparse
+import sys
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from examples.negotiation.lineup import ROLES, Lineup, LineupError
 from examples.negotiation.scripted import scripted
 from examples.negotiation.story import negotiate
+from pydantic_ai.exceptions import UserError
 
-from anagrapheus.timeline import ReplayPins
+from anagrapheus.timeline import PinMiss, ReplayPins
 
 if TYPE_CHECKING:
-    from pydantic_ai.models import Model
+    from collections.abc import Sequence
 
 
-def main() -> None:
-    """Play the negotiation, print it, then replay it and print what that cost."""
-    parser = argparse.ArgumentParser(prog="examples.negotiation", description=__doc__)
-    parser.add_argument(
-        "--live",
-        action="store_true",
-        help="draw through Anthropic instead of the scripted counterpart",
+def main(argv: Sequence[str] | None = None) -> int:
+    """Play the negotiation, print it, then replay it on a fresh store and say what it cost."""
+    parser = argparse.ArgumentParser(
+        prog="python -m examples.negotiation",
+        description="The negotiation demo: two agents, four rounds, then a replay.",
     )
     parser.add_argument(
         "--model",
-        default="claude-opus-5",
-        help="the model to use with --live",
+        action="append",
+        default=[],
+        metavar="[[PARTY.]ROLE=]PROVIDER:MODEL",
+        help=(
+            "a real model for a slot; repeatable. A bare spec fills every slot, "
+            f"ROLE= (one of {', '.join(ROLES)}) or PARTY.ROLE= overrides it. "
+            "Omit entirely to run the scripted counterpart offline."
+        ),
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
-    calls: list[str] = []
-    model = _live(args.model) if args.live else scripted(calls.append)
+    specs: list[str] = args.model
+    try:
+        lineup = Lineup.parse(specs) if specs else Lineup.of(scripted())
+    except (LineupError, UserError) as error:
+        # Both are a model that cannot fill its slot -- a malformed spec, an unknown
+        # provider, a missing key -- and both are reported here, before the first draw,
+        # rather than as a traceback from inside round one.
+        parser.error(str(error))
 
     with tempfile.TemporaryDirectory() as directory:
-        run = negotiate(Path(directory) / "summit.db", models=model)
+        run = negotiate(Path(directory) / "summit.db", models=lineup)
         for step in run.steps:
             print(f"{step.label:>24}  {step.detail}")
 
@@ -56,34 +79,33 @@ def main() -> None:
         # at all: until `commit`, every draw lives in the scratch and nothing canon
         # records that it happened.
         run.commit()
-        drawn = len(calls)
         events = list(run.table.store.read())
         run.table.close()
 
-        # The same story, a *fresh* store, and every draw answered from the log.
-        replayed = negotiate(
-            Path(directory) / "replay.db",
-            models=model,
-            resolver=lambda table: ReplayPins.from_events(events, table.types, on_miss="strict"),
-        )
+        # The same story, a *fresh* store, and every draw answered from the log. Strict
+        # mode raises at the first miss, so a replay that finishes reached no model --
+        # by construction, which is a stronger claim than a count. An earlier version
+        # printed a count that only the scripted model ever incremented, so against a
+        # real provider it said 0 whether or not anything had been reached.
         print()
+        try:
+            replayed = negotiate(
+                Path(directory) / "replay.db",
+                models=lineup,
+                resolver=lambda table: ReplayPins.from_events(
+                    events, table.types, on_miss="strict"
+                ),
+            )
+        except PinMiss as miss:
+            print(f"replay diverged: {miss}")
+            return 1
         print(
-            f"replayed {len(replayed.rounds)} rounds; model calls during replay: "
-            f"{len(calls) - drawn}"
+            f"replayed {len(replayed.rounds)} rounds on a fresh store in strict mode: "
+            "every draw answered from the log, none from a model"
         )
-        # `divergence` is `ReplayPins`' own: a `PinResolver` promises resolution, not a
-        # record of where a replay drifted from what was pinned.
-        pins = replayed.pins
-        print(f"divergence: {pins.divergence if isinstance(pins, ReplayPins) else 'n/a'}")
         replayed.table.close()
-
-
-def _live(name: str) -> Model:
-    """The provider, imported late so an offline run never needs the SDK configured."""
-    from pydantic_ai.models.anthropic import AnthropicModel
-
-    return AnthropicModel(name)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
