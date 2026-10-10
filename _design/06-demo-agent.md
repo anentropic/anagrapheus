@@ -632,9 +632,7 @@ word of the brief and it fails, naming the route and the command that re-records
   first request completed. The demo command ran four rounds live and replayed them on a
   fresh store without reaching the model. Total spend: $0. **And for the other.** The
   direct Anthropic route passes the same four checks on `claude-haiku-5-5`, the cheapest
-  current Claude model, now its default; the demo ran on it too, after the fix in §11. In
-  a Claude Code cloud session that key has to be stored as `TIER3_ANTHROPIC_API_KEY`: an
-  `ANTHROPIC_API_KEY` set in the session's environment never reached the session.
+  current Claude model, now its default; the demo ran on it too, after the fix in §11.
 - **With a real model, the demo's headline is not guaranteed.** The second-order error —
   the EU reads `concede`, the UK imagines `hold_firm` — appears when the UK holds firm in
   public while having let slip that it would concede. The recorded live run showed it.

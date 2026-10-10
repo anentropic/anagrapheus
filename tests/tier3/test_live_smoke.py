@@ -29,11 +29,10 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 import pytest
 from pydantic_ai.models import infer_model, override_allow_model_requests
-from pydantic_ai.providers import infer_provider_class
 
 from tests.tier3.checks import CHECKS
 
@@ -42,25 +41,15 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from pydantic_ai.models import Model
-    from pydantic_ai.providers import Provider
 
 pytestmark = pytest.mark.tier3
 
 
 @dataclass(frozen=True, slots=True)
 class Route:
-    """
-    A way of reaching a model, and the key that opens it.
-
-    The key is read from ``TIER3_<NAME>_API_KEY`` first, then from the provider's own
-    variable. The first is for where the second cannot be set: in a Claude Code cloud
-    session the agent's own connection is to Anthropic, and an ``ANTHROPIC_API_KEY``
-    stored in the session's environment never reached the session, where the same key
-    under another name did.
-    """
+    """A way of reaching a model, and the key that opens it."""
 
     name: str
-    #: The variable the provider reads by itself, and the one CI sets.
     key: str
     #: A pydantic-ai model string. Overridable per route with ``TIER3_<NAME>_MODEL``,
     #: so trying another model needs no edit to this file.
@@ -74,26 +63,8 @@ class Route:
         return os.environ.get(f"TIER3_{self.name.upper()}_MODEL") or self.default_model
 
     @property
-    def own_key(self) -> str:
-        return f"TIER3_{self.name.upper()}_API_KEY"
-
-    @property
     def configured(self) -> bool:
-        return bool(os.environ.get(self.own_key) or os.environ.get(self.key))
-
-    def build(self) -> Model:
-        """The route's model, handed the tier-3 key explicitly when that is the one set."""
-        own = os.environ.get(self.own_key)
-        if not own:
-            return infer_model(self.model)
-
-        def with_own_key(provider: str) -> Provider[object]:
-            # As in `tests.fixtures.record.replay_lineup`: every concrete provider takes
-            # `api_key`, and the base class does not declare it.
-            make = cast("Callable[..., Provider[object]]", infer_provider_class(provider))
-            return make(api_key=own)
-
-        return infer_model(self.model, provider_factory=with_own_key)
+        return bool(os.environ.get(self.key))
 
 
 ROUTES = (
@@ -150,7 +121,7 @@ def live_calls_allowed() -> Iterator[None]:
 def test_at_least_one_route_is_configured():
     """The guard: a tier-3 run where every route skipped must not report success."""
     if not any(route.configured for route in ROUTES):
-        keys = ", ".join(f"{route.own_key} or {route.key}" for route in ROUTES)
+        keys = ", ".join(route.key for route in ROUTES)
         pytest.fail(
             f"no route has a key, so every check would skip and tier 3 would pass having "
             f"called nothing. Set at least one of: {keys}."
@@ -163,9 +134,7 @@ def test_at_least_one_route_is_configured():
         pytest.param(
             route,
             id=route.name,
-            marks=pytest.mark.skipif(
-                not route.configured, reason=f"neither {route.own_key} nor {route.key} set"
-            ),
+            marks=pytest.mark.skipif(not route.configured, reason=f"{route.key} not set"),
         )
         for route in ROUTES
     ],
@@ -177,7 +146,7 @@ def test_against_a_real_provider(
     tmp_path: Path,
     live_calls_allowed: None,
 ):
-    model = route.build()
+    model = infer_model(route.model)
     # What the route claims to cover, checked rather than trusted: an override such as
     # TIER3_OPENROUTER_MODEL=anthropic:... would otherwise make the "openrouter" route
     # test the other route's parser, and report it under the wrong name.
