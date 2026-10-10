@@ -67,3 +67,11 @@ def test_a_model_that_stays_wrong_is_reported_not_raised(
     monkeypatch.setattr(cli, "scripted", lambda: FunctionModel(stubborn))
     assert main([]) == 1
     assert "could not be recorded" in capsys.readouterr().err
+
+
+def test_a_party_not_at_the_table_is_a_usage_error(capsys: CaptureFixture[str]):
+    """``ue.propose`` is refused at parse time, with no table opened and no traceback."""
+    with pytest.raises(SystemExit) as exited:
+        main(["--model", "test", "--model", "ue.propose=test"])
+    assert exited.value.code == 2
+    assert "ue, not at the table" in capsys.readouterr().err

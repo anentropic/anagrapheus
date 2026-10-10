@@ -598,8 +598,8 @@ weights through another route is a different call, so a recorded corpus says in 
 which route made it.
 
 **The recording format closes note 00 §8's first question.** See `timeline.recording`:
-the log's own serialization, so a recording upcasts on read and outlives the schema it
-was written under. The negotiation's corpus is committed and replays strictly into a
+the log's own serialization, so a recording is upcast as it is read into a replay and
+outlives the schema it was written under. The negotiation's corpus is committed and replays strictly into a
 fresh store, which also makes it a regression test on what the model is asked — change a
 word of the brief and it fails, naming the route and the command that re-records it.
 

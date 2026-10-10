@@ -34,7 +34,7 @@ from typing import TYPE_CHECKING
 from examples.negotiation.agent import UnrecordableOutput
 from examples.negotiation.lineup import ROLES, Lineup, LineupError
 from examples.negotiation.scripted import scripted
-from examples.negotiation.story import negotiate
+from examples.negotiation.story import PARTIES, negotiate
 from pydantic_ai.exceptions import UnexpectedModelBehavior, UserError
 
 from anagrapheus.timeline import PinMiss, ReplayPins
@@ -65,10 +65,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     specs: list[str] = args.model
     try:
         lineup = Lineup.parse(specs) if specs else Lineup.of(scripted())
+        lineup.check_parties(PARTIES)
     except (LineupError, UserError) as error:
         # Both are a model that cannot fill its slot -- a malformed spec, an unknown
-        # provider, a missing key -- and both are reported here, before the first draw,
-        # rather than as a traceback from inside round one.
+        # provider, a missing key, a party not at the table -- and both are reported
+        # here, before the first draw, rather than as a traceback from inside round one.
         parser.error(str(error))
 
     with tempfile.TemporaryDirectory() as directory:

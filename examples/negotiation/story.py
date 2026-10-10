@@ -183,6 +183,10 @@ class RoundSummary:
         return Consolidation(prose=output, pins=tuple(keys))
 
 
+#: Who sits at the table, in seat order.
+PARTIES = ("eu", "uk")
+
+
 def negotiate(
     path: Path,
     *,
@@ -206,8 +210,27 @@ def negotiate(
     lineup = models if isinstance(models, Lineup) else Lineup.of(models)
     lookup = dict(ARCHIVE if archive is None else archive)
     summary = RoundSummary(lineup.model_for("summarize"))
-    table = Table.open(path, "eu", "uk", summarize=summary)
-    lineup.check_parties(table.parties)
+    # Before the table opens: a lineup naming a party that is not seated is a
+    # configuration error, and refusing it here leaves no half-built database behind.
+    lineup.check_parties(PARTIES)
+    table = Table.open(path, *PARTIES, summarize=summary)
+    try:
+        return _play(table, lineup, summary, lookup, resolver)
+    except BaseException:
+        # A failed run hands back no `Negotiation`, so nothing else holds the table to
+        # close it.
+        table.close()
+        raise
+
+
+def _play(
+    table: Table,
+    lineup: Lineup,
+    summary: RoundSummary,
+    lookup: Mapping[str, str],
+    resolver: Callable[[Table], PinResolver] | None,
+) -> Negotiation:
+    """The negotiation itself, on a table :func:`negotiate` opened and owns."""
     pins = PinLedger(table.store, table.types) if resolver is None else resolver(table)
     summary.draws_through(pins)
 

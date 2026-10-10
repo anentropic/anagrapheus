@@ -55,3 +55,8 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          # Per-route model overrides, as repository variables, so a release hit by a
+          # rate-limited free model can switch without editing this file. An unset
+          # variable arrives as an empty string, which the suite reads as unset.
+          TIER3_ANTHROPIC_MODEL: ${{ vars.TIER3_ANTHROPIC_MODEL }}
+          TIER3_OPENROUTER_MODEL: ${{ vars.TIER3_OPENROUTER_MODEL }}

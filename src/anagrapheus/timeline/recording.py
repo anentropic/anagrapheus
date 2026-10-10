@@ -10,10 +10,11 @@ from a file — had never been exercised.
 
 **Same serialization.** Every event line is a :class:`~anagrapheus.timeline.StoredEvent`
 exactly as the store holds it. The reason is not tidiness: an event in the log's own
-format is **upcast on read** like any other, so a recording made today survives a
-future change to the event it carries. A test-facing format would need a migration
-story of its own, and would get one only after the first fixture had silently stopped
-loading.
+format is **upcast as it is read into a replay**, like any other —
+:meth:`~anagrapheus.timeline.ReplayPins.from_events` with ``upcasts=`` — so a recording
+made today survives a future change to the event it carries. A test-facing format would
+need a migration story of its own, and would get one only after the first fixture had
+silently stopped loading.
 
 **One header line**, first, saying what produced the events. For a pin corpus that
 matters more than it looks: a pin key includes the model's id, so the same story
@@ -94,7 +95,9 @@ def write_recording(
         raise RecordingError(f"{RECORDING_FORMAT!r} is the format marker, not header content")
     lines = [canonical_json(cast("Json", {RECORDING_FORMAT: _VERSION, **header}))]
     lines.extend(canonical_json(concrete_json(stored.model_dump(mode="json"))) for stored in events)
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    # LF on every platform: text mode would write CRLF on Windows, and a re-recording
+    # there would rewrite every line of the fixture.
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
     return len(lines) - 1
 
 
@@ -122,7 +125,8 @@ def read_recording(path: Path) -> Recording:
         )
     header = dict(parsed)
     version = header.pop(RECORDING_FORMAT)
-    if version != _VERSION:
+    # `type(...) is int`, not `==`: JSON `true` and `1.0` both compare equal to 1.
+    if type(version) is not int or version != _VERSION:
         raise RecordingError(
             f"{path} is recording format {version!r}; this version of the library reads "
             f"format {_VERSION}"

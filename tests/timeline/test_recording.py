@@ -226,10 +226,12 @@ def test_a_file_without_the_header_is_refused(tmp_path: Path, types: EventTypeRe
         read_recording(path)
 
 
-def test_an_unknown_format_version_is_refused(tmp_path: Path):
+@pytest.mark.parametrize("marker", ["2", "true", "1.0"])
+def test_an_unknown_format_version_is_refused(tmp_path: Path, marker: str):
+    """``true`` and ``1.0`` compare equal to ``1`` in Python, and are not format 1."""
     path = tmp_path / "future.jsonl"
-    path.write_text('{"anagrapheus.recording":2}\n')
-    with pytest.raises(RecordingError, match="format 2"):
+    path.write_text(f'{{"anagrapheus.recording":{marker}}}\n')
+    with pytest.raises(RecordingError, match="recording format"):
         read_recording(path)
 
 

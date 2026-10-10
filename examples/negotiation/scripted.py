@@ -117,7 +117,11 @@ def _offer(messages: list[ModelMessage], info: AgentInfo, prompt: str) -> ModelR
                     # opening round, where both are empty, holds firm: `unknown` is not
                     # `never`, and treating it as one would make ignorance concede.
                     "concede": "never" in (theirs, concluded),
-                    "because": f"we read their position as {theirs}",
+                    # Both inputs, because either can decide it: naming only the first
+                    # would credit it with a concession the second caused.
+                    "because": (
+                        f"we read their position as {theirs} and their bottom line as {concluded}"
+                    ),
                 },
             )
         ]

@@ -203,6 +203,7 @@ def test_the_offer_changes_when_only_the_reading_changes(table: Table):
 
     assert steady.concede is False
     assert moved.concede is True, "a party read as immovable is one worth conceding to"
+    assert "bottom line as never" in moved.because, "the reason names what moved it"
 
 
 def test_a_round_replays_without_reaching_the_model(table: Table):

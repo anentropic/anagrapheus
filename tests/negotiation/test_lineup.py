@@ -8,19 +8,22 @@ model. The swap tests are the reason the lineup exists.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pytest
 from examples.negotiation.lineup import Lineup, LineupError
 from examples.negotiation.scripted import respond, scripted
 from examples.negotiation.story import negotiate
+from examples.negotiation.table import Table
 from pydantic_ai.messages import ModelResponse, ToolCallPart
+from pydantic_ai.models.function import FunctionModel
 
 from anagrapheus.timeline import ReplayPins
 
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from examples.negotiation.lineup import Role
     from examples.negotiation.story import Negotiation
     from pydantic_ai.messages import ModelMessage
     from pydantic_ai.models import Model
@@ -84,6 +87,30 @@ def test_a_party_that_is_not_seated_is_refused_before_any_draw(tmp_path: Path):
     with pytest.raises(LineupError, match="ue, not at the table"):
         negotiate(tmp_path / "typo.db", models=lineup)
     assert drawn == [], "refused before the first model call, not partway through"
+    assert not (tmp_path / "typo.db").exists(), "refused before the table was opened"
+
+
+def test_the_constructor_refuses_a_role_that_does_not_exist():
+    """``Lineup`` is public: built directly, a misspelt role must not run either."""
+    with pytest.raises(LineupError, match="no such role: updaet"):
+        Lineup(default=scripted(), roles=cast("dict[Role, Model]", {"updaet": scripted()}))
+
+
+def test_a_failed_negotiation_closes_its_table(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """A run that raises returns no ``Negotiation``, so ``negotiate`` must close it."""
+    closed: list[Table] = []
+
+    def close(self: Table) -> None:
+        closed.append(self)
+
+    monkeypatch.setattr(Table, "close", close)
+
+    def broken(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        raise RuntimeError("the provider fell over")
+
+    with pytest.raises(RuntimeError, match="fell over"):
+        negotiate(tmp_path / "broken.db", models=FunctionModel(broken))
+    assert len(closed) == 1
 
 
 # -- the controlled swap ------------------------------------------------------------------

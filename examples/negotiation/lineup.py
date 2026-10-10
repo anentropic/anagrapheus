@@ -81,6 +81,13 @@ class Lineup:
     parties: Mapping[tuple[str, Role], Model] = field(default_factory=lambda: _none_by_party())
 
     def __post_init__(self) -> None:
+        # The constructor is public, so it refuses what `parse` refuses: a misspelt role
+        # would otherwise be a key nothing ever looks up, and the default would quietly
+        # fill the role it was meant to override.
+        named = [*self.roles, *(role for _, role in self.parties)]
+        unknown = sorted({str(role) for role in named} - set(ROLES))
+        if unknown:
+            raise LineupError(f"no such role: {', '.join(unknown)}. Roles: {', '.join(ROLES)}.")
         uncovered = [role for role in ROLES if self.default is None and role not in self.roles]
         if uncovered:
             raise LineupError(
