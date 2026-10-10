@@ -26,7 +26,8 @@ from examples.negotiation.scripted import respond, scripted
 from examples.negotiation.story import CLAUSE, RoundSummary
 from examples.negotiation.table import Table
 from pydantic import ValidationError
-from pydantic_ai.messages import ModelResponse, ToolCallPart
+from pydantic_ai.exceptions import UnexpectedModelBehavior
+from pydantic_ai.messages import ModelRequest, ModelResponse, RetryPromptPart, ToolCallPart
 from pydantic_ai.models.function import FunctionModel
 
 from anagrapheus.chronicle import Anchors
@@ -208,13 +209,17 @@ def test_no_conclusion_is_written_when_another_party_output_is_invalid(table: Ta
     persisted when the second's was rejected — and the round never closed, so the log
     said something had happened that had not. A half-written round is worse than a
     rejected one.
+
+    Since the validator sends a misnamed party back to the model, a model has to stay
+    wrong through the retry to get here; the round then fails on the retry limit, and
+    still before it writes any conclusion.
     """
     _opened(table)
     ledger = PinLedger(table.store, table.types)
 
     def astray(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
-        """The UK's update names a party that is not at the table; the EU's is fine."""
-        prompt = str(messages[-1].parts[-1].content)  # type: ignore[union-attr]
+        """The UK's update names a party that is not at the table, every time."""
+        prompt = str(messages[0].parts[-1].content)  # type: ignore[union-attr]
         if "negotiating for uk" in prompt and "Record one conclusion" in prompt:
             return ModelResponse(
                 parts=[
@@ -238,7 +243,7 @@ def test_no_conclusion_is_written_when_another_party_output_is_invalid(table: Ta
     }
     before = {scope: len(table.core.query_scope(scope, BeliefFilter())) for scope in table.scopes()}
 
-    with pytest.raises(UnrecordableOutput, match="norway"):
+    with pytest.raises(UnexpectedModelBehavior, match="retries"):
         play_round(table, agents, clause=CLAUSE, number=1)
 
     after = {scope: len(table.core.query_scope(scope, BeliefFilter())) for scope in table.scopes()}
@@ -256,6 +261,48 @@ def test_no_conclusion_is_written_when_another_party_output_is_invalid(table: Ta
         "the EU's conclusion was written before the UK's was rejected"
     )
     assert after.keys() == before.keys()
+
+
+def test_a_misnamed_clause_is_sent_back_and_the_retry_replays(table: Table):
+    """
+    An offer naming the clause wrongly is returned to the model, which tries again.
+
+    Found live: the first Claude model to drive the demo wrote a sentence describing
+    its offer where the clause's name goes, and the round died on the refusal. The
+    retry is a model call like any other, so it is pinned; a replay that finishes in
+    strict mode answered it from the log too.
+    """
+    _opened(table)
+    told: list[str] = []
+
+    def describes(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        """Describe the offer in the clause field, until told what goes there."""
+        retries = [
+            part
+            for message in messages
+            if isinstance(message, ModelRequest)
+            for part in message.parts
+            if isinstance(part, RetryPromptPart)
+        ]
+        told.extend(str(part.content) for part in retries)
+        named = CLAUSE if retries else "Fisheries: we hold at 60/40"
+        args = {"clause": named, "concede": False, "because": "we hold"}
+        return ModelResponse(parts=[ToolCallPart("final_result", args)])
+
+    ledger = PinLedger(table.store, table.types)
+    live = _agents(table, FunctionModel(describes), ledger)["eu"].propose("uk", CLAUSE)
+    ledger.commit()
+
+    assert live.clause == CLAUSE
+    assert told, "the model was never told what was wrong"
+    assert f"must be exactly {CLAUSE!r}" in told[0]
+
+    replay = ReplayPins.from_events(list(table.store.read()), table.types, on_miss="strict")
+    again = Negotiator(FunctionModel(describes), replay, view=table.view("eu")).propose(
+        "uk", CLAUSE
+    )
+    assert again == live
+    assert replay.divergence is None
 
 
 def test_a_conclusion_records_what_it_rests_on(table: Table):

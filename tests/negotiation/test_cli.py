@@ -10,10 +10,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import examples.negotiation.__main__ as cli
 import pytest
 from examples.negotiation.__main__ import main
+from pydantic_ai.messages import ModelResponse, ToolCallPart
+from pydantic_ai.models.function import FunctionModel
 
 if TYPE_CHECKING:
+    from pydantic_ai.messages import ModelMessage
+    from pydantic_ai.models.function import AgentInfo
     from pytest import CaptureFixture, MonkeyPatch
 
 
@@ -48,3 +53,17 @@ def test_a_missing_key_is_reported_before_the_first_draw(
         main(["--model", "anthropic:claude-opus-5"])
     assert exited.value.code == 2
     assert "ANTHROPIC_API_KEY" in capsys.readouterr().err
+
+
+def test_a_model_that_stays_wrong_is_reported_not_raised(
+    monkeypatch: MonkeyPatch, capsys: CaptureFixture[str]
+):
+    """A model that misnames the clause even after the retry gets a message, not a trace."""
+
+    def stubborn(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        args = {"clause": "a sentence about fish", "concede": False, "because": "no"}
+        return ModelResponse(parts=[ToolCallPart("final_result", args)])
+
+    monkeypatch.setattr(cli, "scripted", lambda: FunctionModel(stubborn))
+    assert main([]) == 1
+    assert "could not be recorded" in capsys.readouterr().err

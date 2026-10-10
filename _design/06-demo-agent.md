@@ -315,6 +315,12 @@ workflow, where every route skipping is a green run that called nothing: the sui
 fails that run itself. Default `pytest` still never selects the tier, so a contributor
 still never meets a red test they cannot fix.*
 
+*Amended 2026-10-10. The model-choice argument no longer holds for the direct route
+either: its default is now `claude-haiku-5-5`, the cheapest current Claude model, at the
+owner's direction. What the route covers is `AnthropicModel`'s parsing, which every Claude
+model exercises, so the cheaper model gives up nothing the route was for. It passed all
+four checks when chosen.*
+
 ## 5a. A gate that silently skipped the new code — [ours]
 
 Worth recording because it is not a Python problem and will recur on any repository
@@ -546,6 +552,18 @@ again, a schema rather than a request. On the re-recorded run all eight conclusi
 `red_line`, and the model cited them: *"their bottom line is concede, so holding firm is
 likely to elicit a concession"*.
 
+**The first Claude model to drive it found a third, in a field with one right answer.**
+An `Offer` names its clause, and the round already knows which clause that is. The free
+model echoed `fisheries`; Haiku 5.5, on Anthropic's direct route, wrote a sentence
+describing its offer there. `record_offer` refused it — the review-round check doing its
+job — and the demo died on the refusal with a traceback. The fix is pydantic-ai's own
+mechanism for output that does not fit: an output validator raises `ModelRetry`, the model
+is told what was expected and asked again, and the retry is a model call like any other,
+so it is pinned and replays. The refusals in `record_offer` and `check_reading` stay as the
+last wall; a model still wrong after its retry is reported by the CLI in one line. With it
+the demo ran four rounds live on Haiku 5.5 and replayed on a fresh store with no model
+call. No request changed, so neither committed recording needed re-recording.
+
 It is the plainest case in this note for running a real model at all. A scripted
 counterpart is written by the person who wrote the prompt, so it shares their reading of
 the prompt, and the ambiguity is invisible to it by construction.
@@ -612,8 +630,11 @@ word of the brief and it fails, naming the route and the command that re-records
   all four checks live through OpenRouter on `nvidia/nemotron-3-super-120b-a12b:free`, the
   cheapest model that would — two other $0 models were rate-limited upstream before their
   first request completed. The demo command ran four rounds live and replayed them on a
-  fresh store without reaching the model. Total spend: $0. The direct Anthropic route has
-  still never run; it needs its own key.
+  fresh store without reaching the model. Total spend: $0. **And for the other.** The
+  direct Anthropic route passes the same four checks on `claude-haiku-5-5`, the cheapest
+  current Claude model, now its default; the demo ran on it too, after the fix in §11. In
+  a Claude Code cloud session that key has to be stored as `TIER3_ANTHROPIC_API_KEY`: an
+  `ANTHROPIC_API_KEY` set in the session's environment never reached the session.
 - **With a real model, the demo's headline is not guaranteed.** The second-order error —
   the EU reads `concede`, the UK imagines `hold_firm` — appears when the UK holds firm in
   public while having let slip that it would concede. The recorded live run showed it.

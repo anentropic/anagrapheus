@@ -31,10 +31,11 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from examples.negotiation.agent import UnrecordableOutput
 from examples.negotiation.lineup import ROLES, Lineup, LineupError
 from examples.negotiation.scripted import scripted
 from examples.negotiation.story import negotiate
-from pydantic_ai.exceptions import UserError
+from pydantic_ai.exceptions import UnexpectedModelBehavior, UserError
 
 from anagrapheus.timeline import PinMiss, ReplayPins
 
@@ -71,7 +72,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error(str(error))
 
     with tempfile.TemporaryDirectory() as directory:
-        run = negotiate(Path(directory) / "summit.db", models=lineup)
+        try:
+            run = negotiate(Path(directory) / "summit.db", models=lineup)
+        except (UnrecordableOutput, UnexpectedModelBehavior) as error:
+            # A model that answered with something the round cannot record, and kept
+            # doing so after being told what was expected. Ordinary for a model, so
+            # reported as what it is rather than as a traceback from the round loop.
+            print(f"a model's answer could not be recorded: {error}", file=sys.stderr)
+            return 1
         for step in run.steps:
             print(f"{step.label:>24}  {step.detail}")
 

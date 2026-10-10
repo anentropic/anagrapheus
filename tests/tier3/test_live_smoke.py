@@ -70,7 +70,8 @@ class Route:
 
     @property
     def model(self) -> str:
-        return os.environ.get(f"TIER3_{self.name.upper()}_MODEL", self.default_model)
+        # `or`, not a default: an empty override -- `FOO=` -- means unset, not "no model".
+        return os.environ.get(f"TIER3_{self.name.upper()}_MODEL") or self.default_model
 
     @property
     def own_key(self) -> str:
@@ -99,10 +100,10 @@ ROUTES = (
     Route(
         name="anthropic",
         key="ANTHROPIC_API_KEY",
-        # The library's documented default, and not downgraded for cost: on the direct
-        # route the model is what the consumer is most likely to be running, and the
-        # whole tier is a few cents.
-        default_model="anthropic:claude-opus-5",
+        # The cheapest current Claude model, as on the other route: what this route covers
+        # is `AnthropicModel`'s parsing, which every Claude model exercises. Passed all
+        # four checks when chosen, the forced tool call included.
+        default_model="anthropic:claude-haiku-5-5",
         parses_with="AnthropicModel",
     ),
     Route(

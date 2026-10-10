@@ -37,6 +37,7 @@ belief whose value was prose would be a belief nothing could ever compare.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 from doxastica import EdgeType
@@ -44,7 +45,7 @@ from examples.negotiation import domain
 from examples.negotiation.nesting import reconstruct
 from examples.negotiation.scopes import held, stated
 from pydantic import BaseModel
-from pydantic_ai import Agent
+from pydantic_ai import Agent, ModelRetry
 
 from anagrapheus.provider import PinnedModel, pinned_tool
 
@@ -55,6 +56,7 @@ if TYPE_CHECKING:
     from examples.negotiation.table import Table
     from examples.negotiation.view import PartyView
     from pydantic_ai.models import Model
+    from pydantic_ai.tools import RunContext
 
     from anagrapheus.timeline.pins import PinResolver
 
@@ -227,6 +229,35 @@ def precedent_tool(
     return pinned_tool(resolver, precedent)
 
 
+@dataclass(frozen=True, slots=True)
+class _Asked:
+    """What a call was about, handed to its output validator as the run's deps."""
+
+    party: str
+    clause: str
+
+
+def _retry(what: str, named: str, expected: str) -> ModelRetry:
+    return ModelRetry(
+        f"{what} must be exactly {expected!r}, the name the brief uses, and nothing "
+        f"else; this answer gave {named!r}."
+    )
+
+
+def _check_offer(ctx: RunContext[_Asked], offer: Offer) -> Offer:
+    if offer.clause != ctx.deps.clause:
+        raise _retry("clause", offer.clause, ctx.deps.clause)
+    return offer
+
+
+def _check_reading_named(ctx: RunContext[_Asked], reading: Reading) -> Reading:
+    if reading.about != ctx.deps.party:
+        raise _retry("about", reading.about, ctx.deps.party)
+    if reading.clause != ctx.deps.clause:
+        raise _retry("clause", reading.clause, ctx.deps.clause)
+    return reading
+
+
 class Negotiator:
     """
     One party's agent. Pinned, so a round replays without reaching a model.
@@ -244,6 +275,15 @@ class Negotiator:
     keying per *request*: the two calls send different tool schemas and prompts, so they
     key differently — and when the models differ, their ids differ too. See
     :mod:`examples.negotiation.lineup` for choosing them.
+
+    **A misnamed field is sent back, once.** Both outputs name the clause, and a reading
+    names the party it is about; each has exactly one right answer, which the call
+    already knows. A model that writes anything else there is told what was expected
+    and asked again (``ModelRetry``), and the retry is a model call like any other, so
+    it is pinned and replays. The first Claude model to drive this demo wrote a
+    sentence describing its offer where the clause's name goes. :func:`record_offer`
+    and :func:`check_reading` still refuse what they cannot record: the retry gives a
+    model the chance to fix its answer, and they are what stands if it does not.
     """
 
     def __init__(
@@ -259,10 +299,19 @@ class Negotiator:
         # tool that answers nothing is worse than an agent given none: it spends a turn
         # discovering that, and the discovery is pinned forever.
         tools = [] if archive is None else [precedent_tool(resolver, archive)]
-        self._propose = Agent(model=PinnedModel(model, resolver), output_type=Offer, tools=tools)
-        self._read = Agent(
-            model=PinnedModel(model if update is None else update, resolver), output_type=Reading
+        self._propose = Agent(
+            model=PinnedModel(model, resolver),
+            output_type=Offer,
+            deps_type=_Asked,
+            tools=tools,
         )
+        self._propose.output_validator(_check_offer)
+        self._read = Agent(
+            model=PinnedModel(model if update is None else update, resolver),
+            output_type=Reading,
+            deps_type=_Asked,
+        )
+        self._read.output_validator(_check_reading_named)
         self._view = view
 
     @property
@@ -287,7 +336,8 @@ class Negotiator:
         """
         return self._propose.run_sync(
             f"You are negotiating for {self.party}. Given the brief, propose whether to "
-            f"concede this clause.\n\n" + brief_for(self._view, other, clause) + context
+            f"concede this clause.\n\n" + brief_for(self._view, other, clause) + context,
+            deps=_Asked(other, clause),
         ).output
 
     def update(self, other: str, clause: str, *, observed: str) -> Reading:
@@ -304,7 +354,8 @@ class Negotiator:
             f"{observed}\n\n"
             f"{brief_for(self._view, other, clause)}\n\n"
             f"Record one conclusion about {other}: their bottom line, the furthest "
-            f"they will move on this clause."
+            f"they will move on this clause.",
+            deps=_Asked(other, clause),
         ).output
 
 
