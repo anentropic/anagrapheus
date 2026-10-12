@@ -28,6 +28,7 @@ from pydantic_ai.models.function import FunctionModel
 from anagrapheus.timeline import PinLedger
 
 if TYPE_CHECKING:
+    from examples.negotiation.agent import BottomLine
     from examples.negotiation.table import Table
     from pydantic_ai.messages import ModelMessage
     from pydantic_ai.models.function import AgentInfo
@@ -139,7 +140,7 @@ def test_the_offer_changes_when_only_the_derived_model_changes(table: Table):
     )
 
 
-def _concluded(table: Table, *, about_them: str) -> None:
+def _concluded(table: Table, *, about_them: BottomLine) -> None:
     """The EU's update call has concluded ``about_them`` is the UK's bottom line."""
     premise = record_offer(
         table,
