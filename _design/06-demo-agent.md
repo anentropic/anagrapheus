@@ -609,10 +609,15 @@ word of the brief and it fails, naming the route and the command that re-records
 
 ## 13. Open questions
 
-- **Does the re-key loop belong in the library?** §3 above states the case both ways
-  and deliberately does not decide it.
-- **Nothing enumerates scopes.** The application supplies the list, which is fine while
-  the parties are known up front and gets harder if scopes are created dynamically.
+- ~~**Does the re-key loop belong in the library?**~~ **Decided 2026-10-12: it stays in
+  the demo for 0.1.0.** §3's two decisions — which scopes, and what a scope that never
+  held the belief means — are the application's, and a library loop would have to take
+  both as arguments, which is the demo's loop with a signature. Revisit when a second
+  consumer (NVM) writes the same loop and the two agree on its shape.
+- ~~**Nothing enumerates scopes.**~~ **Decided 2026-10-12: scope listing stays the
+  application's job.** It knows how many minds it models; the library would have to infer
+  it from what was written, and a scope that has held nothing yet would be missing from
+  the answer. Applications that create scopes dynamically record them themselves.
 - ~~**The demo has one round, one agent, and no pinned tool.**~~ **Closed by M8b.** Four
   rounds, two agents, two pinned calls each, a pinned tool in the loop and `RoundClosed`
   as the chronicle's unit boundary — note 05's first consumer outside its own suite.

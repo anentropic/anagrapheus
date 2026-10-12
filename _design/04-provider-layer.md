@@ -83,9 +83,19 @@ it may do and must produce. The last deserves its reason:
 The parameters are reduced by **exclusion**, like the message parts and for the stronger
 version of the same reason — see §8.
 
-`model_settings` is deliberately **out** by default. A temperature change arguably makes
-a different call and a timeout change plainly does not, and that judgment is the
-application's — which is what having a replaceable policy is for.
+~~`model_settings` is deliberately **out** by default.~~ **Amended 2026-10-12: settings
+are in, less the ones about delivery.** The original argument was that a temperature
+change arguably makes a different call and a timeout change plainly does not, so the
+judgment was left to the application. But the default is what most applications run,
+and a consumer who pinned across a temperature change and got the old answer back would
+rightly call that a bug — the quiet failure, the one this note ranks worse. So
+`CallPolicy.material` now takes the **effective** settings (the wrapped model's own
+merged with the run's, which is what the draw is made with), and `SemanticCallPolicy`
+keys them by exclusion: `timeout`, `extra_headers`, `service_tier`, `cache` and any
+provider-prefixed cache setting are dropped as delivery; everything else, including a
+setting pydantic-ai adds later, is kept. When nothing survives, the material has no
+`settings` entry, so a call with no draw-changing settings keys exactly as before and
+every committed corpus still replays.
 
 The default reduces by **exclusion** rather than by listing each known part type.
 pydantic-ai adds part kinds between releases, and an allow-list would silently drop a
@@ -267,9 +277,9 @@ path. Both were invisible from inside the change and obvious from outside it.
   response, replayed as a synthetic stream, with the "replayed a stream is not streamed"
   caveat stated in §4 rather than left implied. The partial-stream question it carried
   is closed too, and differently than expected: a partial is pinned, not refused.
-- **Does `model_settings` belong in the default key?** Left out on the argument that
-  temperature is the application's judgment. A consumer who pins across a settings
-  change and gets a stale answer would reasonably call that a bug in the default.
+- ~~**Does `model_settings` belong in the default key?**~~ **Closed 2026-10-12: yes,
+  less delivery settings** — see §3. A custom `CallPolicy` gains a fourth parameter,
+  `settings`.
 - ~~**Tier 3, the live smoke test**, still does not exist.~~ **Built in M7, widened in
   B.** It gates a release, and runs four checks — plain, structured, a forced tool call,
   a stream — on every route with a key. See [note 06 §5 and §12](06-demo-agent.md).
