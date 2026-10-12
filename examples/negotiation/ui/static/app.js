@@ -94,12 +94,28 @@ function receive(m) {
     state.status = "done";
     $("verdict").textContent = "✓ " + m.verdict;
     $("verdict").hidden = false;
+    if (m.n < history) rewind();
   } else if (m.type === "failed") {
     state.status = "failed";
     $("run-error").textContent = m.error + (m.trace ? "\n\n" + m.trace : "");
     $("run-error").hidden = false;
+    if (m.n < history) rewind();
   }
   schedule();
+}
+
+// How many messages the stream held when this page loaded. A run that finished inside
+// that history is one to read from the start, not one to watch: following it would
+// leave the page on the replay's last frame, the least useful place to begin.
+let history = 0;
+
+function rewind() {
+  state.follow = false;
+  state.stage = "live";
+  for (const s of ["live", "replay"]) {
+    const frames = state.stages[s].frames;
+    state.pos[s] = state.mode === "story" && frames.length ? beats(state.stages[s])[0].last : 0;
+  }
 }
 
 let pending = false;
@@ -588,16 +604,18 @@ $("run-form").addEventListener("submit", async (e) => {
   }
 });
 
+// The stream opens only once the history mark is known; see `rewind`.
 fetch("/config")
   .then((r) => r.json())
   .then((c) => {
     if (!$("models").value) $("models").value = c.models.join(" ");
-  });
+    history = c.history;
+  })
+  .finally(connect);
 
 // The timeline sticks just under the header, whose height changes when it wraps.
 new ResizeObserver(([entry]) => {
   document.documentElement.style.setProperty("--bar-h", `${entry.target.offsetHeight}px`);
 }).observe(document.querySelector(".bar"));
 
-connect();
 render();

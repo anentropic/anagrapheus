@@ -214,7 +214,8 @@ def _get(url: str) -> tuple[int, bytes]:
 def test_the_page_and_its_config_are_served(server: str):
     status, body = _get(server + "/")
     assert status == 200 and b"<title>" in body
-    assert json.loads(_get(server + "/config")[1]) == {"models": ["anthropic:claude-haiku-5-5"]}
+    config = json.loads(_get(server + "/config")[1])
+    assert config == {"models": ["anthropic:claude-haiku-5-5"], "history": 0}
 
 
 def test_nothing_outside_static_is_served(server: str):

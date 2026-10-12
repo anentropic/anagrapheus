@@ -84,6 +84,10 @@ class Hub:
             self._messages.append(message)
             self._changed.notify_all()
 
+    def __len__(self) -> int:
+        with self._changed:
+            return len(self._messages)
+
     def since(self, n: int, *, timeout: float) -> list[Message]:
         """Messages from index ``n`` on, waiting up to ``timeout`` if there are none."""
         with self._changed:

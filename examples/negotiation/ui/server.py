@@ -7,7 +7,9 @@ single local user: ``ThreadingHTTPServer`` gives each open stream its own thread
 is all the concurrency there is.
 
 - ``GET /`` and ``/static/*`` -- the page.
-- ``GET /config`` -- the ``--model`` specs the server was started with, to prefill.
+- ``GET /config`` -- the ``--model`` specs the server was started with, to prefill, and
+  how many messages the stream already holds: the page's line between history it is
+  catching up on and a run it is watching happen.
 - ``GET /events`` -- server-sent events, one :class:`~.session.Hub` message each, with
   the message's index as its id so a reconnecting ``EventSource`` resumes rather than
   replays.
@@ -46,7 +48,7 @@ class _Handler(BaseHTTPRequestHandler):
         elif path.startswith("/static/"):
             self._file(_STATIC / path.removeprefix("/static/"))
         elif path == "/config":
-            self._json(HTTPStatus.OK, {"models": self.specs})
+            self._json(HTTPStatus.OK, {"models": self.specs, "history": len(self.hub)})
         elif path == "/events":
             self._stream()
         else:
