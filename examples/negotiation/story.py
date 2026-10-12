@@ -57,7 +57,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from examples.negotiation.agent import Negotiator
-from examples.negotiation.domain import ClauseTabled, PositionStated, RoundClosed
+from examples.negotiation.domain import NAMESPACE, ClauseTabled, PositionStated, RoundClosed
 from examples.negotiation.lineup import Lineup
 from examples.negotiation.nesting import belief_of
 from examples.negotiation.rounds import Leak, play_round
@@ -65,6 +65,7 @@ from examples.negotiation.scopes import held
 from examples.negotiation.table import Table
 from pydantic_ai import Agent
 
+from anagrapheus.assembly import EventsSlice, Part, Register, assemble
 from anagrapheus.chronicle import Consolidation
 from anagrapheus.provider import PinnedModel
 from anagrapheus.timeline import PinLedger
@@ -76,7 +77,8 @@ if TYPE_CHECKING:
     from examples.negotiation.rounds import Round
     from pydantic_ai.models import Model
 
-    from anagrapheus.timeline import StoredEvent
+    from anagrapheus.assembly import Context
+    from anagrapheus.timeline import Envelope, StoredEvent
     from anagrapheus.timeline.pins import PinKey, PinResolver
 
 __all__ = [
@@ -157,9 +159,12 @@ class RoundSummary:
     is for is what the parties did, not which rows were minted doing it.
     """
 
-    def __init__(self, model: Model) -> None:
+    def __init__(
+        self, model: Model, *, on_context: Callable[[Context], None] | None = None
+    ) -> None:
         self._model = model
         self._resolver: PinResolver | None = None
+        self._assembled = on_context or _ignore
 
     def draws_through(self, resolver: PinResolver) -> None:
         """Bind the ledger. Called once, by the composition root, after the table opens."""
@@ -174,13 +179,56 @@ class RoundSummary:
                 "make an unpinned model call, and the round would never replay."
             )
         keys: list[PinKey] = []
-        told = "; ".join(line for line in map(_render, events) if line)
+        context = summarising(events)
+        self._assembled(context)
         output = (
             Agent(model=PinnedModel(self._model, self._resolver, on_key=keys.append))
-            .run_sync(f"Summarise this round of a negotiation in one sentence: {told}")
+            .run_sync(render_summary(context))
             .output
         )
         return Consolidation(prose=output, pins=tuple(keys))
+
+
+@dataclass(frozen=True)
+class Summarising:
+    """
+    The summarizer's whole grant: the round's events, through the minutes filter.
+
+    The prose it writes goes into every party's prompt, so it may be shown only what
+    every party saw. :func:`_in_the_minutes` is that rule, and since M9 it is a gate on
+    what the summarizer *reads* rather than on what it renders — the context's sources
+    can be checked for a private event, whatever the renderer does.
+    """
+
+    events: EventsSlice
+
+
+def _in_the_minutes(envelope: Envelope) -> bool:
+    """The domain's own room events. Bookkeeping and private remarks are not minuted."""
+    return envelope.namespace == NAMESPACE and envelope.type in _MINUTED
+
+
+_MINUTED = frozenset({ClauseTabled.__name__, PositionStated.__name__, RoundClosed.__name__})
+
+
+def summarising(events: Sequence[StoredEvent]) -> Context:
+    """The summary call's context: the ask, and the minutes of the round."""
+
+    def assembler(grant: Summarising) -> list[Part]:
+        minuted = grant.events.events()
+        told = "; ".join(_render(event) for event in minuted)
+        return [
+            Part("ask", Register.binding, "Summarise this round of a negotiation in one sentence:"),
+            Part("minutes", Register.considered, told, sources=grant.events.handed_out()),
+        ]
+
+    return assemble("summarize", assembler, Summarising(EventsSlice(events, admit=_in_the_minutes)))
+
+
+def render_summary(context: Context) -> str:
+    """The summary prompt, as M8 sent it."""
+    ask, minutes = (str(p.content) for p in context.parts)
+    return f"{ask} {minutes}"
 
 
 #: Who sits at the table, in seat order.
@@ -449,3 +497,7 @@ def _render(event: StoredEvent) -> str:
             return f"round {payload['round_number']} closed"
         case _:
             return ""
+
+
+def _ignore(_context: Context) -> None:
+    """The default ``on_context``: nobody is watching."""

@@ -36,6 +36,13 @@ true, and all that is claimed now, is that every *ordinary* read goes through a 
 that fails loudly on a scope this party may not see. Deliberate introspection defeats
 it; a mistake does not.
 
+**Since M9 it reads through the library's slices** (note 07). The view's beliefs, log
+and chronicle are each an :mod:`anagrapheus.assembly` slice, so the view is a slice
+itself: an agent's grant holds it, and the context assembled from it knows every
+belief, event and section it handed out. :meth:`PartyView.settled` opens one at the
+log's current position for a single call; a view from :meth:`Table.view
+<examples.negotiation.table.Table.view>` reads live and promises no position.
+
 **What this is not.** It is not security — a caller holding the ``Table`` can read
 whatever it likes, and should be able to: the composition root is omniscient by
 necessity, since somebody has to seed both sides. It is a constraint on *the reasoning
@@ -44,21 +51,25 @@ path*, which is where the modelling claim lives.
 
 from __future__ import annotations
 
+import sys
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
-from doxastica import BeliefFilter
 from examples.negotiation.scopes import held, stated
 
+from anagrapheus.assembly import BeliefSlice, ChronicleSlice, LogSlice, handed_out
+from anagrapheus.beliefs import FOLD_NAME
 from anagrapheus.identity import IdentityRegistry
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable
     from uuid import UUID
 
     from doxastica import BeliefState
     from examples.negotiation.table import Table
 
+    from anagrapheus.assembly import Source
+    from anagrapheus.chronicle import Section
     from anagrapheus.timeline import DomainEvent
 
 __all__ = ["PartyView", "ScopeNotVisible"]
@@ -86,8 +97,9 @@ class PartyView:
     place that knows how to wire one.
     """
 
-    def __init__(self, table: Table, party: str) -> None:
+    def __init__(self, table: Table, party: str, *, at: int | None = None) -> None:
         self.party = party
+        self._at = at
         self.predicates = table.predicates
         # Read-only *live* views, not snapshots. `dict(...)` froze the tables at
         # construction, so a `Negotiator` built before `Table.seat()` or
@@ -100,8 +112,26 @@ class PartyView:
         # method was the first attempt and it left the guarantee entirely open: a bound
         # method carries `__self__`, so the core -- reads and writes both -- came along
         # with it. See the module docstring.
-        self.read = _guarded(table.core.query_scope, party)
-        self._read = table.reader.read
+        self._beliefs = BeliefSlice(
+            table.core,
+            visible=lambda scope: _visible(scope, party),
+            upto_seq=at,
+            folded_through=None if at is None else lambda: table.store.read_position(FOLD_NAME),
+        )
+        self.read = _guarded(self._beliefs.scope, party)
+        # A live view reads to the end of the log; a settled one stops where it opened.
+        reach = sys.maxsize if at is None else at
+        self._log = LogSlice(table.reader, upto_seq=reach)
+        self._chronicle = ChronicleSlice(table.chronicle, upto_seq=reach)
+
+        def settle() -> PartyView:
+            # Bring the pure folds up first. A pin committed by the ledger lands in the
+            # log without passing through `Table.append`, so the belief fold can be a
+            # few events behind the log for no reason that matters to a belief.
+            table.settle.catch_up()
+            return PartyView(table, party, at=table.store.last_seq())
+
+        self._settle = settle
         #: How to read an event as beliefs, with identity already resolved. Bound
         #: here so a reconstruction from this view cannot be handed a different
         #: reading of the same events than the table's own queries use.
@@ -154,7 +184,41 @@ class PartyView:
         hand every party the truth and make deception unrepresentable, which is the
         failure R29 exists to prevent, arriving one layer lower down.
         """
-        return [(stored.envelope.event_id, decoded) for stored, decoded in self._read(since_seq)]
+        return [
+            (stored.envelope.event_id, decoded)
+            for stored, decoded in self._log.events(since_seq=since_seq)
+        ]
+
+    def summaries(self) -> list[Section]:
+        """
+        The chronicle's sections: shared prose, the same for every party.
+
+        Model-written, so whatever cites one is labelled advisory — and shared, which is
+        why the chronicle's own summarizer must never be shown a private event (note 06
+        §9a, and the summarizer's grant in :mod:`examples.negotiation.story`).
+        """
+        return self._chronicle.sections()
+
+    # ---- as a slice --------------------------------------------------------------------
+
+    @property
+    def upto_seq(self) -> int | None:
+        """Where a settled view reads, or ``None`` for a live one."""
+        return self._at
+
+    def settled(self) -> PartyView:
+        """
+        The view again, settled at the log's current position for one model call.
+
+        The pure folds are brought up first, and the settled view's belief reads refuse
+        if the belief fold moves after that, so a context assembled from it describes
+        one moment of the negotiation.
+        """
+        return self._settle()
+
+    def handed_out(self) -> tuple[Source, ...]:
+        """Every belief, event and section this view has returned."""
+        return handed_out((self._beliefs, self._log, self._chronicle))
 
     def others(self) -> tuple[str, ...]:
         """Every party but this one, as of now — not as of construction."""
@@ -202,20 +266,26 @@ class PartyView:
         return self.predicates.belief_id("witnessed", self._canonical(self.seats[party]), event_id)
 
 
+def _visible(scope: str, party: str) -> bool:
+    """Own ``held``, anybody's ``stated``, nothing else."""
+    return scope == held(party) or scope.endswith(":stated")
+
+
 def _guarded(
-    query: Callable[[str, BeliefFilter], Sequence[BeliefState]], party: str
+    query: Callable[[str], list[BeliefState]], party: str
 ) -> Callable[[str], list[BeliefState]]:
     """
     A reader that answers only for scopes ``party`` may see.
 
     Own ``held``, anybody's ``stated``, nothing else. `stated` needs no party list --
     those scopes are public by definition, and enumerating the seated parties here would
-    only go stale the moment another is seated mid-negotiation.
+    only go stale the moment another is seated mid-negotiation. The belief slice under
+    it holds the same rule; this one raises the demo's own error first.
     """
 
     def read(scope: str) -> list[BeliefState]:
-        if scope != held(party) and not scope.endswith(":stated"):
+        if not _visible(scope, party):
             raise ScopeNotVisible(scope, party)
-        return list(query(scope, BeliefFilter()))
+        return query(scope)
 
     return read

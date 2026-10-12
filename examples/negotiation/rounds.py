@@ -134,14 +134,10 @@ def play_round(
             f"round has a shape this module has not decided on. See the module docstring."
         )
     opponents = {party: next(p for p in agents if p != party) for party in agents}
-    context = _context(table)
 
     # -- 1. act: every party proposes before any offer is recorded ----------------------
     _log.info("round %d: act -- each party proposes, unseen by the other", number)
-    offers = {
-        party: agent.propose(opponents[party], clause, context=context)
-        for party, agent in agents.items()
-    }
+    offers = {party: agent.propose(opponents[party], clause) for party, agent in agents.items()}
     for party, offer in offers.items():
         _log.info(
             "round %d: %s offers to %s (%s)",
@@ -279,25 +275,3 @@ def _observed(table: Table, party: str, offers: Mapping[str, Offer], leak: Leak 
             f"{leak.suggests} on {leak.clause}."
         )
     return "\n".join(lines)
-
-
-def _context(table: Table) -> str:
-    """
-    The rounds so far, as the chronicle consolidated them.
-
-    Labelled advisory, and appended rather than woven into the brief. A section is a
-    generative projection: derived from canon, never authoritative, and regenerated with
-    different words on a rebuild (note 05). Presenting it beside the belief lines as
-    though it were one of them would make a prompt in which canon and prose are
-    indistinguishable, which is precisely what
-    :class:`~anagrapheus.chronicle.reading.Anchors` and ``Prose`` are separate objects
-    to prevent.
-
-    Empty when nothing has consolidated — including when no chronicle fold was
-    installed at all, which is only the limiting case of a chronicle running behind.
-    """
-    sections = table.brief().depth()
-    if not sections:
-        return ""
-    prose = "\n".join(f"- {section.prose}" for section in sections)
-    return f"\n\nEarlier rounds, as summarised (advisory prose, not canon):\n{prose}"
