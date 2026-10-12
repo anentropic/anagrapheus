@@ -51,10 +51,26 @@ class Labeler:
     def __init__(self, table: Table) -> None:
         self._table = table
         self._events: dict[str, str] = {}
+        self._causes: dict[str, str] = {}
 
-    def saw(self, seq: int, event_id: UUID | str, type_name: str) -> None:
-        """Remember an appended event under its ``#seq Type`` label."""
+    def saw(
+        self, seq: int, event_id: UUID | str, type_name: str, cause: UUID | str | None = None
+    ) -> None:
+        """Remember an appended event under its ``#seq Type`` label, and what caused it."""
         self._events[str(event_id)] = f"#{seq} {type_name}"
+        if cause is not None:
+            self._causes[str(event_id)] = str(cause)
+
+    def source(self, event_id: UUID | str) -> str:
+        """
+        What a belief came from: the cause of the belief event, where it has one.
+
+        A state's ``source_event_id`` is the belief event the fold read it from, which is
+        bookkeeping; the reader wants the ``PositionStated`` or the ``ClauseTabled`` that
+        made somebody believe it, and that is the belief event's ``causation_id``.
+        """
+        key = str(event_id)
+        return self.event(self._causes.get(key, key))
 
     def entity(self, entity_id: UUID | str) -> str:
         """An entity or event id as a name, or a short form of the id if unknown."""
@@ -205,7 +221,7 @@ def _belief(state: BeliefState, labels: Labeler) -> dict[str, Json]:
         "value": to_jsonable_python(state.value, fallback=repr),
         "status": _enum(state.status),
         "stance": _enum(state.stance),
-        "source": labels.event(state.source_event_id),
+        "source": labels.source(state.source_event_id),
     }
 
 
@@ -245,14 +261,23 @@ def _summary(type_name: str, payload: Mapping[str, Json], labels: Labeler) -> st
             )
         case "RoundClosed":
             return f"round {payload['round_number']} closed"
-        case "BeliefMinted":
-            return f"{labels.belief(str(payload['belief_id']))} minted"
+        case "BeliefRevised" | "BeliefExpanded":
+            return (
+                f"{payload['scope_id']} holds {_proposition(payload, labels)} = {payload['value']}"
+            )
+        case "BeliefContracted":
+            return f"{payload['scope_id']} drops {_proposition(payload, labels)}"
         case "PinPromoted":
             return f"{payload['kind']} pin promoted into the log"
         case _:
             return ", ".join(
                 f"{k}={v}" for k, v in payload.items() if isinstance(v, str | int | float | bool)
             )
+
+
+def _proposition(payload: Mapping[str, Json], labels: Labeler) -> str:
+    entities = ", ".join(labels.entity(str(e)) for e in payload["entity_ids"])
+    return f"{payload['predicate']}({entities})"
 
 
 def _guard(compute: Any) -> Json:  # noqa: ANN401

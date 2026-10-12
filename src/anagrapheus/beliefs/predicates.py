@@ -31,6 +31,8 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Final
 from uuid import UUID
 
+from doxastica import Stance
+
 from anagrapheus.beliefs.errors import (
     MalformedBeliefId,
     OutsideVocabulary,
@@ -132,13 +134,34 @@ class Predicate:
 
     def check_value(self, value: object) -> None:
         """
-        Raise :class:`OutsideVocabulary` if ``value`` is not one of the declared words.
+        Refuse a value this predicate cannot hold.
 
-        A predicate with no vocabulary accepts anything. The check is the predicate's own
-        rather than the writer's so that a derived read — an interpreter turning events
-        into the beliefs a witness would form, which never passes through a writer —
-        can hold to the same rule.
+        Two rules, both the predicate's own so that every path writing a belief holds to
+        them — the belief fold, the helpers that build belief events, and a derived read
+        that never touches a store:
+
+        - **A relational value is a bool.** The arity check already stops
+          ``knows(alice)`` from being minted; this catches the same mistake arriving the
+          other way, a third party smuggled into the answer of ``knows(alice, bob)``,
+          which revising would retract. A ``Stance`` is refused too: how firmly a belief
+          is held is doxastica's own ``stance`` argument, one axis over, and taking it as
+          the value would merge ranking with epistemic state (R21). ``TypeError``.
+        - **A declared vocabulary is closed.** :class:`OutsideVocabulary`. A predicate
+          with no vocabulary accepts anything.
         """
+        if self.kind is PredicateKind.RELATIONAL:
+            if isinstance(value, bool):
+                return
+            hint = (
+                " (how firmly it is held is the `stance` argument, not the value)"
+                if isinstance(value, Stance)
+                else ""
+            )
+            raise TypeError(
+                f"predicate {self.name!r} is relational, so its value asserts the "
+                f"proposition rather than answering it: pass a bool, not "
+                f"{type(value).__name__}{hint}"
+            )
         if self.values is None or (isinstance(value, str) and value in self.values):
             return
         raise OutsideVocabulary(

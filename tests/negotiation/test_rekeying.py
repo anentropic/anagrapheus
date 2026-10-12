@@ -161,23 +161,30 @@ def test_a_chooser_resolves_a_split(table: Table):
     assert [(a.moved, a.undecided) for a in applied] == [(1, ())]
 
 
-def test_a_belief_minted_without_appending_is_invisible_to_the_plan(table: Table):
+def test_a_belief_written_around_the_log_is_invisible_to_the_plan_and_the_rebuild(
+    table: Table,
+):
     """
-    The quiet failure `Table.believe` exists to prevent.
+    The hole note 03 §9 closed, shown from the outside.
 
-    `BeliefWriter.revise` hands back the minting event and leaves appending it to the
-    caller. Drop it and everything reads correctly — until a merge, which then appears
-    to succeed while leaving the belief keyed on an entity that names nothing.
+    A belief written straight into the store reads correctly until something asks the
+    log. A merge then plans nothing for it, because the entity index is folded from the
+    log; and a rebuild drops it, because the store is too. Before §9 this was the
+    *library's* front door: `BeliefWriter.revise` wrote here and left only a minting
+    event behind. Now the store is reachable only as a fold, and this is what reaching
+    around it costs.
     """
     fisheries = table.table_clause("fisheries")
     kept, absorbed = table.seats["uk"], table.seat("HMG")
-    # Deliberately the wrong way: revise, discard the minting event.
-    table.writer(held("uk")).revise("position", (absorbed, fisheries), "concede", uuid.uuid7())
-    table.projector.catch_up()
+    belief_id = table.predicates.belief_id("position", absorbed, fisheries)
+    # Deliberately the wrong way: straight into the store, with no event.
+    table.core.revise(held("uk"), belief_id, "concede", uuid.uuid7())
     table.append(merge(table.types, kept=kept, absorbed=absorbed))
     table.projector.catch_up()
 
     assert _plans(table) == [], "nothing was indexed, so nothing is planned"
+    table.rebuild_beliefs()
+    assert table.core.get_revision_chain(belief_id) == [], "and nothing comes back"
 
 
 def test_two_merged_entities_in_one_belief_both_get_substituted(table: Table):
@@ -219,8 +226,8 @@ def test_a_rekeyed_belief_can_itself_be_rekeyed_again(table: Table):
     """
     The successor must reach the entity index, or the *next* merge plans nothing.
 
-    Writing the survivor straight to `MemoryCore` holds the belief but emits no
-    `BeliefMinted`, so the index still knows only the old id. Everything reads correctly
+    Writing the survivor straight to `MemoryCore` holds the belief but leaves no event,
+    so the index still knows only the old id. Everything reads correctly
     until a second identity decision, which then finds nothing to plan and leaves the
     belief keyed on an entity that no longer names anything — the same quiet failure
     `Table.believe` exists to prevent, reached through the re-key path instead.
@@ -262,11 +269,14 @@ def test_a_rekey_carries_the_original_stance(table: Table):
 
     fisheries = table.table_clause("fisheries")
     kept, absorbed = table.seats["uk"], table.seat("HMG")
-    written = table.writer(held("uk")).revise(
-        "position", (absorbed, fisheries), "concede", uuid.uuid7(), Stance.suspected
+    table.believe(
+        held("uk"),
+        "position",
+        (absorbed, fisheries),
+        "concede",
+        uuid.uuid7(),
+        stance=Stance.suspected,
     )
-    table.append(written.minted)
-    table.projector.catch_up()
     table.append(merge(table.types, kept=kept, absorbed=absorbed))
     table.projector.catch_up()
 

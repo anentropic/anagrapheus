@@ -228,7 +228,10 @@ class Runner(logging.Handler):
     def _appended(self, watched: _Watched, events: tuple[PendingEvent, ...], last: int) -> None:
         first = last - len(events) + 1
         for offset, event in enumerate(events):
-            watched.labels.saw(first + offset, event.envelope.event_id, event.envelope.type)
+            envelope = event.envelope
+            watched.labels.saw(
+                first + offset, envelope.event_id, envelope.type, envelope.causation_id
+            )
         rendered = [render_event(e, first + i, watched.labels) for i, e in enumerate(events)]
         self._frame(watched, rendered, last)
 
@@ -244,7 +247,8 @@ class Runner(logging.Handler):
                 self._frame(watched, [], watched.seen)
             return
         for event in fresh:
-            watched.labels.saw(event.seq, event.envelope.event_id, event.envelope.type)
+            envelope = event.envelope
+            watched.labels.saw(event.seq, envelope.event_id, envelope.type, envelope.causation_id)
         rendered = [render_event(e, e.seq, watched.labels) for e in fresh]
         self._frame(watched, rendered, fresh[-1].seq)
 

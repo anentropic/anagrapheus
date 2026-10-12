@@ -2,7 +2,7 @@
 The negotiating table: everything wired together, and the queries it can answer.
 
 This is the composition root a real consumer would write — one store, one registry,
-one predicate registry, and a writer per scope.
+one predicate registry, and one belief fold that every scope's beliefs are folded by.
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from doxastica import BeliefFilter, InMemoryBackend, MemoryCore
+from doxastica import BeliefFilter, InMemoryBackend, MemoryCore, Stance
 from examples.negotiation import domain
 from examples.negotiation.nesting import DEFAULT_DEPTH, Derived, Interpret, reconstruct
 from examples.negotiation.scopes import held, stated
@@ -18,10 +18,13 @@ from examples.negotiation.view import PartyView
 
 from anagrapheus import register_builtin_events
 from anagrapheus.beliefs import (
-    BeliefIndexFold,
-    BeliefWriter,
+    FOLD_NAME,
+    BeliefEvents,
+    BeliefFold,
     Disagreement,
+    Edge,
     SQLiteBeliefIndexStore,
+    StateRef,
     divergence,
 )
 from anagrapheus.chronicle import (
@@ -72,10 +75,17 @@ class Table:
     store: SQLiteEventStore
     reader: EventReader
     types: EventTypeRegistry
-    core: MemoryCore
+    #: Folds every belief event into doxastica and the entity index. The belief store
+    #: is the fold's, not the table's: see :attr:`core`.
+    beliefs: BeliefFold
     predicates: PredicateRegistry
     identity: SQLiteIdentityStore
     projector: Projector
+    #: The pure folds alone -- identity and beliefs -- run on every :meth:`append`, so a
+    #: belief is readable the moment its event is in the log. The chronicle is not in
+    #: it: it spends a model call per round and runs when :attr:`projector` is asked to.
+    #: Positions are per fold name, so the two projectors never re-fold each other's work.
+    settle: Projector
     index_store: SQLiteBeliefIndexStore
     #: The chronicle's sections. Always present, because a store costs nothing; the
     #: *fold* is opt-in, because it spends a model call per round.
@@ -117,14 +127,17 @@ class Table:
         index = SQLiteBeliefIndexStore(store.connection)
         chronicle = SQLiteChronicleStore(store.connection)
         reader = EventReader(store, UpcastRegistry(), types)
-        # Both folds, because a table without the belief index is one where
-        # `plan_rekeys` silently returns nothing: it reads what was minted from
-        # that index, so a merge would appear to succeed having moved nothing.
-        # Leaving it to the caller meant every entry point re-assembled this.
-        folds: list[ProjectionFold] = [IdentityFold(identity, types), BeliefIndexFold(index, types)]
+        predicates = domain.predicates()
+        beliefs = BeliefFold(MemoryCore(InMemoryBackend()), predicates, index, types)
+        # Both pure folds, always. A table without the belief fold is one with no
+        # beliefs at all, and one without identity is one where `plan_rekeys` cannot
+        # follow a merge. Leaving either to the caller meant every entry point
+        # re-assembled this.
+        pure: list[ProjectionFold] = [IdentityFold(identity, types), beliefs]
+        folds = list(pure)
         if summarize is not None:
             # Last, and that ordering is not cosmetic: a summarizer reads the events it
-            # is consolidating, and a round's beliefs should be indexed before its prose
+            # is consolidating, and a round's beliefs should be folded before its prose
             # claims to describe them.
             folds.append(
                 ChronicleFold(chronicle, reader, boundary=ROUND_BOUNDARY, summarize=summarize)
@@ -133,13 +146,18 @@ class Table:
             store=store,
             reader=reader,
             types=types,
-            core=MemoryCore(InMemoryBackend()),
-            predicates=domain.predicates(),
+            beliefs=beliefs,
+            predicates=predicates,
             identity=identity,
             index_store=index,
             chronicle=chronicle,
             projector=Projector(store, reader, folds),
+            settle=Projector(store, reader, pure),
         )
+        if store.read_position(FOLD_NAME):
+            # The position is in the file and the beliefs are in memory, so a reopened
+            # table would resume above beliefs it no longer holds. Fold them again.
+            table.rebuild_beliefs()
         for name in parties:
             table.seat(name)
         return table
@@ -168,12 +186,35 @@ class Table:
 
     # ---- writing ---------------------------------------------------------------------
 
-    def writer(self, scope: str) -> BeliefWriter:
-        """A writer into one scope. Every scope mints through the same registry."""
-        return BeliefWriter(self.core, self.predicates, self.types, scope_id=scope)
+    @property
+    def core(self) -> MemoryCore:
+        """
+        The belief store, as the fold last left it.
+
+        A property, because :meth:`rebuild_beliefs` replaces it: a reference taken
+        before a rebuild reads the old store, which is still a valid fold of the same
+        log and is simply no longer the one being written.
+        """
+        store = self.beliefs.store
+        if not isinstance(store, MemoryCore):
+            raise TypeError(f"the table folds into a MemoryCore, not {type(store).__name__}")
+        return store
+
+    @property
+    def events(self) -> BeliefEvents:
+        """Belief events minted through this table's one registry."""
+        return BeliefEvents(self.types, self.predicates)
 
     def append(self, *events: PendingEvent) -> int:
+        """
+        Append, fold the pure projections, then tell the listeners.
+
+        Folding before the listeners hear about it is the order that makes the UI's
+        snapshot honest: a listener that read the beliefs straight after a belief event
+        would otherwise see the table as it was one event ago.
+        """
         last = self.store.append(events)
+        self.settle.catch_up()
         for listener in self.on_append:
             listener(events, last)
         return last
@@ -184,29 +225,66 @@ class Table:
         predicate: str,
         entity_ids: tuple[UUID, ...],
         value: object,
-        source_event: UUID,
+        cause: UUID,
+        *,
+        stance: Stance = Stance.certain,
+        rests_on: BeliefState | None = None,
     ) -> BeliefState:
         """
-        Hold a belief in ``scope``, **and append the minting event**.
+        Hold a belief in ``scope``: append the event that says so, and return what it folded to.
 
-        The second half is the part worth a helper. ``BeliefWriter.revise`` returns
-        ``Written(state, minted)`` and leaves appending ``minted`` to the caller — by
-        design, since the writer does not own the log. Drop it and the belief is held
-        but invisible to the index, so ``plan_rekeys`` will not see it when an identity
-        decision later moves the entity it names, and the re-key silently misses.
+        **The table never writes the belief store.** It appends a ``BeliefRevised``,
+        and the belief exists because :class:`~anagrapheus.beliefs.BeliefFold` folded
+        it, so dropping the store and replaying the log brings it back. Until note 03
+        §9 this wrote straight into doxastica and appended a ``BeliefMinted`` beside
+        it, and the value, the stance and the holder were in the one place nothing
+        could rebuild.
 
-        That failure is quiet: everything reads correctly until a merge, which then
-        appears to work while leaving beliefs keyed on an entity that no longer names
-        anything. Every consumer needs this pairing, so it is written once here.
+        ``cause`` is the event the belief comes from, recorded as the envelope's
+        ``causation_id``. The state's own ``source_event_id`` is the belief event, which
+        is what lets the fold recognise a replay and what keeps doxastica's as-of order
+        the log's order.
 
-        The state is returned because a caller that wants to record *why* a belief was
-        written needs its handle: ``core.add_edge(reading, premise, DERIVED_FROM)`` takes
-        two ``state_id``s and there is no other way to obtain them. Earlier callers
-        ignore it, which is why it can be added without touching them.
+        ``rests_on`` records what the belief was derived from, as an edge carried *in
+        the event*. An edge laid on the store directly would be one more thing the log
+        does not hold, and a rebuilt store would quietly stop reporting that retracting
+        the premise compromised the conclusion.
+
+        The state is returned because a caller that wants to say *why* it holds a later
+        belief needs it as that belief's ``rests_on``.
         """
-        written = self.writer(scope).revise(predicate, entity_ids, value, source_event)
-        self.append(written.minted)
-        return written.state
+        event = self.events.revise(
+            scope,
+            predicate,
+            entity_ids,
+            value,
+            causation_id=cause,
+            stance=stance,
+            edges=() if rests_on is None else (Edge(StateRef.of(rests_on)),),
+        )
+        self.append(event)
+        state = self.beliefs.state(
+            StateRef(
+                scope,
+                self.predicates.belief_id(predicate, *entity_ids),
+                event.envelope.event_id,
+            )
+        )
+        if state is None:
+            raise RuntimeError(f"{predicate} in {scope!r} was appended and did not fold")
+        return state
+
+    def rebuild_beliefs(self) -> int:
+        """
+        Drop the belief store and the index, and fold both again from the log.
+
+        Note 03 §9's whole claim as an operation: nothing a party believes lives
+        anywhere the log cannot reproduce. Returns the fold's new position.
+        """
+        fresh = MemoryCore(InMemoryBackend())
+        return self.projector.rebuild(
+            FOLD_NAME, reset=lambda: self.beliefs.reset(fresh), reset_in_transaction=True
+        )
 
     # ---- the three questions ---------------------------------------------------------
     #

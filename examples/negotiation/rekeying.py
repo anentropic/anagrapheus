@@ -98,20 +98,26 @@ def apply_rekeys(
             if successor is None:
                 undecided.append(state.belief_id)
                 continue
-            # Through the recorded minting path, carrying the original stance. Writing
-            # to the core directly would drop the stance to its default *and* emit no
-            # `BeliefMinted`, so the successor would never reach the entity index and a
-            # second merge could not plan a re-key for it. That is the same trap
-            # `Table.believe` exists to prevent, and this loop fell into it.
+            # As events, carrying the original stance, and never on the store directly.
+            # A write to the core would drop the stance to its default, reach neither the
+            # entity index nor the log, and vanish on the next rebuild -- so a second
+            # merge could not plan a re-key for it, and a rebuilt store would hold the
+            # belief under the absorbed id it was moved away from.
             parsed = table.predicates.parse(successor)
-            _, minted = table.writer(scope).revise(
-                parsed.name, parsed.entity_ids, state.value, source_event, state.stance
+            old = table.predicates.parse(state.belief_id)
+            # One batch, survivor first: the two events commit together or not at all,
+            # and within it the survivor is folded before the original is retracted.
+            table.append(
+                table.events.revise(
+                    scope,
+                    parsed.name,
+                    parsed.entity_ids,
+                    state.value,
+                    stance=state.stance,
+                    causation_id=source_event,
+                ),
+                table.events.contract(scope, old.name, old.entity_ids, causation_id=source_event),
             )
-            table.append(minted)
-            # Retract only after the survivor is written, so a crash between them
-            # leaves the belief present twice rather than absent. Duplicated is
-            # recoverable by re-running; lost is not.
-            table.core.contract(scope, state.belief_id, source_event_id=source_event)
             moved += 1
         if moved or undecided:
             applied.append(Applied(scope, moved, tuple(undecided)))

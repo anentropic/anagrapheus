@@ -409,11 +409,13 @@ def test_a_leak_seeds_belief_about_access_and_not_the_truth(table: Table):
 
 def test_an_offer_is_said_in_the_room_and_the_belief_cites_it(table: Table):
     """
-    The ``stated`` belief's source event is the ``PositionStated`` that caused it.
+    The ``stated`` belief was caused by the ``PositionStated`` it records.
 
     M7 wrote it against a bare ``uuid7()`` naming nothing, which reads identically and
     leaves the log with no record that anything was said — so a derived model, which
-    can only gate on events, had nothing to gate on.
+    can only gate on events, had nothing to gate on. Since note 03 §9 the state's own
+    source is the belief event the fold read it from, and the ``PositionStated`` is that
+    event's cause.
     """
     _opened(table)
     state = record_offer(
@@ -423,11 +425,9 @@ def test_an_offer_is_said_in_the_room_and_the_belief_cites_it(table: Table):
         clause=CLAUSE,
         heard_by=("eu", "uk"),
     )
-    said = next(
-        event
-        for stored, event in table.reader.read()
-        if stored.envelope.event_id == state.source_event_id
-    )
+    envelopes = {stored.envelope.event_id: stored.envelope for stored, _ in table.reader.read()}
+    cause = envelopes[state.source_event_id].causation_id
+    said = next(event for stored, event in table.reader.read() if stored.envelope.event_id == cause)
     assert said.position == "concede"  # type: ignore[attr-defined]
     assert said.heard_by == ("eu", "uk")  # type: ignore[attr-defined]
     assert state.scope_id == stated("eu")

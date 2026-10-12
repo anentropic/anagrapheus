@@ -15,7 +15,12 @@ integration cost. This subpackage pays it:
   minted at arity 1, so revising it cannot silently retract a claim about a third
   party nobody mentioned. A functional predicate may also declare the words its value
   can be, so two spellings of one answer cannot become two answers.
-- **An index from entity to belief id**, folded from the log. This is the piece
+- **Beliefs are a fold over the log.** An event that changes what somebody believes is
+  read as revise / expand / contract operations, and :class:`BeliefFold` applies them
+  to doxastica, so the belief store can be dropped and rebuilt like every other
+  projection. The library's own :class:`BeliefRevised` and its siblings cover beliefs no
+  domain event carries; an application binds its own events to an interpreter.
+- **An index from entity to belief id**, written by the same fold. This is the piece
   neither library has: doxastica can filter *by* a belief id but never look inside
   one, and the identity layer knows entities and has never heard of a belief. Without
   it, "a merge returns exactly which beliefs need re-keying" is a promise nothing can
@@ -35,12 +40,29 @@ from anagrapheus.beliefs.errors import (
     UnknownPredicate,
     UnknownScheme,
     UnrenderableBelief,
+    UnresolvedStateRef,
     WrongArity,
 )
-from anagrapheus.beliefs.events import BeliefMinted
-from anagrapheus.beliefs.fold import FOLD_NAME, BeliefIndexFold
+from anagrapheus.beliefs.events import (
+    BUILTIN_INTERPRETERS,
+    BeliefContracted,
+    BeliefExpanded,
+    BeliefRevised,
+    EdgeRecord,
+    register_builtin_events,
+    stance_name,
+)
+from anagrapheus.beliefs.fold import FOLD_NAME, BeliefFold, check
 from anagrapheus.beliefs.index import BeliefIndex
-from anagrapheus.beliefs.minting import mint
+from anagrapheus.beliefs.ops import (
+    BeliefOp,
+    Contract,
+    Edge,
+    Expand,
+    Interpreter,
+    Revise,
+    StateRef,
+)
 from anagrapheus.beliefs.predicates import (
     CURRENT_SCHEME,
     MintedId,
@@ -51,28 +73,29 @@ from anagrapheus.beliefs.predicates import (
 from anagrapheus.beliefs.rekey import BeliefRekey, plan_rekeys
 from anagrapheus.beliefs.sqlite import SQLiteBeliefIndexStore
 from anagrapheus.beliefs.store import BeliefIndexStore, BeliefRow
-from anagrapheus.beliefs.vocabulary import (
-    BeliefRole,
-    BeliefVocabulary,
-    RoleBinding,
-    register_builtin_events,
-)
-from anagrapheus.beliefs.writer import BeliefWriter, RelationalValue
+from anagrapheus.beliefs.writer import BeliefEvents, RelationalValue
 
 __all__ = [
+    "BUILTIN_INTERPRETERS",
     "CURRENT_SCHEME",
     "FOLD_NAME",
+    "BeliefContracted",
     "BeliefError",
+    "BeliefEvents",
+    "BeliefExpanded",
+    "BeliefFold",
     "BeliefIndex",
-    "BeliefIndexFold",
     "BeliefIndexStore",
-    "BeliefMinted",
+    "BeliefOp",
     "BeliefRekey",
-    "BeliefRole",
+    "BeliefRevised",
     "BeliefRow",
-    "BeliefVocabulary",
-    "BeliefWriter",
+    "Contract",
     "Disagreement",
+    "Edge",
+    "EdgeRecord",
+    "Expand",
+    "Interpreter",
     "MalformedBeliefId",
     "MergeCycleInBatch",
     "MintedId",
@@ -81,14 +104,17 @@ __all__ = [
     "PredicateKind",
     "PredicateRegistry",
     "RelationalValue",
-    "RoleBinding",
+    "Revise",
     "SQLiteBeliefIndexStore",
+    "StateRef",
     "UnknownPredicate",
     "UnknownScheme",
     "UnrenderableBelief",
+    "UnresolvedStateRef",
     "WrongArity",
+    "check",
     "divergence",
-    "mint",
     "plan_rekeys",
     "register_builtin_events",
+    "stance_name",
 ]

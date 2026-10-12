@@ -275,7 +275,9 @@ Both cost real time here, and both are quiet:
   caller.** Drop it and the belief is held but never indexed, so `plan_rekeys` cannot
   see it and a later merge appears to succeed while leaving the belief keyed on an
   entity that names nothing. `Table.believe` pairs the two, and a test asserts the
-  failure directly.
+  failure directly. *(Closed 2026-10-12 by [note 03 §9](03-belief-layer.md#9-beliefs-as-a-projection--ours):
+  a belief is one event now, folded into both the store and the index, so there is no
+  second half to drop.)*
 - **Beliefs name entities by UUID, so a party must be an identity-layer entity**, not a
   string. Obvious in hindsight and not obvious while writing: the first draft used bare
   names and failed at the pydantic boundary. It is also *why* a party can be merged at
@@ -368,7 +370,9 @@ the successor never reached the entity index and a second merge could plan nothi
 it. The note warning about exactly this was written two sections above the code that
 did it. Now applied through the recorded minting path, carrying the original stance,
 with tests for both halves — a re-key of a re-key, and a hedged belief that must not
-come back certain.
+come back certain. *(Since [note 03 §9](03-belief-layer.md#9-beliefs-as-a-projection--ours) the
+loop appends a `BeliefRevised` carrying the stance and a `BeliefContracted`, both citing
+the merge.)*
 
 Three more, each a real defect:
 

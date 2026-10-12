@@ -18,8 +18,6 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from uuid import UUID
 
-    from anagrapheus.beliefs.events import BeliefMinted
-
 __all__ = ["BeliefIndexStore", "BeliefRow"]
 
 
@@ -35,8 +33,12 @@ class BeliefRow(NamedTuple):
 class BeliefIndexStore(Protocol):
     """The storage the belief index reads, and the fold writes."""
 
-    def minted(self, event: BeliefMinted, seq: int) -> None:
-        """Record a minted belief id and the entities it names."""
+    def minted(self, row: BeliefRow) -> None:
+        """
+        Record a minted belief id and the entities it names.
+
+        An upsert: the same proposition is minted every time any scope writes it.
+        """
         ...
 
     def belief(self, belief_id: str) -> BeliefRow | None:

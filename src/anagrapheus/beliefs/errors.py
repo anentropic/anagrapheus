@@ -9,6 +9,7 @@ __all__ = [
     "OutsideVocabulary",
     "UnknownPredicate",
     "UnknownScheme",
+    "UnresolvedStateRef",
     "UnrenderableBelief",
     "WrongArity",
 ]
@@ -85,4 +86,15 @@ class MergeCycleInBatch(BeliefError):
     planner refuses for the same reason. A ring has no last element, so there is no
     successor to re-mint to — and picking an arbitrary point in it would hand the
     caller a confident answer to a question the log contradicts itself about.
+    """
+
+
+class UnresolvedStateRef(BeliefError):
+    """
+    An edge names a belief state the store does not hold.
+
+    Raised by the fold rather than passed to doxastica, whose ``add_edge`` silently
+    no-ops on a missing endpoint. In a fold that silence would be a dependency the log
+    records and the store lacks, so retracting the premise would stop reporting the
+    conclusion that rests on it — wrong in exactly the way nothing notices.
     """

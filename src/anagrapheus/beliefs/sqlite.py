@@ -19,8 +19,6 @@ from anagrapheus.timeline.migrations import migrate
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from anagrapheus.beliefs.events import BeliefMinted
-
 __all__ = ["SQLiteBeliefIndexStore"]
 
 _TABLES = ("belief_entities", "belief_ids")
@@ -36,7 +34,7 @@ class SQLiteBeliefIndexStore:
 
     # ---- writes ---------------------------------------------------------------------
 
-    def minted(self, event: BeliefMinted, seq: int) -> None:
+    def minted(self, row: BeliefRow) -> None:
         """Record a minted belief id and the entities it names."""
         # ON CONFLICT rather than a plain insert: the fold contract allows the last
         # batch to be re-applied after a crash, and minting the same id twice is
@@ -49,9 +47,9 @@ class SQLiteBeliefIndexStore:
             ON CONFLICT (belief_id) DO UPDATE
                 SET predicate = excluded.predicate
             """,
-            (event.belief_id, event.predicate, seq),
+            (row.belief_id, row.predicate, row.seq),
         )
-        for position, entity_id in enumerate(event.entity_ids):
+        for position, entity_id in enumerate(row.entity_ids):
             self._conn.execute(
                 """
                 INSERT INTO belief_entities (belief_id, entity_id, position, seq)
@@ -59,13 +57,13 @@ class SQLiteBeliefIndexStore:
                 ON CONFLICT (belief_id, position) DO UPDATE
                     SET entity_id = excluded.entity_id
                 """,
-                (event.belief_id, str(entity_id), position, seq),
+                (row.belief_id, str(entity_id), position, row.seq),
             )
         # An id re-minted at a shorter arity would leave the extra slots behind, and
         # they would then travel into every re-key. Cheap to prevent, silent if not.
         self._conn.execute(
             "DELETE FROM belief_entities WHERE belief_id = ? AND position >= ?",
-            (event.belief_id, len(event.entity_ids)),
+            (row.belief_id, len(row.entity_ids)),
         )
 
     # ---- reads ----------------------------------------------------------------------

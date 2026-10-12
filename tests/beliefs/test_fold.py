@@ -1,195 +1,306 @@
-"""The belief fold: dispatch, indifference to foreign events, and replay invariance."""
+"""The belief fold: beliefs and the index both rebuilt from the log, however it was folded."""
 
 from __future__ import annotations
 
 import uuid
 from typing import TYPE_CHECKING
 
+import pytest
+from doxastica import BeliefFilter, InMemoryBackend, MemoryCore, Stance
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from anagrapheus.beliefs import (
-    BeliefIndexFold,
-    BeliefMinted,
-    BeliefRole,
-    BeliefVocabulary,
-    RoleBinding,
-    mint,
+    Contract,
+    Edge,
+    Revise,
+    StateRef,
+    UnresolvedStateRef,
 )
-from anagrapheus.timeline import (
-    DomainEvent,
-    EventReader,
-    EventTypeRegistry,
-    Projector,
-    UpcastRegistry,
-)
+from anagrapheus.timeline import DomainEvent, EventTypeRegistry
 
-from .conftest import Rig, build_predicates, build_rig
+from .conftest import Rig, beliefs_of, build_predicates, build_rig
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from pathlib import Path
 
-    import pytest
+    from anagrapheus.beliefs import BeliefOp
+    from anagrapheus.timeline import Envelope, PendingEvent
 
 
-def test_the_fold_ignores_events_that_are_not_mintings(rig: Rig):
-    """The index shares the stream with the whole domain; most of it is none of its business."""
+def test_the_fold_ignores_events_no_interpreter_claims(rig: Rig):
+    """The fold shares the stream with the whole domain; most of it is none of its business."""
 
     class Shipped(DomainEvent, frozen=True):
         order: str
 
     rig.types.event("shop", "Shipped")(Shipped)
     entity = uuid.uuid7()
-    _, minted = mint(rig.types, rig.predicates, "location", entity)
 
-    rig.commit(minted, rig.types.pending(Shipped(order="a-1")))
+    rig.commit(rig.asserted("location", entity), rig.types.pending(Shipped(order="a-1")))
 
     assert [row.predicate for row in rig.index.beliefs_for(entity)] == ["location"]
 
 
-def test_an_application_vocabulary_folds_to_the_same_index(tmp_path: Path):
+# -- the application's own events ------------------------------------------------------
+
+
+class Observed(DomainEvent, frozen=True):
+    """An application's observation event: one witness sees one person somewhere."""
+
+    witness: str
+    person: uuid.UUID
+    place: str
+
+
+class Recanted(DomainEvent, frozen=True):
+    """The witness takes it back."""
+
+    witness: str
+    person: uuid.UUID
+
+
+def _observed(_envelope: Envelope, event: DomainEvent) -> Sequence[BeliefOp]:
+    assert isinstance(event, Observed)
+    return (Revise(f"witness:{event.witness}", "location", (event.person,), event.place),)
+
+
+def _recanted(_envelope: Envelope, event: DomainEvent) -> Sequence[BeliefOp]:
+    assert isinstance(event, Recanted)
+    return (Contract(f"witness:{event.witness}", "location", (event.person,)),)
+
+
+def _app_rig(path: Path) -> Rig:
+    types = EventTypeRegistry()
+    from anagrapheus import register_builtin_events
+
+    register_builtin_events(types)
+    types.event("app", "Observed")(Observed)
+    types.event("app", "Recanted")(Recanted)
+    return build_rig(
+        path,
+        types=types,
+        interpret={("app", "Observed"): _observed, ("app", "Recanted"): _recanted},
+    )
+
+
+def test_an_application_event_folds_to_beliefs_without_a_library_event(tmp_path: Path):
     """
     The library ships the shape; the application owns the name.
 
-    §8's rule, applied a third time. A consumer that already emits its own minting
-    event binds that type and never sees a library one.
+    Doc 00 §8's rule, applied to belief. An observation event *is* the belief's cause
+    and its content, so the application binds it to an interpreter and never emits a
+    ``BeliefRevised`` beside it. This is the shape NVM's belief ingestion has: beliefs
+    derived from observation events, the log the only place they live.
+    """
+    rig = _app_rig(tmp_path / "app.db")
+    try:
+        alice = uuid.uuid7()
+        seen = rig.types.pending(Observed(witness="bob", person=alice, place="London"))
+        rig.commit(seen)
+
+        [state] = rig.core.query_scope("witness:bob", BeliefFilter())
+        assert state.value == "London"
+        # The state's source *is* the observation, because that is the event folded.
+        assert state.source_event_id == seen.envelope.event_id
+        assert [r.predicate for r in rig.index.beliefs_for(alice)] == ["location"]
+
+        rig.commit(rig.types.pending(Recanted(witness="bob", person=alice)))
+        assert rig.core.query_scope("witness:bob", BeliefFilter()) == []
+
+        before = beliefs_of(rig.core, ("witness:bob",))
+        rig.rebuild()
+        assert beliefs_of(rig.core, ("witness:bob",)) == before
+    finally:
+        rig.store.close()
+
+
+def test_an_interpreter_that_writes_one_belief_twice_is_refused(tmp_path: Path):
+    """
+    One event, one write per proposition per scope.
+
+    A state's source is the event it was folded from, so a second write of the same
+    belief by the same event would be indistinguishable from a replay of the first and
+    silently skipped. Refused instead, loudly.
     """
 
-    class ClaimCoined(DomainEvent, frozen=True):
-        belief_id: str
-        predicate: str
-        entity_ids: tuple[uuid.UUID, ...]
-
-    def adapt(event: DomainEvent) -> BeliefMinted:
-        assert isinstance(event, ClaimCoined)
-        return BeliefMinted(
-            belief_id=event.belief_id,
-            predicate=event.predicate,
-            entity_ids=event.entity_ids,
-        )
+    def twice(_envelope: Envelope, event: DomainEvent) -> Sequence[BeliefOp]:
+        assert isinstance(event, Observed)
+        op = Revise("w", "location", (event.person,), event.place)
+        return (op, op)
 
     types = EventTypeRegistry()
-    types.event("nvm", "ClaimCoined")(ClaimCoined)
-    vocabulary = BeliefVocabulary({BeliefRole.MINTED: RoleBinding("nvm", "ClaimCoined", adapt)})
-
-    predicates = build_predicates()
-    entity = uuid.uuid7()
-    belief_id = predicates.belief_id("location", entity)
-
-    native = build_rig(tmp_path / "native.db")
+    types.event("app", "Observed")(Observed)
+    rig = build_rig(tmp_path / "twice.db", types=types, interpret={("app", "Observed"): twice})
     try:
-        native.commit(mint(native.types, predicates, "location", entity)[1])
-        expected = [
-            (r.belief_id, r.predicate, r.entity_ids) for r in native.index.beliefs_for(entity)
-        ]
+        rig.append(rig.types.pending(Observed(witness="w", person=uuid.uuid7(), place="x")))
+        with pytest.raises(ValueError, match="twice"):
+            rig.projector.catch_up()
     finally:
-        native.store.close()
+        rig.store.close()
 
-    foreign = build_rig(tmp_path / "foreign.db", types=types)
-    foreign.fold = BeliefIndexFold(foreign.index_store, types, vocabulary=vocabulary)
-    foreign.projector = Projector(
-        foreign.store, EventReader(foreign.store, UpcastRegistry(), types), [foreign.fold]
-    )
-    try:
-        foreign.commit(
-            types.pending(
-                ClaimCoined(belief_id=belief_id, predicate="location", entity_ids=(entity,))
-            )
-        )
-        actual = [
-            (r.belief_id, r.predicate, r.entity_ids) for r in foreign.index.beliefs_for(entity)
-        ]
-    finally:
-        foreign.store.close()
 
-    assert actual == expected
+# -- idempotence, edges, reset ---------------------------------------------------------
 
 
 def test_re_applying_a_batch_changes_nothing(rig: Rig):
-    """The fold contract allows the last batch to be re-applied after a crash."""
+    """
+    The fold contract allows the last batch to be re-applied after a crash.
+
+    doxastica is not in the log's transaction, so this is the case that matters: a
+    crash after the store was written and before the position committed. The fold
+    recognises its own writes by their source event and skips them.
+    """
     entity = uuid.uuid7()
-    _, minted = mint(rig.types, rig.predicates, "location", entity)
-    rig.commit(minted)
-    before = _snapshot(rig)
+    rig.commit(rig.events.revise("agent", "location", (entity,), "London"))
+    index_before = _index(rig)
+    beliefs_before = beliefs_of(rig.core, ("agent",))
 
     rig.fold.apply(next(iter(rig.store.read())), rig.store.connection)
 
-    assert _snapshot(rig) == before
+    assert _index(rig) == index_before
+    assert beliefs_of(rig.core, ("agent",)) == beliefs_before
 
 
-def test_minting_the_same_proposition_twice_is_one_row(rig: Rig):
-    """
-    Minting the same proposition twice is ordinary rather than an error.
-
-    Ordinary rather than an error: the same claim can be asserted in two scopes, or
-    re-asserted later, and minting is deterministic so both produce one id.
-    """
+def test_minting_the_same_proposition_twice_is_one_index_row(rig: Rig):
+    """The same claim asserted in two scopes is one id, and one row."""
     entity = uuid.uuid7()
-    first, e1 = mint(rig.types, rig.predicates, "location", entity)
-    second, e2 = mint(rig.types, rig.predicates, "location", entity)
-    rig.commit(e1, e2)
+    rig.commit(rig.asserted("location", entity), rig.asserted("location", entity, scope="other"))
 
-    assert first == second
     assert len(rig.index.beliefs_for(entity)) == 1
 
 
-_UUIDS = st.builds(uuid.UUID, st.binary(min_size=16, max_size=16).map(bytes.hex))
+def test_an_edge_survives_a_rebuild(rig: Rig):
+    """
+    The dependency is in the log, so a rebuilt store still knows what rests on what.
+
+    Laid on the store directly — as the demo did until note 03 §9 — the edge would be
+    gone after a rebuild, and retracting the premise would stop reporting the
+    conclusion that rests on it.
+    """
+    alice = uuid.uuid7()
+    believer = rig.believer("agent")
+    premise = believer.revise("location", (alice,), "London")
+    believer.for_scope("analyst").revise("employer", (alice,), "BBC", rests_on=premise)
+
+    rig.rebuild()
+
+    [premise_now] = rig.core.query_scope("agent", BeliefFilter())
+    reached = rig.core.get_impact(premise_now.state_id).reached
+    assert [(s.scope_id, s.value) for s in reached] == [("analyst", "BBC")]
+
+
+def test_an_edge_to_a_state_the_log_does_not_hold_is_refused(rig: Rig):
+    """The store would lay nothing and say nothing; the fold says so."""
+    ghost = StateRef("agent", rig.predicates.belief_id("location", uuid.uuid7()), uuid.uuid7())
+    rig.append(rig.events.revise("agent", "location", (uuid.uuid7(),), "x", edges=(Edge(ghost),)))
+
+    with pytest.raises(UnresolvedStateRef):
+        rig.projector.catch_up()
+
+
+def test_reset_folds_into_the_store_it_is_given(rig: Rig):
+    """There is no "clear" on a belief store; the caller hands the fold an empty one."""
+    rig.commit(rig.asserted("location", uuid.uuid7()))
+    old = rig.core
+    fresh = MemoryCore(InMemoryBackend())
+
+    rig.fold.reset(fresh)
+
+    assert rig.core is fresh
+    assert rig.core.query_scope("agent", BeliefFilter()) == []
+    assert old.query_scope("agent", BeliefFilter()) != [], "the old store is untouched"
+
+
+# -- the invariant ---------------------------------------------------------------------
+
+_OPS = st.sampled_from(["revise", "expand", "contract"])
+_STANCES = st.sampled_from(list(Stance))
 
 
 @settings(deadline=None, max_examples=40)
 @given(
     plan=st.lists(
-        st.tuples(st.sampled_from(["location", "employer", "knows", "sibling"]), _UUIDS, _UUIDS),
+        st.tuples(
+            _OPS,
+            st.sampled_from(["agent", "rumour"]),
+            st.sampled_from(["location", "employer", "knows", "sibling"]),
+            _STANCES,
+        ),
         min_size=1,
-        max_size=8,
+        max_size=10,
     ),
-    cut=st.integers(min_value=0, max_value=8),
+    cut=st.integers(min_value=0, max_value=10),
     batch_size=st.integers(min_value=1, max_value=4),
 )
 def test_straight_through_equals_interrupted_equals_rebuilt(
     tmp_path_factory: pytest.TempPathFactory,
-    plan: list[tuple[str, uuid.UUID, uuid.UUID]],
+    plan: list[tuple[str, str, str, Stance]],
     cut: int,
     batch_size: int,
 ):
     """
-    Fold-replay is an invariant: same log, same index, however the folding was cut up.
+    Fold-replay is an invariant: same log, same beliefs and same index, however folded.
 
-    The M1 and M2 property, applied to the third projection in the stack.
+    The M1 and M2 property, applied now to what is *believed* and not only to which ids
+    were minted — the gap note 03 §9 closed. ``state_id`` aside, which doxastica mints,
+    every revision, value, status and stance comes back.
     """
     predicates = build_predicates()
-    events: list[tuple[str, tuple[uuid.UUID, ...]]] = []
-    for name, a, b in plan:
-        arity = predicates.predicate(name).arity
-        events.append((name, (a,) if arity == 1 else (a, b)))
-
+    # A small pool of entities, so revisions and contractions actually collide.
+    pool = [uuid.UUID(int=n) for n in range(1, 4)]
     root = tmp_path_factory.mktemp("replay")
+
+    def events(rig: Rig) -> list[PendingEvent]:
+        built: list[PendingEvent] = []
+        for i, (op, scope, name, stance) in enumerate(plan):
+            arity = predicates.predicate(name).arity
+            ids = tuple(pool[(i + k) % len(pool)] for k in range(arity))
+            relational = name in {"knows", "sibling"}
+            value: object = True if relational else f"v{i % 2}"
+            if op == "contract":
+                built.append(rig.events.contract(scope, name, ids))
+            elif op == "expand":
+                built.append(rig.events.expand(scope, name, ids, value, stance=stance))
+            else:
+                built.append(rig.events.revise(scope, name, ids, value, stance=stance))
+        return built
 
     straight = build_rig(root / "straight.db")
     try:
-        straight.commit(*[mint(straight.types, predicates, n, *e)[1] for n, e in events])
-        expected = _snapshot(straight)
+        straight.commit(*events(straight))
+        expected = (_index(straight), beliefs_of(straight.core, ("agent", "rumour")))
     finally:
         straight.store.close()
 
     interrupted = build_rig(root / "interrupted.db")
     try:
-        pending = [mint(interrupted.types, predicates, n, *e)[1] for n, e in events]
+        pending = events(interrupted)
         head, tail = pending[: cut or None], pending[cut:] if cut else []
         interrupted.append(*head)
         interrupted.projector.catch_up(batch_size=batch_size)
         if tail:
             interrupted.append(*tail)
             interrupted.projector.catch_up(batch_size=batch_size)
-        assert _snapshot(interrupted) == expected
+        got = (_index(interrupted), beliefs_of(interrupted.core, ("agent", "rumour")))
+        assert _comparable(got) == _comparable(expected)
 
         interrupted.rebuild()
-        assert _snapshot(interrupted) == expected
+        rebuilt = (_index(interrupted), beliefs_of(interrupted.core, ("agent", "rumour")))
+        assert rebuilt == got
     finally:
         interrupted.store.close()
 
 
-def _snapshot(rig: Rig) -> dict[str, list[tuple[object, ...]]]:
+def _comparable(snapshot: tuple[object, list[tuple[object, ...]]]) -> object:
+    # Two logs built from one plan carry different event ids, so a source is compared by
+    # its position in the scope's history rather than by value.
+    index, beliefs = snapshot
+    return index, [row[:2] + row[3:] for row in beliefs]
+
+
+def _index(rig: Rig) -> dict[str, list[tuple[object, ...]]]:
     return {
         table: sorted(tuple(row) for row in rig.store.connection.execute(f"SELECT * FROM {table}"))  # noqa: S608
         for table in ("belief_ids", "belief_entities")

@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from anagrapheus.beliefs import BeliefMinted, mint
+from anagrapheus.beliefs import BeliefRow
 from anagrapheus.beliefs.migrations import COMPONENT, LATEST_VERSION
 from anagrapheus.timeline.migrations import SchemaTooNew, component_version
 
@@ -21,9 +21,9 @@ def test_the_index_answers_the_question_neither_library_can(rig: Rig):
     """Doxastica filters *by* a belief id; identity knows entities. Only this joins them."""
     alice, bob = uuid.uuid7(), uuid.uuid7()
     rig.commit(
-        mint(rig.types, rig.predicates, "location", alice)[1],
-        mint(rig.types, rig.predicates, "knows", alice, bob)[1],
-        mint(rig.types, rig.predicates, "location", bob)[1],
+        rig.asserted("location", alice),
+        rig.asserted("knows", alice, bob),
+        rig.asserted("location", bob),
     )
 
     assert [r.predicate for r in rig.index.beliefs_for(alice)] == ["location", "knows"]
@@ -39,7 +39,7 @@ def test_argument_order_survives_the_round_trip(rig: Rig):
     set of entities could not tell the two apart, and a re-key would substitute blind.
     """
     a, b = uuid.uuid7(), uuid.uuid7()
-    rig.commit(mint(rig.types, rig.predicates, "knows", a, b)[1])
+    rig.commit(rig.asserted("knows", a, b))
 
     belief_id = rig.predicates.belief_id("knows", a, b)
     assert rig.index.entities_of(belief_id) == (a, b)
@@ -47,7 +47,7 @@ def test_argument_order_survives_the_round_trip(rig: Rig):
 
 def test_a_belief_naming_one_entity_twice_appears_once(rig: Rig):
     a = uuid.uuid7()
-    rig.commit(mint(rig.types, rig.predicates, "sibling", a, a)[1])
+    rig.commit(rig.asserted("sibling", a, a))
 
     assert len(rig.index.beliefs_for(a)) == 1
 
@@ -65,9 +65,9 @@ def test_an_unknown_belief_id_is_an_ordinary_answer(rig: Rig):
 def test_beliefs_of_a_predicate(rig: Rig):
     a, b = uuid.uuid7(), uuid.uuid7()
     rig.commit(
-        mint(rig.types, rig.predicates, "location", a)[1],
-        mint(rig.types, rig.predicates, "employer", a)[1],
-        mint(rig.types, rig.predicates, "location", b)[1],
+        rig.asserted("location", a),
+        rig.asserted("employer", a),
+        rig.asserted("location", b),
     )
 
     assert [r.belief_id for r in rig.index.beliefs_of("location")] == [
@@ -81,15 +81,12 @@ def test_re_minting_at_a_shorter_arity_leaves_no_stale_slot(rig: Rig):
     A shorter re-record leaves no orphaned argument slots.
 
     An id re-recorded with fewer entities would otherwise keep the extra slots, and
-    they would travel into every re-key. Reachable only through an application's own
-    vocabulary, which the library cannot arity-check for it.
+    they would travel into every re-key. Not reachable through the fold, which
+    mints at the declared arity; the store does not rely on that.
     """
     a, b = uuid.uuid7(), uuid.uuid7()
-    long = BeliefMinted(belief_id="v1:crm:knows(x)", predicate="knows", entity_ids=(a, b))
-    short = BeliefMinted(belief_id="v1:crm:knows(x)", predicate="knows", entity_ids=(a,))
-
-    rig.index_store.minted(long, 1)
-    rig.index_store.minted(short, 2)
+    rig.index_store.minted(BeliefRow("v1:crm:knows(x)", "knows", (a, b), 1))
+    rig.index_store.minted(BeliefRow("v1:crm:knows(x)", "knows", (a,), 2))
 
     assert rig.index.entities_of("v1:crm:knows(x)") == (a,)
     assert rig.index.beliefs_for(b) == []
@@ -146,9 +143,7 @@ def test_listing_beliefs_does_not_run_a_query_per_row(rig: Rig):
     likely to involve.
     """
     entity = uuid.uuid7()
-    rig.commit(
-        *[mint(rig.types, rig.predicates, "knows", entity, uuid.uuid7())[1] for _ in range(20)]
-    )
+    rig.commit(*[rig.asserted("knows", entity, uuid.uuid7()) for _ in range(20)])
 
     statements: list[str] = []
     rig.store.connection.set_trace_callback(statements.append)
