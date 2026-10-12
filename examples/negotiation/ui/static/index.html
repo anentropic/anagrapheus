@@ -15,6 +15,10 @@
              placeholder="scripted (offline) — or e.g. anthropic:claude-haiku-5-5  update=…">
       <button type="submit" id="run-button">Run</button>
     </form>
+    <div class="modes" role="group" aria-label="View">
+      <button type="button" data-mode="story" title="Plain language, one step of the story at a time">Story</button>
+      <button type="button" data-mode="workings" title="Every belief, derived model, event and model call">Workings</button>
+    </div>
     <div id="status" class="status idle">idle</div>
   </header>
   <div id="run-error" class="banner error" hidden></div>
@@ -38,6 +42,21 @@
       <label class="follow"><input id="follow" type="checkbox" checked> follow</label>
     </div>
     <div id="frame-label" class="frame-label">no frames yet — press Run</div>
+  </section>
+
+  <section id="plain" class="plain" aria-label="The story so far">
+    <details class="intro" id="intro">
+      <summary>What am I looking at?</summary>
+      <p>Two AI negotiators, one for the EU and one for the UK, bargain over a single clause.
+        Each has a <b>private goal</b>, says things <b>in public</b>, and builds a picture of
+        what the other side wants, and of what the other side thinks <em>it</em> knows.</p>
+      <p>Everything that happens is written to a log, and each side's beliefs are worked out
+        from what it could have seen. So a side can be wrong, for example if it thinks a slip
+        went unnoticed when it didn't. That gap is the point of the demo.</p>
+      <p>Step through with <b>◀ ▶</b> or the arrow keys. After the live run, the whole thing is
+        <b>replayed</b> from the log alone: the same story, with no AI called at all.</p>
+    </details>
+    <div id="plain-body"></div>
   </section>
 
   <main class="grid">
@@ -81,6 +100,7 @@
     <div id="story"></div>
   </details>
 
+  <script src="/static/plain.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>

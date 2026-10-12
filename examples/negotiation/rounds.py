@@ -197,12 +197,13 @@ def play_round(
     for party, reading in readings.items():
         check_reading(table, reading, about=opponents[party], clause=clause)
         _log.info(
-            "round %d: %s concludes %s(%s) = %s",
+            "round %d: %s concludes %s(%s) = %s (%s)",
             number,
             party,
             reading.predicate,
             reading.about,
             reading.value,
+            reading.because,
         )
     concluded = {
         # The premise is what the *other* side said this round, which is the observation

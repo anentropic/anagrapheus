@@ -23,7 +23,21 @@ const state = {
   playing: null,
   stages: { live: newStage(), replay: newStage() },
   filters: { model: true, round: true, pins: true, store: false, other: true },
+  // Story by default: the workings assume you already know what a scope is.
+  mode: localStorage.getItem("mode") === "workings" ? "workings" : "story",
 };
+
+function setMode(mode) {
+  state.mode = mode;
+  localStorage.setItem("mode", mode);
+  if (mode === "story") {
+    // Land on the end of the current beat, so the narration describes a finished step.
+    const stage = state.stages[state.stage];
+    if (stage.frames.length) state.pos[state.stage] = beatAt(beats(stage), state.pos[state.stage]).beat.last;
+  }
+  window.scrollTo(0, 0);
+  schedule();
+}
 
 // DOM nodes built once per log record / event, then shown or hidden as the frame moves,
 // so an expanded model call stays expanded while scrubbing.
@@ -166,8 +180,12 @@ function category(log) {
 // ---- render -----------------------------------------------------------------------------
 
 function render() {
+  document.body.classList.toggle("mode-story", state.mode === "story");
+  document.body.classList.toggle("mode-workings", state.mode === "workings");
+  for (const b of document.querySelectorAll(".modes button")) b.classList.toggle("active", b.dataset.mode === state.mode);
   renderStatus();
   renderTimeline();
+  if (state.mode === "story") return renderPlain();
   const { frame, prev, pos, stage } = currentFrames();
   if (!frame) {
     for (const id of ["beliefs", "headline", "model-cards", "chronicle"]) $(id).replaceChildren();
@@ -203,14 +221,8 @@ function renderTimeline() {
   $("follow").checked = state.follow;
   $("play").textContent = state.playing ? "⏸" : "▶";
 
-  // One chip per contiguous phase: setup, then each round's act/say/leak/read/close.
-  const groups = [];
-  stage.frames.forEach((f, i) => {
-    const phase = f.phase || "setup";
-    const g = groups[groups.length - 1];
-    if (g && g.phase === phase) g.last = i;
-    else groups.push({ phase, first: i, last: i });
-  });
+  // One chip per beat: setup, then each round's say/leak/read/close.
+  const groups = beats(stage);
   const current = stage.frames[pos];
   let lastRound = null;
   const chips = groups.map((g) => {
@@ -227,7 +239,8 @@ function renderTimeline() {
       ].join(" "),
       text: starts ? `${round} · ${step}` : step,
       title: `${g.phase} — frames ${g.first + 1}–${g.last + 1}` + (end && end.wrong ? " — the UK is wrong about what the EU concluded" : ""),
-      onclick: () => go(g.first),
+      // The Story view shows a beat once it is done; the workings, as it begins.
+      onclick: () => go(state.mode === "story" ? g.last : g.first),
     });
   });
   $("phases").replaceChildren(...chips);
@@ -493,6 +506,7 @@ function go(index, { keepFollow = false } = {}) {
 }
 
 function step(delta) {
+  if (state.mode === "story") return stepBeat(delta);
   go(state.pos[state.stage] + delta);
 }
 
@@ -503,11 +517,15 @@ function togglePlay() {
   } else {
     const frames = state.stages[state.stage].frames;
     if (state.pos[state.stage] >= frames.length - 1) go(0);
-    state.playing = setInterval(() => {
-      const n = state.stages[state.stage].frames.length;
-      if (state.pos[state.stage] >= n - 1) return togglePlay();
-      step(1);
-    }, 250);
+    state.playing = setInterval(
+      () => {
+        const n = state.stages[state.stage].frames.length;
+        if (state.pos[state.stage] >= n - 1) return togglePlay();
+        step(1);
+      },
+      // A beat is a paragraph to read; a frame is one row of the log.
+      state.mode === "story" ? 2500 : 250,
+    );
   }
   schedule();
 }
@@ -525,6 +543,7 @@ $("follow").onchange = (e) => {
   state.follow = e.target.checked;
   if (state.follow) go(Infinity, { keepFollow: true });
 };
+for (const b of document.querySelectorAll(".modes button")) b.onclick = () => setMode(b.dataset.mode);
 for (const tab of document.querySelectorAll(".tab")) {
   tab.onclick = () => {
     state.stage = tab.dataset.stage;
