@@ -593,5 +593,10 @@ fetch("/config")
     if (!$("models").value) $("models").value = c.models.join(" ");
   });
 
+// The timeline sticks just under the header, whose height changes when it wraps.
+new ResizeObserver(([entry]) => {
+  document.documentElement.style.setProperty("--bar-h", `${entry.target.offsetHeight}px`);
+}).observe(document.querySelector(".bar"));
+
 connect();
 render();

@@ -157,6 +157,11 @@ button.link { border: 0; background: none; padding: 0; color: var(--accent); tex
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 8px;
+  /* Pinned under the header while the panels scroll; --bar-h tracks its real height. */
+  position: sticky;
+  top: var(--bar-h, 53px);
+  z-index: 1;
+  box-shadow: 0 4px 10px -6px rgb(0 0 0 / 0.25);
 }
 .timeline .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .timeline .row + .row { margin-top: 8px; }
