@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 from . import beliefs, chronicle, identity, provider, timeline
@@ -17,6 +18,12 @@ __all__ = [
     "register_builtin_events",
     "timeline",
 ]
+
+# A library logs and never configures: without this, a consumer that has not set up
+# logging would see Python's last-resort handler print our warnings to stderr. Every
+# module logs under `anagrapheus.<subpackage>.<module>`, so one `getLogger("anagrapheus")`
+# turns all of it up or down.
+logging.getLogger(__name__).addHandler(logging.NullHandler())
 
 
 def register_builtin_events(registry: EventTypeRegistry) -> None:

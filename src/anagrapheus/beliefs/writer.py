@@ -16,6 +16,7 @@ in UUID7 byte order — makes its as-of cut agree with the log's own order.
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from doxastica import Stance
@@ -33,6 +34,8 @@ if TYPE_CHECKING:
     from anagrapheus.timeline.registry import EventTypeRegistry
 
 __all__ = ["BeliefWriter", "RelationalValue", "Written"]
+
+_log = logging.getLogger(__name__)
 
 #: What a relational belief's value may be: whether the proposition holds, and nothing
 #: else. *How firmly* is a separate axis, and doxastica already has a parameter for it —
@@ -107,6 +110,7 @@ class BeliefWriter:
         """AGM revision: supersede whatever this scope held for this proposition."""
         belief_id, minted = self._mint(predicate, entity_ids, value, correlation_id)
         state = self._store.revise(self._scope_id, belief_id, value, source_event_id, stance)
+        _log.debug("revise %s: %s = %r", self._scope_id, belief_id, value)
         return Written(state, minted)
 
     def expand(
@@ -122,13 +126,14 @@ class BeliefWriter:
         """AGM expansion: add without consistency enforcement."""
         belief_id, minted = self._mint(predicate, entity_ids, value, correlation_id)
         state = self._store.expand(self._scope_id, belief_id, value, source_event_id, stance)
+        _log.debug("expand %s: %s = %r", self._scope_id, belief_id, value)
         return Written(state, minted)
 
     def contract(self, predicate: str, entity_ids: tuple[UUID, ...], source_event_id: UUID) -> None:
         """AGM contraction: retract this proposition in this scope."""
-        self._store.contract(
-            self._scope_id, self._predicates.belief_id(predicate, *entity_ids), source_event_id
-        )
+        belief_id = self._predicates.belief_id(predicate, *entity_ids)
+        self._store.contract(self._scope_id, belief_id, source_event_id)
+        _log.debug("contract %s: %s", self._scope_id, belief_id)
 
     def _mint(
         self,

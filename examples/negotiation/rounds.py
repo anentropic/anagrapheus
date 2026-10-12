@@ -35,6 +35,7 @@ It raises instead.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -51,6 +52,8 @@ if TYPE_CHECKING:
     from examples.negotiation.table import Table
 
 __all__ = ["Leak", "Round", "Turn", "play_round"]
+
+_log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,12 +136,22 @@ def play_round(
     context = _context(table)
 
     # -- 1. act: every party proposes before any offer is recorded ----------------------
+    _log.info("round %d: act -- each party proposes, unseen by the other", number)
     offers = {
         party: agent.propose(opponents[party], clause, context=context)
         for party, agent in agents.items()
     }
+    for party, offer in offers.items():
+        _log.info(
+            "round %d: %s offers to %s (%s)",
+            number,
+            party,
+            "concede" if offer.concede else "hold firm",
+            offer.because,
+        )
 
     # -- 2. say ------------------------------------------------------------------------
+    _log.info("round %d: say -- offers are stated in the room", number)
     said = {
         # Everyone at the table is in the room, which is what "stated" means here.
         party: record_offer(table, offer, party=party, clause=clause, heard_by=tuple(agents))
@@ -155,6 +168,14 @@ def play_round(
     _heard_in_the_room(table, tuple(agents), said)
 
     # -- 3. leak -----------------------------------------------------------------------
+    if leak is not None:
+        _log.info(
+            "round %d: leak -- %s lets slip %r, overheard by %s",
+            number,
+            leak.speaker,
+            leak.suggests,
+            leak.overheard_by,
+        )
     leaked = None if leak is None else _let_slip(table, leak)
 
     # The beliefs written above are invisible to `plan_rekeys` and the derived read until
@@ -162,6 +183,7 @@ def play_round(
     table.projector.catch_up()
 
     # -- 4. read -----------------------------------------------------------------------
+    _log.info("round %d: read -- each party concludes something about the other", number)
     readings = {
         party: agent.update(
             opponents[party], clause, observed=_observed(table, party, offers, leak)
@@ -174,6 +196,14 @@ def play_round(
     # one, because the log then says something happened that did not.
     for party, reading in readings.items():
         check_reading(table, reading, about=opponents[party], clause=clause)
+        _log.info(
+            "round %d: %s concludes %s(%s) = %s",
+            number,
+            party,
+            reading.predicate,
+            reading.about,
+            reading.value,
+        )
     concluded = {
         # The premise is what the *other* side said this round, which is the observation
         # the conclusion rests on. Retract it -- a bluff, withdrawn -- and `get_impact`
@@ -183,6 +213,7 @@ def play_round(
     }
 
     # -- 5. close ----------------------------------------------------------------------
+    _log.info("round %d: close", number)
     closing = table.types.pending(domain.RoundClosed(round_number=number))
     table.append(closing)
     table.projector.catch_up()

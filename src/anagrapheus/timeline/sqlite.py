@@ -10,6 +10,7 @@ transaction in one file. "Scratch is never canon" is structural, not physical:
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -30,6 +31,8 @@ if TYPE_CHECKING:
     from anagrapheus.timeline.envelope import PendingEvent
 
 __all__ = ["SQLiteEventStore"]
+
+_log = logging.getLogger(__name__)
 
 
 def _now_iso() -> str:
@@ -133,7 +136,16 @@ class SQLiteEventStore:
                         json.dumps(pending.payload, ensure_ascii=False),
                     ),
                 )
-            return last + len(batch)
+        # After the `with`, so a batch whose own write failed is never reported. One
+        # appended inside a caller's transaction can still roll back with it later.
+        if batch and _log.isEnabledFor(logging.DEBUG):
+            _log.debug(
+                "appended seq %d..%d: %s",
+                last + 1,
+                last + len(batch),
+                ", ".join(p.envelope.type for p in batch),
+            )
+        return last + len(batch)
 
     def read(self, since_seq: int = 0, limit: int | None = None) -> Iterator[StoredEvent]:
         """Read events with ``seq > since_seq`` in order; content never filters here."""

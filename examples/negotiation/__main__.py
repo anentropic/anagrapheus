@@ -26,6 +26,7 @@ shapes nothing synthetic produces.
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 import tempfile
 from pathlib import Path
@@ -60,7 +61,21 @@ def main(argv: Sequence[str] | None = None) -> int:
             "Omit entirely to run the scripted counterpart offline."
         ),
     )
+    parser.add_argument(
+        "--log-level",
+        default="WARNING",
+        choices=("DEBUG", "INFO", "WARNING", "ERROR"),
+        help=(
+            "log backend activity to stderr: INFO shows every model and tool call and "
+            "each round's steps, DEBUG adds event appends, belief writes and folds"
+        ),
+    )
     args = parser.parse_args(argv)
+    logging.basicConfig(
+        level=args.log_level,
+        format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+    )
 
     specs: list[str] = args.model
     try:
