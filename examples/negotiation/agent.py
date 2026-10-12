@@ -37,6 +37,7 @@ belief whose value was prose would be a belief nothing could ever compare.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 from doxastica import EdgeType
@@ -44,7 +45,7 @@ from examples.negotiation import domain
 from examples.negotiation.nesting import reconstruct
 from examples.negotiation.scopes import held, stated
 from pydantic import BaseModel
-from pydantic_ai import Agent
+from pydantic_ai import Agent, ModelRetry
 
 from anagrapheus.provider import PinnedModel, pinned_tool
 
@@ -55,6 +56,7 @@ if TYPE_CHECKING:
     from examples.negotiation.table import Table
     from examples.negotiation.view import PartyView
     from pydantic_ai.models import Model
+    from pydantic_ai.tools import RunContext
 
     from anagrapheus.timeline.pins import PinResolver
 
@@ -83,10 +85,20 @@ class Reading(BaseModel):
     """
     What a party concludes about another after a round — first-order, by schema.
 
-    ``predicate`` is a ``Literal`` over the two predicates that describe another party's
-    *preferences*. Nothing here can say "what they believe": R28 forbids storing that,
-    and this type is where the forbidding happens, because a prompt asking a model not
-    to is a request and a schema is a wall.
+    ``predicate`` is a ``Literal`` with one member, ``red_line``: a disposition, held
+    with no witness trail, which is R28's exception and the one belief about another
+    party that may be stored. Nothing here can say "what they believe": R28 forbids
+    storing that, and this type is where the forbidding happens, because a prompt asking
+    a model not to is a request and a schema is a wall.
+
+    **It also allowed ``position``, and that was a second gap.** ``position`` is a
+    legitimate first-order belief, but nothing reads a stored ``position`` about the
+    other side — the brief derives that line instead — so a conclusion written there
+    reached no decision. The scripted model always chose ``red_line``; the first real
+    model to drive this harness chose ``position`` for seven of its eight conclusions,
+    because the prompt asked "what they actually want", which is a position. Note 06
+    §11. The prompt now asks for what the brief reads, and the schema allows nothing
+    else.
 
     The fields are the *arguments* to a belief id, never the id itself — §6a's
     mint-from-structured-data rule. ``because`` is the exception that proves it: it is
@@ -99,7 +111,7 @@ class Reading(BaseModel):
     about: str
     #: A tabled clause, by title.
     clause: str
-    predicate: Literal["position", "red_line"]
+    predicate: Literal["red_line"]
     #: The position itself — ``"concede"``, ``"never"``, whatever the domain says.
     value: str
     #: Why, in the model's words. For the reader, not for the store.
@@ -138,9 +150,15 @@ def brief_for(view: PartyView, other: str, clause: str) -> str:
     """
     What ``view``'s party knows going into a round about ``other``'s position.
 
-    Three lines from three sources, and the difference between them is the whole brief:
-    what we want, what they said, and what we think they actually want. A brief built
-    from one source would read identically whether or not we had any model of them.
+    Four lines from four sources, and the difference between them is the whole brief:
+    what we want, what they said, what we derive they actually want, and what we
+    concluded about their bottom line last round. A brief built from one source would
+    read identically whether or not we had any model of them.
+
+    **The fourth line closes a loop M8b left open.** The update call writes a
+    ``red_line`` reading every round, and until note 06 §11 nothing read it back — so
+    the second pinned call ran, replayed, and could not affect a single offer. A model
+    swapped into that role would have changed nothing measurable.
 
     **The third line is derived, not read.** Since M8 there is no
     ``party:{a}:model-of:{b}`` scope to query — R28 forbids storing it — so it is
@@ -171,12 +189,15 @@ def brief_for(view: PartyView, other: str, clause: str) -> str:
         (other,),
         interpret=view.interpret,
     ).get(theirs)
+    # Our own scope, so readable; a belief *about* them, so R28's exception applies.
+    concluded = view.own_belief(view.red_line_id(other, clause))
 
     return (
         f"Clause: {clause}\n"
         f"Our position: {'unknown' if ours is None else ours.value}\n"
         f"Their stated position: {'unknown' if said is None else said.value}\n"
-        f"What we believe they actually want: {'unknown' if modelled is None else modelled}"
+        f"What we believe they actually want: {'unknown' if modelled is None else modelled}\n"
+        f"Our read of their bottom line: {'unknown' if concluded is None else concluded.value}"
     )
 
 
@@ -208,6 +229,35 @@ def precedent_tool(
     return pinned_tool(resolver, precedent)
 
 
+@dataclass(frozen=True, slots=True)
+class _Asked:
+    """What a call was about, handed to its output validator as the run's deps."""
+
+    party: str
+    clause: str
+
+
+def _retry(what: str, named: str, expected: str) -> ModelRetry:
+    return ModelRetry(
+        f"{what} must be exactly {expected!r}, the name the brief uses, and nothing "
+        f"else; this answer gave {named!r}."
+    )
+
+
+def _check_offer(ctx: RunContext[_Asked], offer: Offer) -> Offer:
+    if offer.clause != ctx.deps.clause:
+        raise _retry("clause", offer.clause, ctx.deps.clause)
+    return offer
+
+
+def _check_reading_named(ctx: RunContext[_Asked], reading: Reading) -> Reading:
+    if reading.about != ctx.deps.party:
+        raise _retry("about", reading.about, ctx.deps.party)
+    if reading.clause != ctx.deps.clause:
+        raise _retry("clause", reading.clause, ctx.deps.clause)
+    return reading
+
+
 class Negotiator:
     """
     One party's agent. Pinned, so a round replays without reaching a model.
@@ -217,14 +267,23 @@ class Negotiator:
     could read its counterpart's private scope in one line and would look better for
     it, so it is never handed one.
 
-    **Two agents over one pinned model.** Proposing and reading want different output
-    types, so they are different ``Agent`` objects, but they share one
-    :class:`~anagrapheus.provider.model.PinnedModel` and therefore one ledger. That is
-    safe for the reason §4a gives for keying per *request* rather than per run: the two
-    calls send different tool schemas and different prompts, so they key differently and
-    cannot collide. Giving each its own wrapper would have worked equally well and said
-    something false — that the pin's identity has anything to do with which object made
-    the call.
+    **Two calls, and a model for each if you want one.** ``model`` proposes and
+    ``update`` reads; ``update`` defaults to ``model``, which is what the demo did before
+    roles could differ. Each gets its own
+    :class:`~anagrapheus.provider.model.PinnedModel`, over one shared ledger. The pins
+    cannot collide whether or not the models are the same, for the reason §4a gives for
+    keying per *request*: the two calls send different tool schemas and prompts, so they
+    key differently — and when the models differ, their ids differ too. See
+    :mod:`examples.negotiation.lineup` for choosing them.
+
+    **A misnamed field is sent back, once.** Both outputs name the clause, and a reading
+    names the party it is about; each has exactly one right answer, which the call
+    already knows. A model that writes anything else there is told what was expected
+    and asked again (``ModelRetry``), and the retry is a model call like any other, so
+    it is pinned and replays. The first Claude model to drive this demo wrote a
+    sentence describing its offer where the clause's name goes. :func:`record_offer`
+    and :func:`check_reading` still refuse what they cannot record: the retry gives a
+    model the chance to fix its answer, and they are what stands if it does not.
     """
 
     def __init__(
@@ -234,14 +293,25 @@ class Negotiator:
         *,
         view: PartyView,
         archive: Callable[[str], str] | None = None,
+        update: Model | None = None,
     ) -> None:
-        pinned = PinnedModel(model, resolver)
         # The tool is offered only when there is an archive to reach. An agent given a
         # tool that answers nothing is worse than an agent given none: it spends a turn
         # discovering that, and the discovery is pinned forever.
         tools = [] if archive is None else [precedent_tool(resolver, archive)]
-        self._propose = Agent(model=pinned, output_type=Offer, tools=tools)
-        self._read = Agent(model=pinned, output_type=Reading)
+        self._propose = Agent(
+            model=PinnedModel(model, resolver),
+            output_type=Offer,
+            deps_type=_Asked,
+            tools=tools,
+        )
+        self._propose.output_validator(_check_offer)
+        self._read = Agent(
+            model=PinnedModel(model if update is None else update, resolver),
+            output_type=Reading,
+            deps_type=_Asked,
+        )
+        self._read.output_validator(_check_reading_named)
         self._view = view
 
     @property
@@ -266,7 +336,8 @@ class Negotiator:
         """
         return self._propose.run_sync(
             f"You are negotiating for {self.party}. Given the brief, propose whether to "
-            f"concede this clause.\n\n" + brief_for(self._view, other, clause) + context
+            f"concede this clause.\n\n" + brief_for(self._view, other, clause) + context,
+            deps=_Asked(other, clause),
         ).output
 
     def update(self, other: str, clause: str, *, observed: str) -> Reading:
@@ -282,7 +353,9 @@ class Negotiator:
             f"You are negotiating for {self.party}. This round you observed:\n\n"
             f"{observed}\n\n"
             f"{brief_for(self._view, other, clause)}\n\n"
-            f"Record one conclusion about what {other} actually wants."
+            f"Record one conclusion about {other}: their bottom line, the furthest "
+            f"they will move on this clause.",
+            deps=_Asked(other, clause),
         ).output
 
 

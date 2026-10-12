@@ -307,6 +307,20 @@ model would buy nothing and would test something a consumer is less likely to be
 Skipped rather than failed without a key, so a contributor never meets a red test they
 cannot fix.
 
+*Amended 2026-10-09 (B). One call against one provider became four checks against every
+route with a key — see §12. The model-choice argument above still holds for the direct
+route and no longer for OpenRouter's, where the response shape is the router's whatever
+model answers. And "skipped rather than failed" was right locally and wrong in the
+workflow, where every route skipping is a green run that called nothing: the suite now
+fails that run itself. Default `pytest` still never selects the tier, so a contributor
+still never meets a red test they cannot fix.*
+
+*Amended 2026-10-10. The model-choice argument no longer holds for the direct route
+either: its default is now `claude-haiku-5-5`, the cheapest current Claude model, at the
+owner's direction. What the route covers is `AnthropicModel`'s parsing, which every Claude
+model exercises, so the cheaper model gives up nothing the route was for. It passed all
+four checks when chosen.*
+
 ## 5a. A gate that silently skipped the new code — [ours]
 
 Worth recording because it is not a Python problem and will recur on any repository
@@ -509,7 +523,87 @@ mismatch closes after round one. What persists is the false **access-belief**; t
 measured gap does not. That is the §2 error in miniature, committed in the PR that exists
 to correct it.
 
-## 10. Open questions
+## 11. The second call that reached no decision — [ours, B]
+
+M8b added a second pinned call per party per round. It writes a `red_line` reading — what
+this party concluded is the other's bottom line — into the party's own scope. **Nothing
+read it back**: not the brief, not `misreading`, not `own_gap`. The call ran, was pinned,
+replayed perfectly, and could not affect a single offer.
+
+It surfaced while planning per-role model evaluation, which is where it would have done
+real damage. Put a better model or a worse one in the update role and nothing measurable
+changes, so an evaluation scores every model an equally good updater — a false result
+that reads like a real one.
+
+It is §2e's shape once more. `agent.py`'s own docstring said an agent that never revises
+is "a sequence of independent turns wearing a round's clothes". The revision happened;
+the agents never acted on it. The brief now carries a fourth line, and the test M7 wrote
+for the derived model was written again for the reading: hold everything else fixed,
+change only what the update call concluded, and the next offer changes.
+
+**The first real model to drive the harness reopened it through the predicate beside
+it.** The update call's schema allowed `position` as well as `red_line`, and its prompt
+asked "what {other} actually wants" — which *is* a position — while the brief read a
+bottom line. The scripted model always chose `red_line`, so every test passed. The real
+one chose `position` for seven of its eight conclusions, each stored and read by nothing:
+the fourth brief line's fix, bypassed by a model doing exactly what it was asked. The
+prompt now asks for the bottom line and the schema allows nothing else — the §8 rule
+again, a schema rather than a request. On the re-recorded run all eight conclusions were
+`red_line`, and the model cited them: *"their bottom line is concede, so holding firm is
+likely to elicit a concession"*.
+
+**The first Claude model to drive it found a third, in a field with one right answer.**
+An `Offer` names its clause, and the round already knows which clause that is. The free
+model echoed `fisheries`; Haiku 5.5, on Anthropic's direct route, wrote a sentence
+describing its offer there. `record_offer` refused it — the review-round check doing its
+job — and the demo died on the refusal with a traceback. The fix is pydantic-ai's own
+mechanism for output that does not fit: an output validator raises `ModelRetry`, the model
+is told what was expected and asked again, and the retry is a model call like any other,
+so it is pinned and replays. The refusals in `record_offer` and `check_reading` stay as the
+last wall; a model still wrong after its retry is reported by the CLI in one line. With it
+the demo ran four rounds live on Haiku 5.5 and replayed on a fresh store with no model
+call. No request changed, so neither committed recording needed re-recording.
+
+It is the plainest case in this note for running a real model at all. A scripted
+counterpart is written by the person who wrote the prompt, so it shares their reading of
+the prompt, and the ambiguity is invisible to it by construction.
+
+## 12. A model per role, and what the pin key gives an evaluation for free — [ours, B]
+
+The negotiation makes three kinds of call — propose, update, summarize — and they all ran
+on one model. `Lineup` names a model per role, optionally per party, from
+`[party.]role=provider:model` strings resolved by pydantic-ai's `infer_model`. It lives
+in `examples/`: roles are vocabulary, and doc 00 §8 puts vocabulary with whoever owns the
+domain. Nothing in `src/` changed.
+
+**Comparing one role with the rest held fixed needed no new machinery.** A pin key
+includes the model's id, so replaying a recorded run in `"record"` mode with *one* role's
+model changed makes exactly that role's calls miss and draw. Upstream calls replay bit for
+bit, downstream ones re-draw only where their prompt changed, and the replay's
+`divergence` says where it stopped being a replay. A controlled comparison, rather than
+two runs that differ in everything at once.
+
+**Two models with one id share pins**, which is the trap in that paragraph. A real
+provider's id is `provider:model`, and two models cannot collide. Every `FunctionModel`
+built from one function reports the same id, so a role swapped to a second copy of the
+scripted model would hit the first copy's pins and never draw — a comparison of nothing.
+`scripted()` takes a name for this, and the swap test asserts the contender actually drew.
+
+**Routes, and why tier 3 now has several.** A pin stores pydantic-ai's normalized
+`ModelResponse`, so the pin *format* is provider-agnostic — but the parsing that produces
+it is per model class. Direct Anthropic parses with `AnthropicModel`; OpenRouter, whatever
+model it routes to, with `OpenRouterModel`, an `OpenAIChatModel` subclass, OpenAI-shaped.
+Each route covers real shapes the other cannot. And a pin is bound to its route: the same
+weights through another route is a different call, so a recorded corpus says in its header
+which route made it.
+
+**The recording format closes note 00 §8's first question.** See `timeline.recording`:
+the log's own serialization, so a recording is upcast as it is read into a replay and
+outlives the schema it was written under. The negotiation's corpus is committed and replays strictly into a
+fresh store, which also makes it a regression test on what the model is asked — change a
+word of the brief and it fails, naming the route and the command that re-records it.
+
+## 13. Open questions
 
 - **Does the re-key loop belong in the library?** §3 above states the case both ways
   and deliberately does not decide it.
@@ -532,20 +626,40 @@ to correct it.
 - **A round is pairwise, and says so by raising.** With three parties a round has a shape
   this code has not decided on — simultaneous pairwise briefs, or one offer to the table
   — and guessing would have shipped a plural case nobody thought about.
-- **`--live` is unexercised by any test.** The flag swaps the scripted counterpart for
-  `AnthropicModel` and the import is lazy, so an offline run never needs the SDK
-  configured — but nothing in tiers 0–2 can run it, and tier 3 deliberately does not,
-  because a four-round negotiation against a real provider is twenty-eight requests a
-  release rather than one — sixteen agent calls, four consolidations, and eight tool-loop
-  continuations. So the claim available is that the *seam* is right (the model is a
-  parameter and everything downstream is pinned), not that a live run works. Somebody
-  has to type it.
+- ~~**No real key has run any of this yet.**~~ **Closed for one route.** Tier 3 passes
+  all four checks live through OpenRouter on `nvidia/nemotron-3-super-120b-a12b:free`, the
+  cheapest model that would — two other $0 models were rate-limited upstream before their
+  first request completed. The demo command ran four rounds live and replayed them on a
+  fresh store without reaching the model. Total spend: $0. **And for the other.** The
+  direct Anthropic route passes the same four checks on `claude-haiku-5-5`, the cheapest
+  current Claude model, now its default; the demo ran on it too, after the fix in §11.
+- **With a real model, the demo's headline is not guaranteed.** The second-order error —
+  the EU reads `concede`, the UK imagines `hold_firm` — appears when the UK holds firm in
+  public while having let slip that it would concede. The recorded live run showed it.
+  The next live run did not: the UK conceded in public from round one, so there was
+  nothing to be wrong about. The scripted counterpart always shows it because it was
+  written to. Whether a real lineup produces the phenomenon is a property of the lineup,
+  which makes it an evaluation question rather than something to assert.
+- **A conclusion's value is free text.** The live model wrote `hold firm` where the domain
+  says `hold_firm`. Nothing compares conclusion values yet, so nothing broke; the first
+  evaluation that scores them will, silently, unless values get the vocabulary that
+  predicates already have.
 - **The scripted counterpart decides from the brief, which is a smaller claim than it
   looks.** It reads one line of the brief and branches on it, so changing a belief
   changes an offer and the demo is not a fixture. It is still not a model: nothing here
   shows that a *real* model given this brief would use the third line at all, which is
   an eval question and note 00 §6 keeps evals out of the test suite.
-- **Tier 3 tests one call.** Structured output, tool calls and streaming against a real
-  provider are all still unproven; the pins that cover them are synthetic. Widening it
-  costs cents, and the reason not to is that each addition is another thing that can
-  fail for reasons unrelated to this library.
+- ~~**Tier 3 tests one call.**~~ **Closed by B.** Four checks — plain, structured, a
+  forced tool call, a stream — on every route with a key, and the same bodies run offline
+  on every commit so they cannot rot between releases.
+- ~~**The committed corpus was recorded from the scripted model.**~~ **Closed.**
+  `tests/fixtures/negotiation.openrouter.pins.jsonl` is a live run on a real model, and the
+  default suite replays it on every commit with every key removed from the environment:
+  the models are rebuilt with a placeholder credential a strict replay never sends.
+  What a replay provably needs is the model's id. The real class is rebuilt as well, as
+  the safe choice, but a mutant that swapped it for another class with the same id
+  replayed just as well — so that part is caution, not a demonstrated need.
+- **There is no evaluation runner.** The lineup, the controlled swap and the scores —
+  concession round, `misreading`, `own_gap`, the second-order mismatch, `usage` on every
+  pin — all exist. A grid over lineups and scenarios does not, and nor does a second
+  scenario. Note 00 §6 keeps evals out of the test suite, so it would be its own thing.

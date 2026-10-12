@@ -171,8 +171,23 @@ class PartyView:
         the kind of wrong that never raises. It has already happened once here; note 06
         §5b records it.
         """
+        return self._about("position", party, clause)
+
+    def red_line_id(self, party: str, clause: str) -> str:
+        """
+        The belief id for what this party has concluded is ``party``'s bottom line.
+
+        The update call's output, and the one belief about another party that R28's
+        exception lets a party *store*: a disposition read with no witness trail. Read
+        back into the brief by :func:`~examples.negotiation.agent.brief_for` — which it
+        was not, until note 06 §11.
+        """
+        return self._about("red_line", party, clause)
+
+    def _about(self, predicate: str, party: str, clause: str) -> str:
+        """A belief id about ``party`` and ``clause``, every reference canonicalized."""
         return self.predicates.belief_id(
-            "position",
+            predicate,
             self._canonical(self.seats[party]),
             # The clause is canonicalized too. Clauses are identity entities as much as
             # parties are (`Table.table_clause` establishes one), so two names for one

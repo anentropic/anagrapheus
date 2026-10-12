@@ -40,9 +40,15 @@ __all__ = ["respond", "scripted"]
 UNKNOWN = "unknown"
 
 _MODELLED = "What we believe they actually want: "
+_CONCLUDED = "Our read of their bottom line: "
 
 
-def scripted(record: Callable[[str], None] | None = None) -> Model:
+def scripted(
+    record: Callable[[str], None] | None = None,
+    *,
+    name: str = "scripted",
+    respond_with: Callable[[list[ModelMessage], AgentInfo], ModelResponse] | None = None,
+) -> Model:
     """
     The negotiation's scripted counterpart, as an ordinary pydantic-ai model.
 
@@ -50,14 +56,22 @@ def scripted(record: Callable[[str], None] | None = None) -> Model:
     reached a model — which is the only way to assert that a replay reached none. It is
     a callback rather than a returned list because the model is built before the run and
     the count is wanted after it.
+
+    ``name`` becomes the model's id, **and the id is part of every pin key.** Two
+    scripted models with one name are one model as far as the ledger is concerned,
+    which is right for a replay and fatal for a comparison: a role "swapped" to a second
+    copy would hit the first copy's pins and never draw. Give a model under evaluation a
+    name of its own. ``respond_with`` replaces the scripted behaviour, for a test that
+    needs one role to answer differently.
     """
+    answer = respond if respond_with is None else respond_with
 
     def recorded(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         if record is not None:
             record(_prompt(messages))
-        return respond(messages, info)
+        return answer(messages, info)
 
-    return FunctionModel(recorded)
+    return FunctionModel(recorded, model_name=name)
 
 
 def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
@@ -91,17 +105,23 @@ def _offer(messages: list[ModelMessage], info: AgentInfo, prompt: str) -> ModelR
     if any(name == "precedent" for name in _tools_offered(info)) and not _already_asked(messages):
         return ModelResponse(parts=[ToolCallPart("precedent", {"clause": _clause(prompt)})])
     theirs = _line(prompt, _MODELLED)
+    concluded = _line(prompt, _CONCLUDED)
     return ModelResponse(
         parts=[
             ToolCallPart(
                 "final_result",
                 {
                     "clause": _clause(prompt),
-                    # Concede only against a side believed immovable. An opening round,
-                    # where the model of the other is empty, holds firm: `unknown` is
-                    # not `never`, and treating it as one would make ignorance concede.
-                    "concede": theirs == "never",
-                    "because": f"we read their position as {theirs}",
+                    # Concede only against a side believed immovable -- by what we derive
+                    # they want, or by what we concluded about them last round. An
+                    # opening round, where both are empty, holds firm: `unknown` is not
+                    # `never`, and treating it as one would make ignorance concede.
+                    "concede": "never" in (theirs, concluded),
+                    # Both inputs, because either can decide it: naming only the first
+                    # would credit it with a concession the second caused.
+                    "because": (
+                        f"we read their position as {theirs} and their bottom line as {concluded}"
+                    ),
                 },
             )
         ]
@@ -176,12 +196,12 @@ def _other(prompt: str) -> str:
     """
     Who the brief is about, taken from the sentence that names them.
 
-    The update call ends with "Record one conclusion about what X actually wants", and
-    X is the only place in the prompt where the other party is named unambiguously —
+    The update call ends with "Record one conclusion about X: their bottom line ...",
+    and X is the only place in the prompt where the other party is named unambiguously —
     the belief lines say "they".
     """
-    marker = "Record one conclusion about what "
+    marker = "Record one conclusion about "
     for line in prompt.splitlines():
         if marker in line:
-            return line.split(marker, 1)[1].split(" ", 1)[0]
+            return line.split(marker, 1)[1].split(":", 1)[0]
     return UNKNOWN

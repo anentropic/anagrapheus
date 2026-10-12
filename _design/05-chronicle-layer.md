@@ -240,4 +240,5 @@ prose to be doing work that the verbatim tail could not.
   otherwise. It would need identity that distinguishes two consolidations of one range,
   which range-derived ids deliberately do not provide — the same property that makes
   anchors replay is what makes divergent sections collide.
-- **Tier 3, the live smoke test**, still does not exist — now six milestones running.
+- ~~**Tier 3, the live smoke test**, still does not exist.~~ **Built in M7, widened in
+  B** — see [note 06 §5 and §12](06-demo-agent.md).
