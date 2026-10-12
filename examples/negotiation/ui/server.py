@@ -14,10 +14,19 @@ is all the concurrency there is.
   the message's index as its id so a reconnecting ``EventSource`` resumes rather than
   replays.
 - ``POST /run`` -- ``{"models": [...]}``: start a negotiation, or say why not.
+
+**Loopback only, and only for pages it served.** There is no authentication, ``/run``
+spends whatever provider keys the process holds, and ``/events`` streams every
+conversation in full. So :func:`serve` refuses a non-loopback address; every request
+must name this server in ``Host`` (a DNS-rebinding page names its own domain) and, if it
+carries an ``Origin``, be from this server; and ``/run`` takes ``application/json`` only,
+which a cross-site page cannot send without a CORS preflight this server never grants.
+A ``text/plain`` form post from any website would otherwise start a paid run.
 """
 
 from __future__ import annotations
 
+import ipaddress
 import json
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -27,7 +36,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 if TYPE_CHECKING:
     from examples.negotiation.ui.session import Hub, Runner
 
-__all__ = ["serve"]
+__all__ = ["is_loopback", "serve"]
 
 _STATIC = Path(__file__).parent / "static"
 _TYPES = {".html": "text/html", ".js": "text/javascript", ".css": "text/css"}
@@ -40,8 +49,23 @@ class _Handler(BaseHTTPRequestHandler):
     hub: ClassVar[Hub]
     runner: ClassVar[Runner]
     specs: ClassVar[list[str]]
+    #: ``host:port`` forms this server answers to, and the origins of its own pages.
+    hosts: ClassVar[frozenset[str]]
+    origins: ClassVar[frozenset[str]]
+
+    def _trusted(self) -> bool:
+        """Refuse a request that is not addressed to, or sent from, this server."""
+        origin = self.headers.get("Origin")
+        if self.headers.get("Host") not in self.hosts or (
+            origin is not None and origin not in self.origins
+        ):
+            self.send_error(HTTPStatus.FORBIDDEN, "not a request from this server's page")
+            return False
+        return True
 
     def do_GET(self) -> None:  # noqa: N802 -- http.server's naming
+        if not self._trusted():
+            return
         path = self.path.split("?", 1)[0]
         if path == "/":
             self._file(_STATIC / "index.html")
@@ -55,8 +79,13 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_error(HTTPStatus.NOT_FOUND)
 
     def do_POST(self) -> None:  # noqa: N802 -- http.server's naming
+        if not self._trusted():
+            return
         if self.path != "/run":
             self.send_error(HTTPStatus.NOT_FOUND)
+            return
+        if self.headers.get_content_type() != "application/json":
+            self._json(HTTPStatus.UNSUPPORTED_MEDIA_TYPE, {"error": "send application/json"})
             return
         try:
             body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
@@ -118,8 +147,28 @@ class _Handler(BaseHTTPRequestHandler):
 def serve(
     hub: Hub, runner: Runner, specs: list[str], *, host: str, port: int
 ) -> ThreadingHTTPServer:
-    """Bind the server; the caller runs ``serve_forever`` on it."""
+    """Bind the server on a loopback address; the caller runs ``serve_forever`` on it."""
+    if not is_loopback(host):
+        raise ValueError(
+            f"refusing to listen on {host!r}: the UI has no authentication and its /run "
+            "spends this process's provider keys, so it serves loopback only"
+        )
     handler = type("Handler", (_Handler,), {"hub": hub, "runner": runner, "specs": specs})
     server = ThreadingHTTPServer((host, port), handler)
     server.daemon_threads = True
+    # The real port, which differs from `port` when that was 0.
+    bound = server.server_address[1]
+    names = {host, "localhost", "127.0.0.1"}
+    handler.hosts = frozenset(f"{name}:{bound}" for name in names)
+    handler.origins = frozenset(f"http://{name}:{bound}" for name in names)
     return server
+
+
+def is_loopback(host: str) -> bool:
+    """Whether ``host`` names this machine only: ``localhost`` or a loopback address."""
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False

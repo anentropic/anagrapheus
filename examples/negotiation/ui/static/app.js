@@ -198,7 +198,10 @@ function category(log) {
 function render() {
   document.body.classList.toggle("mode-story", state.mode === "story");
   document.body.classList.toggle("mode-workings", state.mode === "workings");
-  for (const b of document.querySelectorAll(".modes button")) b.classList.toggle("active", b.dataset.mode === state.mode);
+  for (const b of document.querySelectorAll(".modes button")) {
+    b.classList.toggle("active", b.dataset.mode === state.mode);
+    b.setAttribute("aria-pressed", String(b.dataset.mode === state.mode));
+  }
   renderStatus();
   renderTimeline();
   if (state.mode === "story") return renderPlain();
@@ -225,6 +228,7 @@ function renderStatus() {
   $("run-button").disabled = state.status === "running";
   for (const tab of document.querySelectorAll(".tab")) {
     tab.classList.toggle("active", tab.dataset.stage === state.stage);
+    tab.setAttribute("aria-selected", String(tab.dataset.stage === state.stage));
     tab.disabled = state.stages[tab.dataset.stage].frames.length === 0;
   }
 }

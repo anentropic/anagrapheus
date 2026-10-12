@@ -156,19 +156,22 @@ class PinnedModel(WrapperModel):
                 pinned=_interpret(raw),
             )
 
-        async with self._resolver.resolve_stream(
-            key,
-            kind=self._kind,
-            effect=live,
-            capture=_capture,
-            interpret=replayed,
-        ) as stream:
-            try:
+        # Around the whole context, not only the caller's use of the stream: opening it
+        # can fail (the provider refuses), and so can closing it (the pin is written on
+        # the way out). Success is logged only once the stream has closed cleanly.
+        try:
+            async with self._resolver.resolve_stream(
+                key,
+                kind=self._kind,
+                effect=live,
+                capture=_capture,
+                interpret=replayed,
+            ) as stream:
                 yield stream
-            except Exception as error:
-                call.failed(error)
-                raise
-            call.done(stream.get())
+        except Exception as error:
+            call.failed(error)
+            raise
+        call.done(stream.get())
 
     def _key(self, messages: list[ModelMessage], parameters: ModelRequestParameters) -> PinKey:
         """Build this call's key, and report it to ``on_key`` if one was given."""

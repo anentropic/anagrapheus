@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING
 
 import pytest
 from pydantic_ai import Agent
 
-from anagrapheus.provider import PinnedModel
+from anagrapheus.provider import PinnedModel, pinned_tool
+from anagrapheus.timeline import ReplayPins
+from anagrapheus.timeline.replay import PinMiss
 
-from .conftest import Counted, Rig, says
+from .conftest import Counted, CountedStream, Rig, says
 
 if TYPE_CHECKING:
     from pydantic_ai.messages import ModelMessage, ModelResponse
@@ -88,3 +91,51 @@ def test_the_library_is_silent_until_configured():
     """A library logs and never configures: without a handler, nothing reaches stderr."""
     handlers = logging.getLogger("anagrapheus").handlers
     assert any(isinstance(h, logging.NullHandler) for h in handlers)
+
+
+async def _streamed(agent: Agent[None, str], prompt: str) -> str:
+    async with agent.run_stream(prompt) as result:
+        return await result.get_output()
+
+
+def test_a_streamed_call_is_logged_once_it_has_closed(rig: Rig, caplog: LogCaptureFixture):
+    agent = Agent(model=PinnedModel(CountedStream(["Lis", "bon"]).model(), rig.ledger))
+
+    with caplog.at_level(logging.INFO, logger="anagrapheus"):
+        asyncio.run(_streamed(agent, "where?"))
+
+    (record,) = _calls(caplog)
+    assert record.levelno == logging.INFO
+    assert " drawn " in record.getMessage()
+
+
+def test_a_stream_that_fails_to_open_is_a_warning(rig: Rig, caplog: LogCaptureFixture):
+    """
+    Review finding: only the caller's use of an open stream was covered.
+
+    A strict replay that misses raises while the stream is being *opened*, before there
+    is anything to use -- and that call left no record at all.
+    """
+    replay = ReplayPins.from_events([], rig.types, on_miss="strict")
+    agent = Agent(model=PinnedModel(CountedStream(["Lisbon"]).model(), replay))
+
+    with caplog.at_level(logging.INFO, logger="anagrapheus"), pytest.raises(PinMiss):
+        asyncio.run(_streamed(agent, "where?"))
+
+    (record,) = _calls(caplog)
+    assert record.levelno == logging.WARNING
+    assert "failed" in record.getMessage()
+
+
+def test_a_failed_tool_is_a_warning(rig: Rig, caplog: LogCaptureFixture):
+    """Review finding: a tool that raised left no record, though a failed call should."""
+
+    def fetch(url: str) -> str:
+        raise ConnectionError("archive unreachable")
+
+    with caplog.at_level(logging.INFO, logger="anagrapheus"), pytest.raises(ConnectionError):
+        asyncio.run(pinned_tool(rig.ledger, fetch)("http://example.test"))
+
+    (record,) = [r for r in caplog.records if r.name == "anagrapheus.provider.tools"]
+    assert record.levelno == logging.WARNING
+    assert "archive unreachable" in record.getMessage()

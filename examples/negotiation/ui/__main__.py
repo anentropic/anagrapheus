@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING
 # Before pydantic-ai is imported: its banner would otherwise interrupt the terminal log.
 os.environ.setdefault("PYDANTIC_AI_NO_BANNER", "1")
 
-from examples.negotiation.ui.server import serve  # noqa: E402
+from examples.negotiation.ui.server import is_loopback, serve  # noqa: E402
 from examples.negotiation.ui.session import WATCHED_LOGGERS, Hub, Runner  # noqa: E402
 
 if TYPE_CHECKING:
@@ -45,7 +45,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         metavar="[[PARTY.]ROLE=]PROVIDER:MODEL",
         help="as for `python -m examples.negotiation`; prefills the page's lineup",
     )
-    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="a loopback address: the UI has no authentication, so it serves this machine only",
+    )
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--no-browser", action="store_true", help="don't open a browser tab")
     parser.add_argument(
@@ -58,6 +62,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="what reaches the terminal; the page always gets everything",
     )
     args = parser.parse_args(argv)
+    if not is_loopback(args.host):
+        parser.error(
+            f"--host {args.host!r} is not a loopback address. The UI has no authentication "
+            "and /run spends your provider keys, so it only serves this machine."
+        )
 
     terminal = logging.StreamHandler()
     terminal.setLevel(args.log_level)

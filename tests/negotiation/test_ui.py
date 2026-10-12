@@ -181,6 +181,8 @@ def _drain(hub: Hub) -> None:
         n += len(fresh)
         if any(m["type"] in ("done", "failed") for m in fresh):
             return
+    # Falling through would pass the test and leave a hung run behind it.
+    pytest.fail("the run did not finish within 30s")
 
 
 def test_the_table_reports_every_append(table: Table):
@@ -258,3 +260,45 @@ def test_the_second_order_check_runs_both_ways(played: list[Message]):
     )["snapshot"]["second_order"]
     wrong = {(e["reader"], e["subject"]) for e in after_round_one if e["wrong"]}
     assert wrong == {("eu", "uk")}, "the story's mistake, and only that one, after round one"
+
+
+def _post(url: str, body: bytes, headers: dict[str, str]) -> int:
+    request = urllib.request.Request(url, data=body, headers=headers)
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:
+            return response.status
+    except urllib.error.HTTPError as error:
+        return error.code
+
+
+def test_a_cross_site_form_post_cannot_start_a_run(server: str, runner: tuple[Hub, Runner]):
+    """
+    Review finding: ``/run`` parsed JSON whatever the content type said.
+
+    A ``text/plain`` POST is one any website can send to a loopback server without a
+    CORS preflight -- and it would have started a run on this process's provider keys.
+    """
+    hub, _ = runner
+    body = json.dumps({"models": []}).encode()
+    assert _post(server + "/run", body, {"Content-Type": "text/plain"}) == 415
+    assert hub.since(0, timeout=0) == [], "no run started"
+
+
+def test_a_page_from_elsewhere_is_refused(server: str, runner: tuple[Hub, Runner]):
+    """Requests must name this server as ``Host`` and, if they carry one, ``Origin``."""
+    hub, _ = runner
+    body = json.dumps({"models": []}).encode()
+    json_type = {"Content-Type": "application/json"}
+    assert _post(server + "/run", body, {**json_type, "Origin": "https://evil.test"}) == 403
+    # A DNS-rebinding page reaches 127.0.0.1 under its own name, which `Host` carries.
+    rebound = urllib.request.Request(server + "/events", headers={"Host": "evil.test"})
+    with pytest.raises(urllib.error.HTTPError) as refused:
+        urllib.request.urlopen(rebound, timeout=5)
+    assert refused.value.code == 403
+    assert hub.since(0, timeout=0) == []
+
+
+def test_the_server_will_not_listen_beyond_loopback(runner: tuple[Hub, Runner]):
+    hub, run = runner
+    with pytest.raises(ValueError, match="loopback only"):
+        serve(hub, run, [], host="0.0.0.0", port=0)

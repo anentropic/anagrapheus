@@ -29,16 +29,16 @@
       <button type="button" data-mode="story" title="Plain language, one step of the story at a time">Story</button>
       <button type="button" data-mode="workings" title="Every belief, derived model, event and model call">Workings</button>
     </div>
-    <div id="status" class="status idle">idle</div>
+    <div id="status" class="status idle" role="status">idle</div>
   </header>
-  <div id="run-error" class="banner error" hidden></div>
-  <div id="verdict" class="banner ok" hidden></div>
+  <div id="run-error" class="banner error" role="alert" hidden></div>
+  <div id="verdict" class="banner ok" role="status" hidden></div>
 
   <section class="timeline" aria-label="Timeline">
     <div class="row">
       <div class="tabs" role="tablist">
-        <button role="tab" data-stage="live" class="tab active">Live run</button>
-        <button role="tab" data-stage="replay" class="tab">Replay <span class="hint">fresh store, no model</span></button>
+        <button role="tab" data-stage="live" class="tab active" aria-selected="true">Live run</button>
+        <button role="tab" data-stage="replay" class="tab" aria-selected="false">Replay <span class="hint">fresh store, no model</span></button>
       </div>
       <div id="phases" class="phases"></div>
     </div>

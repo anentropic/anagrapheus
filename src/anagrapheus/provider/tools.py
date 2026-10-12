@@ -153,9 +153,20 @@ def pinned_tool[**P, R](
             return await result if inspect.isawaitable(result) else result
 
         key = pin_key(kind, asked)
-        result = await resolver.resolve_async(
-            key, kind=kind, effect=draw, interpret=lambda raw: raw
-        )
+        try:
+            result = await resolver.resolve_async(
+                key, kind=kind, effect=draw, interpret=lambda raw: raw
+            )
+        except Exception as error:
+            _log.warning(
+                "tool %s(%s) failed after %.2fs: %s %s",
+                tool_name,
+                asked["arguments"],
+                time.perf_counter() - started,
+                error,
+                key,
+            )
+            raise
         _log.info(
             "tool %s(%s) %s in %.2fs -> %r %s",
             tool_name,
