@@ -420,7 +420,7 @@ def _render(event: StoredEvent) -> str:
 
     Only the domain's own events, and no identifiers — see :class:`RoundSummary`. An
     unrecognised event is skipped rather than rendered generically: a summary listing
-    ``BeliefMinted`` fourteen times is noise the model then has to be told to ignore.
+    a belief event forty times is noise the model then has to be told to ignore.
 
     **``SideRemarkOverheard`` is skipped, and that is a constraint rather than a
     choice.** A chronicle is *one* projection, and its prose is appended to every

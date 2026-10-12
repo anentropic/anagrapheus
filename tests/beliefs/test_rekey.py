@@ -8,9 +8,9 @@ import pytest
 
 from anagrapheus.beliefs import (
     BeliefError,
+    BeliefRow,
     UnknownPredicate,
     UnrenderableBelief,
-    mint,
     plan_rekeys,
 )
 from anagrapheus.identity.store import RekeyRow
@@ -28,9 +28,9 @@ def test_a_merge_computes_one_successor_per_affected_belief(rig: Rig):
     """
     kept, absorbed, other = uuid.uuid7(), uuid.uuid7(), uuid.uuid7()
     rig.commit(
-        mint(rig.types, rig.predicates, "location", absorbed)[1],
-        mint(rig.types, rig.predicates, "knows", absorbed, other)[1],
-        mint(rig.types, rig.predicates, "location", other)[1],
+        rig.asserted("location", absorbed),
+        rig.asserted("knows", absorbed, other),
+        rig.asserted("location", other),
     )
 
     plans = plan_rekeys(
@@ -56,7 +56,7 @@ def test_a_split_yields_a_candidate_per_product_and_refuses_to_choose(rig: Rig):
     is known; ``sole()`` raises rather than picking the first.
     """
     original, uk, us = uuid.uuid7(), uuid.uuid7(), uuid.uuid7()
-    rig.commit(mint(rig.types, rig.predicates, "employer", original)[1])
+    rig.commit(rig.asserted("employer", original))
 
     plans = plan_rekeys(
         [
@@ -85,7 +85,7 @@ def test_the_rows_of_one_split_are_one_plan_not_several(rig: Rig):
     into three confident wrong answers.
     """
     original = uuid.uuid7()
-    rig.commit(mint(rig.types, rig.predicates, "location", original)[1])
+    rig.commit(rig.asserted("location", original))
 
     plans = plan_rekeys(
         [
@@ -109,7 +109,7 @@ def test_an_unordered_predicate_is_re_sorted_after_substitution(rig: Rig):
     minting the same proposition afresh would never produce.
     """
     a, b = uuid.uuid7(), uuid.uuid7()
-    rig.commit(mint(rig.types, rig.predicates, "sibling", a, b)[1])
+    rig.commit(rig.asserted("sibling", a, b))
     # A survivor that sorts before both, so the substituted entity must move.
     kept = uuid.UUID(int=0)
 
@@ -131,7 +131,7 @@ def test_merging_the_two_entities_of_one_belief_keeps_its_arity(rig: Rig):
     subsequent mint of the same claim would ever produce.
     """
     a, b = uuid.uuid7(), uuid.uuid7()
-    rig.commit(mint(rig.types, rig.predicates, "sibling", a, b)[1])
+    rig.commit(rig.asserted("sibling", a, b))
 
     plans = plan_rekeys(
         [RekeyRow(seq=9, kind="merge", from_entity=b, to_entity=a)],
@@ -150,7 +150,7 @@ def test_a_belief_this_registry_cannot_re_mint_is_reported_not_skipped(rig: Rig)
     raises and dropping it takes an argument that says so.
     """
     entity = uuid.uuid7()
-    rig.commit(mint(rig.types, build_predicates("other"), "location", entity)[1])
+    _index_foreign(rig, "location", entity)
     strangers = build_predicates("crm")
     # A registry that does not declare `location` at all cannot render the id.
     rows = [RekeyRow(seq=9, kind="merge", from_entity=entity, to_entity=uuid.uuid7())]
@@ -163,6 +163,14 @@ def test_a_belief_this_registry_cannot_re_mint_is_reported_not_skipped(rig: Rig)
     # ...and a registry that *does* declare it re-mints happily, foreign namespace and
     # all, because the namespace travels with the id rather than being assumed.
     assert plan_rekeys(rows, rig.index, strangers)[0].sole().startswith("v1:other:location(")
+
+
+def _index_foreign(rig: Rig, predicate: str, *entity_ids: uuid.UUID) -> None:
+    """An index row another application's registry minted, sharing this index."""
+    other = build_predicates("other")
+    minted = other.mint(predicate, *entity_ids)
+    with rig.store.transaction():
+        rig.index_store.minted(BeliefRow(other.render(minted), predicate, minted.entity_ids, 1))
 
 
 def _registry_without_location():
@@ -180,7 +188,7 @@ def test_a_chain_of_merges_in_one_batch_composes(rig: Rig):
     that the same batch already superseded. The cascade has to see the batch whole.
     """
     a, b, c = uuid.uuid7(), uuid.uuid7(), uuid.uuid7()
-    rig.commit(mint(rig.types, rig.predicates, "location", a)[1])
+    rig.commit(rig.asserted("location", a))
 
     plans = plan_rekeys(
         [
@@ -197,7 +205,7 @@ def test_a_chain_of_merges_in_one_batch_composes(rig: Rig):
 def test_a_split_product_later_merged_composes_too(rig: Rig):
     """The chain need not be all merges: a product can be absorbed in the same batch."""
     original, uk, us, group = uuid.uuid7(), uuid.uuid7(), uuid.uuid7(), uuid.uuid7()
-    rig.commit(mint(rig.types, rig.predicates, "employer", original)[1])
+    rig.commit(rig.asserted("employer", original))
 
     plans = plan_rekeys(
         [
@@ -224,7 +232,7 @@ def test_a_merge_cycle_in_a_batch_does_not_hang(rig: Rig):
     either: it says it cannot re-key rather than picking an arbitrary point in a ring.
     """
     a, b = uuid.uuid7(), uuid.uuid7()
-    rig.commit(mint(rig.types, rig.predicates, "location", a)[1])
+    rig.commit(rig.asserted("location", a))
 
     with pytest.raises(BeliefError):
         plan_rekeys(
@@ -245,7 +253,7 @@ def test_an_unrenderable_belief_names_its_actual_cause(rig: Rig):
     responses, so the error is its own type and keeps the original as its cause.
     """
     entity = uuid.uuid7()
-    rig.commit(mint(rig.types, build_predicates("other"), "location", entity)[1])
+    _index_foreign(rig, "location", entity)
     rows = [RekeyRow(seq=9, kind="merge", from_entity=entity, to_entity=uuid.uuid7())]
 
     with pytest.raises(UnrenderableBelief) as caught:

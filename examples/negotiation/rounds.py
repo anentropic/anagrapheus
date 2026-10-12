@@ -44,7 +44,7 @@ from examples.negotiation.agent import check_reading, record_offer, record_readi
 from examples.negotiation.scopes import held
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Mapping
     from uuid import UUID
 
     from doxastica import BeliefState
@@ -75,7 +75,8 @@ class Leak:
     speaker: str
     overheard_by: str
     clause: str
-    suggests: str
+    #: How far the remark says the speaker will move, in the domain's vocabulary.
+    suggests: domain.Disposition
     #: Holder -> the parties that holder believes witnessed the remark. A holder absent
     #: from this mapping believes nobody heard it, including itself.
     believed_by: Mapping[str, tuple[str, ...]]
@@ -158,15 +159,6 @@ def play_round(
         for party, offer in offers.items()
     }
 
-    # Said in the room, so everybody believes everybody heard it. Written out as
-    # ordinary access-beliefs rather than assumed, because the derived read gates on
-    # beliefs and nothing else: a public statement no party believes was witnessed is a
-    # statement no party can build a model from, and every derived model would come back
-    # empty for a reason that looked like a bug in the gate. It is also the baseline the
-    # leak's asymmetry is visible against -- everything is shared except the one thing
-    # that is not.
-    _heard_in_the_room(table, tuple(agents), said)
-
     # -- 3. leak -----------------------------------------------------------------------
     if leak is not None:
         _log.info(
@@ -178,8 +170,8 @@ def play_round(
         )
     leaked = None if leak is None else _let_slip(table, leak)
 
-    # The beliefs written above are invisible to `plan_rekeys` and the derived read until
-    # the folds have seen their minting events, and the update call below reads both.
+    # Every belief above is already folded -- `Table.append` settles the pure folds --
+    # but the chronicle is not, and the update call below reads the story so far.
     table.projector.catch_up()
 
     # -- 4. read -----------------------------------------------------------------------
@@ -235,29 +227,6 @@ def play_round(
         closed=closing.envelope.event_id,
         leaked=leaked,
     )
-
-
-def _heard_in_the_room(
-    table: Table, parties: Sequence[str], said: Mapping[str, BeliefState]
-) -> None:
-    """
-    Every party believes every party witnessed every offer.
-
-    The offers' events are what the beliefs cite and what they name:
-    ``record_offer`` writes the ``stated`` belief against its own ``PositionStated``,
-    so ``state.source_event_id`` *is* that event and there is no second handle to pass
-    around.
-    """
-    for state in said.values():
-        for holder in parties:
-            for witness in parties:
-                table.believe(
-                    held(holder),
-                    "witnessed",
-                    (table.canonical(table.seats[witness]), state.source_event_id),
-                    True,
-                    state.source_event_id,
-                )
 
 
 def _let_slip(table: Table, leak: Leak) -> UUID:

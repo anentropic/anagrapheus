@@ -6,8 +6,10 @@ __all__ = [
     "BeliefError",
     "MalformedBeliefId",
     "MergeCycleInBatch",
+    "OutsideVocabulary",
     "UnknownPredicate",
     "UnknownScheme",
+    "UnresolvedStateRef",
     "UnrenderableBelief",
     "WrongArity",
 ]
@@ -35,6 +37,17 @@ class WrongArity(BeliefError):
     arity 1 would key the belief on ``knows(alice)`` alone, and revising the value from
     ``bob`` to ``carol`` would then *silently retract* the belief about bob. The
     declaration is what makes that unrepresentable rather than merely discouraged.
+    """
+
+
+class OutsideVocabulary(BeliefError, ValueError):
+    """
+    A value for a predicate that declares its answers, and this is not one of them.
+
+    The vocabulary is schema in the same sense the predicate is (doc 00 §6b): a value
+    outside it is a belief nothing else can be compared with, and accepting it would let
+    one spelling of an answer quietly become a second answer. Also a ``ValueError``,
+    because that is what it is to a caller who has never heard of this library's types.
     """
 
 
@@ -73,4 +86,15 @@ class MergeCycleInBatch(BeliefError):
     planner refuses for the same reason. A ring has no last element, so there is no
     successor to re-mint to — and picking an arbitrary point in it would hand the
     caller a confident answer to a question the log contradicts itself about.
+    """
+
+
+class UnresolvedStateRef(BeliefError):
+    """
+    An edge names a belief state the store does not hold.
+
+    Raised by the fold rather than passed to doxastica, whose ``add_edge`` silently
+    no-ops on a missing endpoint. In a fold that silence would be a dependency the log
+    records and the store lacks, so retracting the premise would stop reporting the
+    conclusion that rests on it — wrong in exactly the way nothing notices.
     """

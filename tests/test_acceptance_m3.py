@@ -5,8 +5,9 @@ An agent believes things about two contacts, learns they are one person, and fin
 exactly which beliefs that invalidated — the seam doc 00 §5d promises and §6 pays for.
 Then a second holder disagrees with it, which is §6c.
 
-Beliefs are written into a real doxastica core, not a fake: the point of the milestone
-is the integration, and a fake would only prove we agree with ourselves.
+Beliefs are folded into a real doxastica core, not a fake: the point of the milestone
+is the integration, and a fake would only prove we agree with ourselves. Since note 03
+§9 they are folded from the log, so the story ends by losing them and getting them back.
 """
 
 from __future__ import annotations
@@ -18,9 +19,9 @@ from doxastica import BeliefFilter, InMemoryBackend, MemoryCore, Stance
 
 from anagrapheus import register_builtin_events
 from anagrapheus.beliefs import (
+    BeliefEvents,
+    BeliefFold,
     BeliefIndex,
-    BeliefIndexFold,
-    BeliefWriter,
     Predicate,
     PredicateKind,
     PredicateRegistry,
@@ -58,20 +59,17 @@ PREDICATES = (
 )
 
 
-def open_stack(path: Path, types: EventTypeRegistry):
+def open_stack(path: Path, types: EventTypeRegistry, predicates: PredicateRegistry):
     """Everything wired over one file, as a composition root would do it."""
     store = SQLiteEventStore(path)
     identity_store = SQLiteIdentityStore(store.connection)
     index_store = SQLiteBeliefIndexStore(store.connection)
     reader = EventReader(store, UpcastRegistry(), types)
-    projector = Projector(
-        store,
-        reader,
-        [IdentityFold(identity_store, types), BeliefIndexFold(index_store, types)],
-    )
+    beliefs = BeliefFold(MemoryCore(InMemoryBackend()), predicates, index_store, types)
+    projector = Projector(store, reader, [IdentityFold(identity_store, types), beliefs])
     return (
         store,
-        index_store,
+        beliefs,
         projector,
         IdentityRegistry(identity_store, ladder=LADDER),
         BeliefIndex(index_store),
@@ -83,9 +81,12 @@ def test_milestone_3_acceptance(tmp_path: Path):
     types = EventTypeRegistry()
     register_builtin_events(types)
     predicates = PredicateRegistry(PREDICATES, namespace="crm")
-    store, index_store, projector, identity, index = open_stack(path, types)
-    core = MemoryCore(InMemoryBackend())
-    agent = BeliefWriter(core, predicates, types, scope_id="agent")
+    store, beliefs, projector, identity, index = open_stack(path, types, predicates)
+    events = BeliefEvents(types, predicates)
+
+    def core() -> MemoryCore:
+        assert isinstance(beliefs.store, MemoryCore)
+        return beliefs.store
 
     # -- two contacts and a colleague, every id minted through the pin ledger ---------
     ledger = PinLedger(store, types)
@@ -94,23 +95,29 @@ def test_milestone_3_acceptance(tmp_path: Path):
     carol, e_c = establish(types, "carol@corp", provenance="crm", resolver=ledger)
     store.append([e_a, e_b, e_c])
 
-    # -- the agent believes things; each write hands back the event recording its mint,
-    # -- and the caller appends them in its own batch --------------------------------
+    # -- the agent believes things, each one an event in the log ----------------------
     #
-    # doxastica's `source_event_id` is a caller-supplied opaque handle, and the envelope
-    # id of the event that occasioned the belief is exactly the handle worth supplying:
-    # it makes "which event caused this?" answerable, and puts doxastica's as-of
-    # ordering in step with the log's own. Here that is the establishing event.
-    established = list(store.read())
-    _, m1 = agent.revise("location", (contact_a,), "London", established[0].envelope.event_id)
-    _, m2 = agent.revise(
-        "knows", (contact_b, carol), True, established[1].envelope.event_id, Stance.suspected
+    # Each belief event names the event that occasioned it as its cause, so "which event
+    # caused this?" is answered by the envelope, the way the rest of the stack answers
+    # it. Here that is the establishing event.
+    established = [e.envelope.event_id for e in store.read()]
+    store.append(
+        [
+            events.revise("agent", "location", (contact_a,), "London", causation_id=established[0]),
+            events.revise(
+                "agent",
+                "knows",
+                (contact_b, carol),
+                True,
+                stance=Stance.suspected,
+                causation_id=established[1],
+            ),
+            events.revise("agent", "location", (carol,), "Paris", causation_id=established[2]),
+        ]
     )
-    _, m3 = agent.revise("location", (carol,), "Paris", established[2].envelope.event_id)
-    store.append([m1, m2, m3])
     projector.catch_up()
 
-    assert len(core.query_scope("agent", BeliefFilter())) == 3
+    assert len(core().query_scope("agent", BeliefFilter())) == 3
 
     # -- the two contacts turn out to be one person ----------------------------------
     before_merge = store.last_seq()
@@ -131,48 +138,61 @@ def test_milestone_3_acceptance(tmp_path: Path):
     # -- applying the plan is the caller's, because it is a belief decision ----------
     for plan in plans:
         stale = next(
-            s for s in core.query_scope("agent", BeliefFilter()) if s.belief_id == plan.belief_id
+            s for s in core().query_scope("agent", BeliefFilter()) if s.belief_id == plan.belief_id
         )
-        successor = predicates.parse(plan.sole())
-        _, minted = agent.revise(
-            successor.name,
-            successor.entity_ids,
-            stale.value,
-            merged_at,
-            stale.stance,
+        old, new = predicates.parse(plan.belief_id), predicates.parse(plan.sole())
+        store.append(
+            [
+                events.revise(
+                    "agent",
+                    new.name,
+                    new.entity_ids,
+                    stale.value,
+                    stance=stale.stance,
+                    causation_id=merged_at,
+                ),
+                events.contract("agent", old.name, old.entity_ids, causation_id=merged_at),
+            ]
         )
-        store.append([minted])
-        core.contract("agent", plan.belief_id, merged_at)
     projector.catch_up()
 
-    held = {s.belief_id for s in core.query_scope("agent", BeliefFilter())}
+    held = {s.belief_id for s in core().query_scope("agent", BeliefFilter())}
     assert predicates.belief_id("knows", contact_a, carol) in held
     assert predicates.belief_id("knows", contact_b, carol) not in held
 
     # -- a second holder disagrees, which is the whole multi-agent case --------------
-    rumour = agent.for_scope("rumour")
-    _, rumoured = rumour.revise("location", (carol,), "Berlin", merged_at)
-    store.append([rumoured])
+    store.append([events.revise("rumour", "location", (carol,), "Berlin", causation_id=merged_at)])
+    projector.catch_up()
 
-    assert [(d.held, d.reference) for d in divergence(core, "agent", "rumour")] == [
+    assert [(d.held, d.reference) for d in divergence(core(), "agent", "rumour")] == [
         ("Paris", "Berlin")
     ]
+    before_crash = (_snapshot(store), _beliefs(core()))
 
-    # -- crash: a fresh process resumes above the position ---------------------------
+    # -- crash: a fresh process, with nothing of the beliefs but the log -------------
+    #
+    # This store is in memory, so it went with the process; the position did not, so
+    # catching up would resume above beliefs nobody holds. The fold is rebuilt instead,
+    # and everything comes back.
     ledger.commit()
-    position_before = store.read_position(BELIEFS_FOLD)
     store.close()
 
     fresh_types = EventTypeRegistry()
     register_builtin_events(fresh_types)
-    store, index_store, projector, identity, index = open_stack(path, fresh_types)
-    assert store.read_position(BELIEFS_FOLD) == position_before
-    projector.catch_up()
-    incremental = _snapshot(store)
+    store, beliefs, projector, identity, index = open_stack(path, fresh_types, predicates)
+    assert store.read_position(BELIEFS_FOLD) > 0
+    assert core().query_scope("agent", BeliefFilter()) == []
+    projector.rebuild(
+        BELIEFS_FOLD,
+        reset=lambda: beliefs.reset(MemoryCore(InMemoryBackend())),
+        reset_in_transaction=True,
+    )
 
-    # -- rebuild: same log, same index -----------------------------------------------
-    projector.rebuild(BELIEFS_FOLD, reset=index_store.reset, reset_in_transaction=True)
-    assert _snapshot(store) == incremental
+    # -- rebuilt: same log, same index, same beliefs ---------------------------------
+    assert (_snapshot(store), _beliefs(core())) == before_crash
+    assert [(d.held, d.reference) for d in divergence(core(), "agent", "rumour")] == [
+        ("Paris", "Berlin")
+    ]
 
     # ...and the index still answers the merge question after being rebuilt from zero.
     assert {r.belief_id for r in index.beliefs_for(carol)} == {
@@ -192,11 +212,10 @@ def test_the_relational_trap_is_unrepresentable(tmp_path: Path):
     retract one about carol.
     """
     predicates = PredicateRegistry(PREDICATES, namespace="crm")
-    core = MemoryCore(InMemoryBackend())
     types = EventTypeRegistry()
     register_builtin_events(types)
-    writer = BeliefWriter(core, predicates, types, scope_id="agent")
-    store = SQLiteEventStore(tmp_path / "agent.db")
+    store, beliefs, projector, _, _ = open_stack(tmp_path / "agent.db", types, predicates)
+    events = BeliefEvents(types, predicates)
     try:
         alice, _ = establish(types, "alice", provenance="crm")
         bob, _ = establish(types, "bob", provenance="crm")
@@ -205,11 +224,16 @@ def test_the_relational_trap_is_unrepresentable(tmp_path: Path):
         with pytest.raises(Exception, match="takes 2 entities"):
             predicates.belief_id("knows", alice)
         with pytest.raises(TypeError, match="relational"):
-            writer.revise("knows", (alice, bob), carol, alice)
+            events.revise("agent", "knows", (alice, bob), str(carol))
 
-        writer.revise("knows", (alice, bob), True, alice)
-        writer.revise("knows", (alice, carol), True, bob)
-        assert len(core.query_scope("agent", BeliefFilter())) == 2
+        store.append(
+            [
+                events.revise("agent", "knows", (alice, bob), True),
+                events.revise("agent", "knows", (alice, carol), True),
+            ]
+        )
+        projector.catch_up()
+        assert len(beliefs.store.query_scope("agent", BeliefFilter())) == 2
     finally:
         store.close()
 
@@ -219,3 +243,17 @@ def _snapshot(store: SQLiteEventStore) -> dict[str, list[tuple[object, ...]]]:
         table: sorted(tuple(row) for row in store.connection.execute(f"SELECT * FROM {table}"))  # noqa: S608
         for table in ("belief_ids", "belief_entities")
     }
+
+
+def _beliefs(core: MemoryCore) -> list[tuple[object, ...]]:
+    # Everything but `state_id`, which doxastica mints afresh on every fold.
+    return [
+        (s.scope_id, s.belief_id, s.source_event_id, repr(s.value), s.status, s.stance)
+        for scope in ("agent", "rumour")
+        for t in sorted(
+            core.query_scope(scope, BeliefFilter(), include_retracted=True),
+            key=lambda t: t.belief_id,
+        )
+        for s in core.get_revision_chain(t.belief_id)
+        if s.scope_id == scope
+    ]

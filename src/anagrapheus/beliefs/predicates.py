@@ -31,8 +31,11 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Final
 from uuid import UUID
 
+from doxastica import Stance
+
 from anagrapheus.beliefs.errors import (
     MalformedBeliefId,
+    OutsideVocabulary,
     UnknownPredicate,
     UnknownScheme,
     WrongArity,
@@ -99,18 +102,71 @@ class Predicate:
     ``sibling(b, a)`` are one proposition — so minting sorts them and both spellings
     reach the same id. ``ordered=True`` is the default because most predicates read in
     one direction: ``reports_to(a, b)`` is not ``reports_to(b, a)``.
+
+    ``values`` closes a functional predicate's answers to a declared set of words. The
+    id was already schema and the value was not, so ``hold firm`` and ``hold_firm`` were
+    two beliefs that no divergence query could compare and nothing would notice.
+    ``None``, the default, leaves the value open — right for ``location`` or a name,
+    where the answers cannot be listed. A relational predicate cannot declare values:
+    its value only says whether the proposition holds, and that is already closed to a
+    bool.
     """
 
     name: str
     arity: int
     kind: PredicateKind
     ordered: bool = True
+    values: frozenset[str] | None = None
 
     def __post_init__(self) -> None:
         if not _NAME.match(self.name):
             raise ValueError(f"predicate name {self.name!r} is not an identifier")
         if self.arity < 1:
             raise ValueError(f"predicate {self.name!r} needs at least one entity, got {self.arity}")
+        if self.values is not None:
+            if self.kind is PredicateKind.RELATIONAL:
+                raise ValueError(
+                    f"predicate {self.name!r} is relational, so its value is a bool and "
+                    f"cannot declare a vocabulary"
+                )
+            if not self.values:
+                raise ValueError(f"predicate {self.name!r} declares an empty vocabulary")
+
+    def check_value(self, value: object) -> None:
+        """
+        Refuse a value this predicate cannot hold.
+
+        Two rules, both the predicate's own so that every path writing a belief holds to
+        them — the belief fold, the helpers that build belief events, and a derived read
+        that never touches a store:
+
+        - **A relational value is a bool.** The arity check already stops
+          ``knows(alice)`` from being minted; this catches the same mistake arriving the
+          other way, a third party smuggled into the answer of ``knows(alice, bob)``,
+          which revising would retract. A ``Stance`` is refused too: how firmly a belief
+          is held is doxastica's own ``stance`` argument, one axis over, and taking it as
+          the value would merge ranking with epistemic state (R21). ``TypeError``.
+        - **A declared vocabulary is closed.** :class:`OutsideVocabulary`. A predicate
+          with no vocabulary accepts anything.
+        """
+        if self.kind is PredicateKind.RELATIONAL:
+            if isinstance(value, bool):
+                return
+            hint = (
+                " (how firmly it is held is the `stance` argument, not the value)"
+                if isinstance(value, Stance)
+                else ""
+            )
+            raise TypeError(
+                f"predicate {self.name!r} is relational, so its value asserts the "
+                f"proposition rather than answering it: pass a bool, not "
+                f"{type(value).__name__}{hint}"
+            )
+        if self.values is None or (isinstance(value, str) and value in self.values):
+            return
+        raise OutsideVocabulary(
+            f"predicate {self.name!r} answers with one of {sorted(self.values)}, not {value!r}"
+        )
 
 
 @dataclass(frozen=True, slots=True)

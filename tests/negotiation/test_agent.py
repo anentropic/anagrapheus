@@ -256,3 +256,18 @@ def test_text_output_is_not_what_the_agent_returns(table: Table):
 
     with pytest.raises(UnexpectedModelBehavior):
         negotiator.propose("uk", "fisheries")
+
+
+def test_the_domain_vocabulary_is_the_one_the_registry_holds():
+    """
+    The bottom line the model is shown and the words the belief layer accepts are one set.
+
+    Two copies would drift, and the drift would be silent in exactly the way note 06
+    §13 recorded: a value the schema allowed and nothing compared.
+    """
+    registry = domain.predicates()
+    shown = Reading.model_json_schema()["$defs"]["BottomLine"]["enum"]
+
+    assert registry.predicate("red_line").values == set(shown)
+    # A position is a want as well as a disposition (the EU's is `settle`), so it is open.
+    assert registry.predicate("position").values is None

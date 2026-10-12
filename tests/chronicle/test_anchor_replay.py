@@ -75,10 +75,10 @@ def test_a_deterministic_fold_still_rebuilds_freely(rig: Rig):
     # The identity and belief folds declare deterministic; the acceptance and timeline
     # suites exercise their rebuilds. Asserted here so a change to the guard that
     # accidentally caught every fold fails close to its cause.
-    from anagrapheus.beliefs import BeliefIndexFold
+    from anagrapheus.beliefs import BeliefFold
     from anagrapheus.identity import IdentityFold
 
-    assert BeliefIndexFold.fold == "deterministic"
+    assert BeliefFold.fold == "deterministic"
     assert IdentityFold.fold == "deterministic"
 
 
