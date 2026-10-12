@@ -91,6 +91,10 @@ class Table:
     #: `get_scope_at` cuts a scope by source event and a belief citing a phantom lands
     #: in an order nobody chose.
     tabled_at: dict[str, UUID] = field(default_factory=dict)
+    #: Called after every :meth:`append` with the events and the new last ``seq``.
+    #: For watching a negotiation as it happens -- the UI snapshots the table here.
+    #: A listener reads; one that wrote would re-enter the append it is reporting.
+    on_append: list[Callable[[tuple[PendingEvent, ...], int], None]] = field(default_factory=list)
 
     @classmethod
     def open(cls, path: Path, *parties: str, summarize: Summarizer | None = None) -> Table:
@@ -169,7 +173,10 @@ class Table:
         return BeliefWriter(self.core, self.predicates, self.types, scope_id=scope)
 
     def append(self, *events: PendingEvent) -> int:
-        return self.store.append(events)
+        last = self.store.append(events)
+        for listener in self.on_append:
+            listener(events, last)
+        return last
 
     def believe(
         self,

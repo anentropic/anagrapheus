@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>anagrapheus · negotiation</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <header class="bar">
+    <h1>negotiation <span class="sub">anagrapheus demo</span></h1>
+    <form id="run-form" class="run">
+      <label for="models" class="visually-hidden">Model specs</label>
+      <input id="models" name="models" spellcheck="false" autocomplete="off"
+             placeholder="scripted (offline) — or e.g. anthropic:claude-haiku-5-5  update=…">
+      <button type="submit" id="run-button">Run</button>
+    </form>
+    <div id="status" class="status idle">idle</div>
+  </header>
+  <div id="run-error" class="banner error" hidden></div>
+  <div id="verdict" class="banner ok" hidden></div>
+
+  <section class="timeline" aria-label="Timeline">
+    <div class="row">
+      <div class="tabs" role="tablist">
+        <button role="tab" data-stage="live" class="tab active">Live run</button>
+        <button role="tab" data-stage="replay" class="tab">Replay <span class="hint">fresh store, no model</span></button>
+      </div>
+      <div id="phases" class="phases"></div>
+    </div>
+    <div class="row scrub">
+      <button id="first" title="First frame (Home)">⏮</button>
+      <button id="prev" title="Previous frame (←)">◀</button>
+      <button id="play" title="Play (space)">▶</button>
+      <button id="next" title="Next frame (→)">▶︎|</button>
+      <button id="last" title="Latest frame (End)">⏭</button>
+      <input id="scrubber" type="range" min="0" max="0" value="0" aria-label="Frame">
+      <label class="follow"><input id="follow" type="checkbox" checked> follow</label>
+    </div>
+    <div id="frame-label" class="frame-label">no frames yet — press Run</div>
+  </section>
+
+  <main class="grid">
+    <section class="panel" aria-labelledby="beliefs-h">
+      <h2 id="beliefs-h">What each party holds <span class="hint">stored scopes</span></h2>
+      <div id="beliefs"></div>
+    </section>
+
+    <section class="panel" aria-labelledby="minds-h">
+      <h2 id="minds-h">Minds as modelled <span class="hint">derived on demand, never stored</span></h2>
+      <div id="headline"></div>
+      <div id="model-cards"></div>
+      <h3>Chronicle <span class="hint">advisory prose, one per closed round</span></h3>
+      <ol id="chronicle" class="chronicle"></ol>
+    </section>
+
+    <section class="panel activity" aria-labelledby="activity-h">
+      <h2 id="activity-h">Backend activity</h2>
+      <div class="filters" id="filters">
+        <label><input type="checkbox" data-cat="model" checked> model &amp; tool calls</label>
+        <label><input type="checkbox" data-cat="round" checked> round steps</label>
+        <label><input type="checkbox" data-cat="pins" checked> pins &amp; chronicle</label>
+        <label><input type="checkbox" data-cat="store"> store &amp; folds</label>
+      </div>
+      <ol id="log" class="log"></ol>
+    </section>
+  </main>
+
+  <section class="panel events" aria-labelledby="events-h">
+    <h2 id="events-h">Event log <span class="hint">the only canon; click a row for its payload</span></h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>seq</th><th>type</th><th>what happened</th></tr></thead>
+        <tbody id="events"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <details class="panel story" id="story-panel">
+    <summary>The story, as the command-line demo prints it</summary>
+    <div id="story"></div>
+  </details>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

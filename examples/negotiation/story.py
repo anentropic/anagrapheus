@@ -193,6 +193,7 @@ def negotiate(
     models: Model | Lineup,
     archive: Mapping[str, str] | None = None,
     resolver: Callable[[Table], PinResolver] | None = None,
+    observe: Callable[[Table], None] | None = None,
 ) -> Negotiation:
     """
     Play the whole negotiation and hand back everything it produced.
@@ -206,6 +207,9 @@ def negotiate(
     both need the store, and the store is the table's. A replay in ``"record"`` mode
     with a *different* lineup is how one role is evaluated with the rest held fixed;
     see :mod:`examples.negotiation.lineup`.
+
+    ``observe`` is handed the table as soon as it opens, before anything is said at
+    it -- the place to attach an ``on_append`` listener and watch the story unfold.
     """
     lineup = models if isinstance(models, Lineup) else Lineup.of(models)
     lookup = dict(ARCHIVE if archive is None else archive)
@@ -215,6 +219,8 @@ def negotiate(
     lineup.check_parties(PARTIES)
     table = Table.open(path, *PARTIES, summarize=summary)
     try:
+        if observe is not None:
+            observe(table)
         return _play(table, lineup, summary, lookup, resolver)
     except BaseException:
         # A failed run hands back no `Negotiation`, so nothing else holds the table to
