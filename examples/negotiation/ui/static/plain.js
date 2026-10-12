@@ -26,6 +26,10 @@ function who(parties) {
   return parties.map(the).join(" and ");
 }
 
+// A value longer than this is a sentence, not a word: a real model's bottom line can be
+// "unknown: no confirmed furthest movement; …". It moves under its label.
+const LONG = 24;
+
 const BEAT_TITLES = {
   setup: "The setup",
   act: "Each side decides",
@@ -202,7 +206,11 @@ function mindCard(snapshot, party, previous) {
         const changed = old !== null && old[i] !== value;
         return [
           el("dt", { class: `kind-${kind}`, text: label }),
-          el("dd", { class: changed ? "changed" : "" }, value === null ? el("span", { class: "unknown", text: "no idea yet" }) : phrase(value)),
+          el(
+            "dd",
+            { class: [changed ? "changed" : "", value !== null && phrase(value).length > LONG ? "long" : ""].join(" ") },
+            value === null ? el("span", { class: "unknown", text: "no idea yet" }) : phrase(value),
+          ),
         ];
       }),
     ),

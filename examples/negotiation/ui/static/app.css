@@ -138,13 +138,16 @@ q.reason { font-style: italic; }
 @media (max-width: 700px) { .minds { grid-template-columns: 1fr; } }
 .mind { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 16px; }
 .mind h3 { margin: 0 0 8px; font-size: 16px; }
-.mind dl { margin: 0; display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; align-items: baseline; }
+/* The label column never gives up its share; a short value sits beside it. */
+.mind dl { margin: 0; display: grid; grid-template-columns: minmax(10em, 1fr) minmax(0, max-content); gap: 6px 12px; align-items: baseline; }
 .mind dt { color: var(--muted); font-size: 13px; }
 .mind dt.kind-held::before { content: "🔒 "; }
 .mind dt.kind-stated::before { content: "📢 "; }
 .mind dt.kind-model::before { content: "💭 "; }
 .mind dd { margin: 0; font-weight: 600; text-align: right; border-radius: 4px; padding: 0 4px; }
 .mind dd.changed { background: var(--changed); color: var(--changed-ink); }
+/* A real model may answer with a sentence. It gets its own line under the label. */
+.mind dd.long { grid-column: 1 / -1; text-align: left; font-weight: 500; margin: -2px 0 4px 1.4em; overflow-wrap: anywhere; }
 .mind .unknown { color: var(--muted); font-weight: 400; font-style: italic; }
 
 .behind { color: var(--muted); font-size: 13px; margin-top: 14px; }
