@@ -37,6 +37,7 @@ if TYPE_CHECKING:
 PREDICATES = (
     Predicate("location", 1, PredicateKind.FUNCTIONAL),
     Predicate("employer", 1, PredicateKind.FUNCTIONAL),
+    Predicate("tier", 1, PredicateKind.FUNCTIONAL, values=frozenset({"free", "pro"})),
     Predicate("knows", 2, PredicateKind.RELATIONAL),
     Predicate("sibling", 2, PredicateKind.RELATIONAL, ordered=False),
 )

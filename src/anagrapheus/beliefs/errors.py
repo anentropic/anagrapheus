@@ -6,6 +6,7 @@ __all__ = [
     "BeliefError",
     "MalformedBeliefId",
     "MergeCycleInBatch",
+    "OutsideVocabulary",
     "UnknownPredicate",
     "UnknownScheme",
     "UnrenderableBelief",
@@ -35,6 +36,17 @@ class WrongArity(BeliefError):
     arity 1 would key the belief on ``knows(alice)`` alone, and revising the value from
     ``bob`` to ``carol`` would then *silently retract* the belief about bob. The
     declaration is what makes that unrepresentable rather than merely discouraged.
+    """
+
+
+class OutsideVocabulary(BeliefError, ValueError):
+    """
+    A value for a predicate that declares its answers, and this is not one of them.
+
+    The vocabulary is schema in the same sense the predicate is (doc 00 §6b): a value
+    outside it is a belief nothing else can be compared with, and accepting it would let
+    one spelling of an answer quietly become a second answer. Also a ``ValueError``,
+    because that is what it is to a caller who has never heard of this library's types.
     """
 
 

@@ -13,6 +13,7 @@ from anagrapheus.beliefs import (
     CURRENT_SCHEME,
     MalformedBeliefId,
     MintedId,
+    OutsideVocabulary,
     Predicate,
     PredicateKind,
     PredicateRegistry,
@@ -194,3 +195,53 @@ def test_parse_still_reads_an_id_with_no_namespace():
 
     assert parsed.namespace == ""
     assert parsed.entity_ids == (entity,)
+
+
+class TestVocabulary:
+    """A functional predicate may close its answers; a relational one already is closed."""
+
+    def test_a_value_outside_the_vocabulary_is_refused(self):
+        stance = Predicate(
+            "stance", 1, PredicateKind.FUNCTIONAL, values=frozenset({"concede", "hold_firm"})
+        )
+
+        stance.check_value("hold_firm")
+        # The spelling a live model actually wrote, which is the case this exists for.
+        with pytest.raises(OutsideVocabulary, match=r"\['concede', 'hold_firm'\].*'hold firm'"):
+            stance.check_value("hold firm")
+        # Not a string at all is outside a vocabulary of words, too.
+        with pytest.raises(OutsideVocabulary):
+            stance.check_value(1)
+
+    def test_it_is_a_value_error_to_a_caller_who_knows_none_of_our_types(self):
+        stance = Predicate("stance", 1, PredicateKind.FUNCTIONAL, values=frozenset({"a"}))
+
+        with pytest.raises(ValueError, match="answers with one of"):
+            stance.check_value("b")
+
+    def test_an_undeclared_vocabulary_accepts_anything(self):
+        Predicate("location", 1, PredicateKind.FUNCTIONAL).check_value("anywhere at all")
+
+    def test_a_relational_predicate_cannot_declare_one(self):
+        with pytest.raises(ValueError, match="relational"):
+            Predicate("knows", 2, PredicateKind.RELATIONAL, values=frozenset({"yes"}))
+
+    def test_an_empty_vocabulary_is_refused(self):
+        """Declaring no possible answers would make every write fail, so it is a typo."""
+        with pytest.raises(ValueError, match="empty vocabulary"):
+            Predicate("stance", 1, PredicateKind.FUNCTIONAL, values=frozenset())
+
+    def test_the_vocabulary_is_not_part_of_the_id(self):
+        """
+        Widening a vocabulary must not orphan a belief already held.
+
+        The id names the question and the value answers it; adding an answer is a
+        change to the answers, so every id minted before it still reaches its history.
+        """
+        narrow = Predicate("stance", 1, PredicateKind.FUNCTIONAL, values=frozenset({"a"}))
+        wide = Predicate("stance", 1, PredicateKind.FUNCTIONAL, values=frozenset({"a", "b"}))
+        entity = uuid.uuid7()
+
+        assert PredicateRegistry([narrow], namespace="t").belief_id(
+            "stance", entity
+        ) == PredicateRegistry([wide], namespace="t").belief_id("stance", entity)

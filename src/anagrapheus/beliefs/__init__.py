@@ -13,7 +13,8 @@ integration cost. This subpackage pays it:
 - **The id names the question, the value answers it.** Declared arity closes the
   functional/relational trap mechanically — a predicate declared ``knows/2`` cannot be
   minted at arity 1, so revising it cannot silently retract a claim about a third
-  party nobody mentioned.
+  party nobody mentioned. A functional predicate may also declare the words its value
+  can be, so two spellings of one answer cannot become two answers.
 - **An index from entity to belief id**, folded from the log. This is the piece
   neither library has: doxastica can filter *by* a belief id but never look inside
   one, and the identity layer knows entities and has never heard of a belief. Without
@@ -30,6 +31,7 @@ from anagrapheus.beliefs.errors import (
     BeliefError,
     MalformedBeliefId,
     MergeCycleInBatch,
+    OutsideVocabulary,
     UnknownPredicate,
     UnknownScheme,
     UnrenderableBelief,
@@ -74,6 +76,7 @@ __all__ = [
     "MalformedBeliefId",
     "MergeCycleInBatch",
     "MintedId",
+    "OutsideVocabulary",
     "Predicate",
     "PredicateKind",
     "PredicateRegistry",

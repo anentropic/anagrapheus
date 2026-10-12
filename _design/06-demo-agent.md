@@ -640,10 +640,13 @@ word of the brief and it fails, naming the route and the command that re-records
   nothing to be wrong about. The scripted counterpart always shows it because it was
   written to. Whether a real lineup produces the phenomenon is a property of the lineup,
   which makes it an evaluation question rather than something to assert.
-- **A conclusion's value is free text.** The live model wrote `hold firm` where the domain
-  says `hold_firm`. Nothing compares conclusion values yet, so nothing broke; the first
-  evaluation that scores them will, silently, unless values get the vocabulary that
-  predicates already have.
+- ~~**A conclusion's value is free text.**~~ **Closed in two halves.** The live model wrote
+  `hold firm` where the domain says `hold_firm`. The schema half came first: `Reading.value`
+  is a three-word `Literal` the model is shown, and an answer outside it is sent back. The
+  belief-layer half followed: `red_line` declares the same words as its vocabulary
+  (`domain.Disposition`), so a value that reaches the writer by any route other than that
+  schema is refused there too ([note 03 §4](03-belief-layer.md)). `position` stays open on
+  purpose — the EU's own seeded want is `settle`, a goal rather than a disposition.
 - **The scripted counterpart decides from the brief, which is a smaller claim than it
   looks.** It reads one line of the brief and branches on it, so changing a belief
   changes an offer and the demo is not a fixture. It is still not a model: nothing here

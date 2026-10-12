@@ -83,6 +83,18 @@ is written as advice. Two mechanisms make it structural here:
   and it needs no understanding of what a predicate means.
 - **Kind.** `BeliefWriter` refuses a relational predicate whose value is not a bool.
   The arity rule catches the shape; this catches the same mistake arriving as a value.
+- **Vocabulary** *(added 2026-10-12)*. A functional predicate may declare `values`, the
+  words its answer can be, and the writer refuses any other. The id was schema and the
+  value was not, so a live model's `hold firm` beside the domain's `hold_firm` was a
+  second answer that no divergence query could compare and nothing noticed
+  ([note 06 §13](06-demo-agent.md#13-open-questions)). The check is the predicate's own
+  (`Predicate.check_value`) rather than the writer's, so a derived read that never
+  passes through a writer can hold to it. It is optional because most answers cannot be
+  listed (`location`, a name), it is refused on a relational predicate because a bool is
+  already closed, and it is **not part of the id**: widening a vocabulary adds answers
+  to a question that already exists, so it must not orphan the beliefs keyed on it.
+  Reading stays permissive, as `parse` is: the check governs what this process writes,
+  not what the log already holds.
 
 **A `Stance` is refused as a value too**, which was not the first design. It looks
 like it belongs — a relational belief's value only says whether the proposition holds,

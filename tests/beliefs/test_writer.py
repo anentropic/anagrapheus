@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import pytest
 from doxastica import BeliefFilter, Stance
 
-from anagrapheus.beliefs import BeliefWriter, plan_rekeys
+from anagrapheus.beliefs import BeliefWriter, OutsideVocabulary, plan_rekeys
 from anagrapheus.identity.store import RekeyRow
 
 from .conftest import Rig, build_predicates
@@ -66,6 +66,26 @@ def test_a_stance_is_not_a_value_even_for_a_relational_predicate(writer: BeliefW
 def test_a_functional_predicate_takes_any_value(writer: BeliefWriter):
     """``location(alice)`` is answered by a place; the value is opaque to us all."""
     writer.revise("location", (uuid.uuid7(),), {"city": "London", "since": 2019}, uuid.uuid7())
+
+
+def test_a_declared_vocabulary_is_held_on_every_write(writer: BeliefWriter, core: MemoryCore):
+    """
+    Two spellings of one answer cannot become two answers.
+
+    The refusal happens before anything is minted or stored, so a rejected write leaves
+    no index row pointing at a belief that was never held — and ``expand`` is held to
+    it as much as ``revise``.
+    """
+    account = uuid.uuid7()
+
+    with pytest.raises(OutsideVocabulary, match="'premium'"):
+        writer.revise("tier", (account,), "premium", uuid.uuid7())
+    with pytest.raises(OutsideVocabulary):
+        writer.expand("tier", (account,), "premium", uuid.uuid7())
+    assert core.query_scope("agent", BeliefFilter()) == []
+
+    state, _ = writer.revise("tier", (account,), "pro", uuid.uuid7())
+    assert state.value == "pro"
 
 
 def test_revising_a_relational_belief_leaves_the_other_party_alone(

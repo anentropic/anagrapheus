@@ -22,7 +22,7 @@ identity decisions, and no decision ever names an event.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final, Literal, get_args
 from uuid import UUID  # noqa: TC003 -- pydantic resolves event annotations at runtime
 
 from anagrapheus.beliefs import Predicate, PredicateKind, PredicateRegistry
@@ -111,6 +111,16 @@ class RoundClosed(DomainEvent, frozen=True):
     round_number: int
 
 
+#: How far a party will move on a clause: what an offer states, a remark lets slip, and
+#: a bottom line concludes. ``concede`` gives way, ``hold_firm`` will not move yet
+#: but has not ruled it out, ``never`` will not move at all.
+type Disposition = Literal["concede", "hold_firm", "never"]
+
+#: :data:`Disposition` as the set a predicate declares, so the type and the registry
+#: cannot drift apart.
+DISPOSITIONS: Final = frozenset[str](get_args(Disposition.__value__))
+
+
 #: The negotiation's predicates. `position` and `red_line` are functional -- a party
 # holds one position on a clause at a time, and revising supersedes correctly.
 #
@@ -126,9 +136,17 @@ class RoundClosed(DomainEvent, frozen=True):
 # set** -- *"the divergence is the deception/surprise engine."* A party that
 # mis-tracks who overheard a remark is a party that can be played, and everything the
 # derived read in `nesting.py` can say about another mind is gated by these.
+#
+# **`red_line` answers in a declared vocabulary, and `position` does not.** A bottom line
+# is a conclusion a model writes about another party, read back into the next brief and
+# compared across scopes, so it is held to :data:`Disposition` on write. Until note 06
+# §13 closed it the three words lived in the data and in the model's schema and nowhere
+# the belief layer could see. A position stays open: the EU's own seeded want is
+# `settle`, which is a goal rather than a disposition, and closing the predicate would
+# have forced one vocabulary onto two different questions.
 PREDICATES = (
     Predicate("position", 2, PredicateKind.FUNCTIONAL),
-    Predicate("red_line", 2, PredicateKind.FUNCTIONAL),
+    Predicate("red_line", 2, PredicateKind.FUNCTIONAL, values=DISPOSITIONS),
     Predicate("witnessed", 2, PredicateKind.RELATIONAL),
 )
 

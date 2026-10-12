@@ -75,7 +75,8 @@ class Leak:
     speaker: str
     overheard_by: str
     clause: str
-    suggests: str
+    #: How far the remark says the speaker will move, in the domain's vocabulary.
+    suggests: domain.Disposition
     #: Holder -> the parties that holder believes witnessed the remark. A holder absent
     #: from this mapping believes nobody heard it, including itself.
     believed_by: Mapping[str, tuple[str, ...]]

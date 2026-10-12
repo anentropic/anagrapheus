@@ -62,9 +62,10 @@ class BeliefWriter:
     """
     Writes beliefs into a ``BeliefStore``, keyed by predicate rather than by id.
 
-    A thin wrapper by design: it adds minting, the ``source_event_id`` binding, and one
-    check. Everything else — revision semantics, scopes, retraction cascades — is
-    doxastica's, reached through the store the caller passes in.
+    A thin wrapper by design: it adds minting, the ``source_event_id`` binding, and
+    the value checks the predicate declares. Everything else — revision semantics,
+    scopes, retraction cascades — is doxastica's, reached through the store the caller
+    passes in.
 
     **Writing hands back an event you must append.** An earlier draft minted the id and
     said nothing, which made this class a trap: a caller who used only the writer — the
@@ -153,8 +154,9 @@ class BeliefWriter:
         )
 
     def _check(self, predicate: str, value: Any) -> None:
-        """Refuse the relational shape doc 00 §6a warns about."""
+        """Refuse the relational shape doc 00 §6a warns about, and undeclared answers."""
         declared = self._predicates.predicate(predicate)
+        declared.check_value(value)
         if declared.kind is PredicateKind.RELATIONAL and not isinstance(value, bool):
             # The arity check already stops `knows(alice)` from being minted. This
             # catches the same mistake arriving the other way: a relational predicate

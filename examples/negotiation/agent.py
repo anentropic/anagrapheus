@@ -83,8 +83,10 @@ class Offer(BaseModel):
 
 
 #: What a bottom line can be. The same words a position is stated and leaked in, so a
-#: reading compares with everything else the belief layer holds about a party.
-type BottomLine = Literal["concede", "hold_firm", "never"]
+#: reading compares with everything else the belief layer holds about a party -- which
+#: is why it is the domain's vocabulary rather than this module's, and why the registry
+#: refuses anything else on write.
+type BottomLine = domain.Disposition
 
 
 class Reading(BaseModel):
