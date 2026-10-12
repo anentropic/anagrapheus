@@ -71,6 +71,14 @@ function about(beliefs, predicate, party) {
   return found ? found.value : null;
 }
 
+/** The seated parties, in seat order, as the snapshot's scopes list them. */
+function parties(snapshot) {
+  return Array.isArray(snapshot.scopes) ? [...new Set(snapshot.scopes.map((s) => s.party))] : [];
+}
+
+/** The party across the table. The round loop is pairwise, so there is exactly one. */
+const otherThan = (snapshot, party) => parties(snapshot).find((p) => p !== party);
+
 function scope(snapshot, party, kind) {
   const scopes = Array.isArray(snapshot.scopes) ? snapshot.scopes : [];
   return scopes.find((s) => s.party === party && s.kind === kind)?.beliefs ?? [];
@@ -113,11 +121,11 @@ function narrate(stage, beat) {
 
   if (beat.phase === "setup") {
     const clause = events.find((e) => e.type === "ClauseTabled");
-    out.push(sentence(`Two negotiators, the EU and the UK, sit down to bargain over one clause: ${clause ? clause.payload.title : "the clause"}.`));
-    const eu = phrase(about(scope(end, "eu", "held"), "position", "eu"));
-    const uk = phrase(about(scope(end, "uk", "held"), "position", "uk"));
-    if (eu && uk) {
-      out.push(sentence(`In private, the EU wants to ${eu}, and the UK is secretly willing to ${uk}. Neither knows what the other wants.`));
+    const seated = parties(end);
+    out.push(sentence(`${seated.length === 2 ? "Two" : seated.length} negotiators, ${seated.map(the).join(" and ")}, sit down to bargain over one clause: ${clause ? clause.payload.title : "the clause"}.`));
+    const wants = seated.map((p) => [p, phrase(about(scope(end, p, "held"), "position", p))]).filter(([, w]) => w);
+    if (wants.length) {
+      out.push(sentence(`In private, ${wants.map(([p, w]) => `${the(p)} wants to ${w}`).join(", and ")}. Neither knows what the other wants.`));
     }
     return out;
   }
@@ -136,7 +144,7 @@ function narrate(stage, beat) {
       out.push(sentence(el("strong", { text: `${The(p.speaker)} lets slip that it might ${phrase(p.suggests)}` }), `, and ${the(p.overheard_by)} overhears it.`));
       const label = `#${e.seq} SideRemarkOverheard`;
       const really = new Set([p.speaker, p.overheard_by]);
-      for (const party of ["eu", "uk"]) {
+      for (const party of parties(end)) {
         const thinks = believedWitnesses(end, party, label);
         // The speaker knows what it said; whether it counts itself a witness is the
         // story's business, not a mistake worth flagging. The listener is the question.
@@ -155,8 +163,8 @@ function narrate(stage, beat) {
   }
 
   if (beat.phase.endsWith(": read")) {
-    for (const party of ["eu", "uk"]) {
-      const other = party === "eu" ? "uk" : "eu";
+    for (const party of parties(end)) {
+      const other = otherThan(end, party);
       const now = about(scope(end, party, "held"), "red_line", other);
       const was = before ? about(scope(before, party, "held"), "red_line", other) : null;
       if (now === null || now === was) continue;
@@ -184,7 +192,7 @@ function narrate(stage, beat) {
 // ---- the panels ------------------------------------------------------------------------------
 
 function mindCard(snapshot, party, previous) {
-  const other = party === "eu" ? "uk" : "eu";
+  const other = otherThan(snapshot, party);
   const P = name(party);
   const O = name(other);
   const rows = [
@@ -218,7 +226,7 @@ function mindCard(snapshot, party, previous) {
 }
 
 function mindValues(snapshot, party) {
-  const other = party === "eu" ? "uk" : "eu";
+  const other = otherThan(snapshot, party);
   return [
     about(scope(snapshot, party, "held"), "position", party),
     about(scope(snapshot, party, "stated"), "position", party),
@@ -228,25 +236,38 @@ function mindValues(snapshot, party) {
   ];
 }
 
+/**
+ * Each side's read of the other, against what the other imagines it to be -- in words.
+ *
+ * Every direction is checked and reported, not the one the scripted story stages: with
+ * real models either side may misjudge what the other has concluded, both may, or
+ * neither will. A wrong guess here is about a mind, not about the facts.
+ */
 function twist(snapshot) {
-  const h = snapshot.headline;
-  if (!h || h.error || h.truly === null) {
+  const checks = secondOrder(snapshot).filter((e) => e.reads !== null || e.imagined !== null);
+  if (!checks.length) {
     return el("div", { class: "twist calm" }, el("strong", { text: "Nothing to compare yet. " }), "Neither side has formed a view of the other.");
   }
-  if (!h.wrong) {
+  const wrong = checks.filter((e) => e.wrong);
+  if (!wrong.length) {
     return el(
       "div",
       { class: "twist calm" },
-      el("strong", { text: "The two pictures line up. " }),
-      `The EU thinks the UK will ${phrase(h.truly)}, and the UK correctly guesses that's what the EU thinks.`,
+      el("strong", { text: "The pictures line up. " }),
+      ...checks.map((e) => `${The(e.reader)} thinks ${the(e.subject)} will ${phrase(e.reads)}, and ${the(e.subject)} correctly guesses that's what ${the(e.reader)} thinks. `),
     );
   }
   return el(
     "div",
     { class: "twist" },
-    el("strong", { text: "The twist: " }),
-    `the EU has worked out that the UK will ${phrase(h.truly)}. But the UK thinks the EU still believes it will ${phrase(h.imagined)}. `,
-    "The UK isn't wrong about the facts. It's wrong about what the EU knows, and nothing in its own records can show it that.",
+    el("strong", { text: wrong.length === 1 ? "A mistake about a mind: " : "Both sides are wrong about the other: " }),
+    ...wrong.map(
+      (e) =>
+        (e.reads === null
+          ? `${The(e.subject)} thinks ${the(e.reader)} believes it will ${phrase(e.imagined)}, but ${the(e.reader)} has no read on it yet. `
+          : `${The(e.reader)} has worked out that ${the(e.subject)} will ${phrase(e.reads)}, but ${the(e.subject)} thinks ${the(e.reader)} believes it will ${e.imagined === null ? "do something else" : phrase(e.imagined)}. `) +
+        `That's a mistake about what ${the(e.reader)} knows, and nothing in ${the(e.subject)}'s own records can show it. `,
+    ),
   );
 }
 
@@ -291,7 +312,7 @@ function renderPlain() {
   root.replaceChildren(
     el("section", { class: "happened" }, el("h2", { text: beatTitle(beat.phase) }), ...narrate(stage, beat)),
     twist(end),
-    el("div", { class: "minds" }, mindCard(end, "eu", previous), mindCard(end, "uk", previous)),
+    el("div", { class: "minds" }, ...parties(end).map((p) => mindCard(end, p, previous))),
     behindTheScenes(stage, beat),
   );
 }

@@ -101,7 +101,7 @@ def snapshot(table: Table, labels: Labeler) -> dict[str, Json]:
     return {
         "scopes": _guard(lambda: _scopes(table, labels)),
         "models": _guard(lambda: _models(table, labels)),
-        "headline": _guard(lambda: _headline(table, labels)),
+        "second_order": _guard(lambda: _second_order(table, labels)),
         "chronicle": _guard(lambda: [s.prose for s in table.brief().depth()]),
     }
 
@@ -158,28 +158,41 @@ def _models(table: Table, labels: Labeler) -> list[dict[str, Json]]:
     return out
 
 
-def _headline(table: Table, labels: Labeler) -> dict[str, Json] | None:
+def _second_order(table: Table, labels: Labeler) -> list[dict[str, Json]]:
     """
-    The story's measured claim, after every event rather than once a round.
+    Each side's read of another, against what that other imagines the read to be.
 
-    What the EU reads of the UK's position, against what the UK imagines the EU reads:
-    the pair :class:`~examples.negotiation.story.Mismatch` records at each round's end.
+    For every ordered pair and clause: what ``reader`` derives ``subject`` wants (depth
+    one, from ``reader``'s view), and what ``subject`` thinks ``reader`` derives (depth
+    two, from ``subject``'s view). Where they differ, ``subject`` is wrong about what
+    ``reader`` has concluded -- a mistake about a mind, not about the world.
+
+    Both directions, always. The story stages one of them, and a real model may make
+    either, both or neither; :class:`~examples.negotiation.story.Mismatch` is the
+    EU-reads-UK entry here, measured after every event rather than once a round.
     """
-    if not {"eu", "uk"} <= set(table.seats) or not table.clauses:
-        return None
-    clause = next(iter(table.clauses))
-    wanted = table.predicates.belief_id(
-        "position", table.canonical(table.seats["uk"]), table.canonical(table.clauses[clause])
-    )
     interpret = table.interpret()
-    truly = reconstruct(table.view("eu"), ("uk",), interpret=interpret).get(wanted)
-    imagined = reconstruct(table.view("uk"), ("eu", "uk"), interpret=interpret).get(wanted)
-    return {
-        "belief": labels.belief(wanted),
-        "truly": to_jsonable_python(truly),
-        "imagined": to_jsonable_python(imagined),
-        "wrong": truly != imagined,
-    }
+    out: list[dict[str, Json]] = []
+    for clause, clause_id in table.clauses.items():
+        for reader in table.parties:
+            for subject in (p for p in table.parties if p != reader):
+                belief = table.predicates.belief_id(
+                    "position", table.canonical(table.seats[subject]), table.canonical(clause_id)
+                )
+                reads = reconstruct(table.view(reader), (subject,), interpret=interpret)
+                imagined = reconstruct(table.view(subject), (reader, subject), interpret=interpret)
+                out.append(
+                    {
+                        "reader": reader,
+                        "subject": subject,
+                        "clause": clause,
+                        "belief": labels.belief(belief),
+                        "reads": to_jsonable_python(reads.get(belief)),
+                        "imagined": to_jsonable_python(imagined.get(belief)),
+                        "wrong": reads.get(belief) != imagined.get(belief),
+                    }
+                )
+    return out
 
 
 # ---- pieces -------------------------------------------------------------------------------

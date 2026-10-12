@@ -246,16 +246,16 @@ function renderTimeline() {
     const [round, step] = g.phase.includes(": ") ? g.phase.split(": ") : [null, g.phase];
     const starts = round !== null && round !== lastRound;
     lastRound = round;
-    const end = stage.frames[g.last].snapshot.headline;
+    const wrong = mistakes(stage.frames[g.last].snapshot);
     return el("button", {
       class: [
         "chip",
         starts ? "round-start" : "",
         current && (current.phase || "setup") === g.phase ? "current" : "",
-        end && end.wrong ? "wrong" : "",
+        wrong.length ? "wrong" : "",
       ].join(" "),
       text: starts ? `${round} · ${step}` : step,
-      title: `${g.phase} — frames ${g.first + 1}–${g.last + 1}` + (end && end.wrong ? " — the UK is wrong about what the EU concluded" : ""),
+      title: [`${g.phase} — frames ${g.first + 1}–${g.last + 1}`, ...wrong.map(misjudged)].join(" — "),
       // The Story view shows a beat once it is done; the workings, as it begins.
       onclick: () => go(state.mode === "story" ? g.last : g.first),
     });
@@ -336,6 +336,14 @@ function renderBeliefs(frame, prev) {
   );
 }
 
+/** The snapshot's second-order checks, one per ordered pair of parties; [] before any. */
+function secondOrder(snapshot) {
+  return Array.isArray(snapshot.second_order) ? snapshot.second_order : [];
+}
+
+const mistakes = (snapshot) => secondOrder(snapshot).filter((e) => e.wrong);
+const misjudged = (e) => `${name(e.subject)} is wrong about what ${name(e.reader)} concluded`;
+
 function modelTitle(m) {
   const chain = [m.viewer, ...m.chain].map(name);
   if (chain.length === 2) return `${chain[0]}'s model of ${chain[1]}`;
@@ -344,26 +352,30 @@ function modelTitle(m) {
 
 function renderMinds(frame, prev) {
   const snap = frame.snapshot;
-  const h = snap.headline;
-  if (h && h.error) {
-    $("headline").replaceChildren(el("div", { class: "error-text", text: h.error }));
-  } else if (h) {
+  const checks = snap.second_order;
+  if (checks && checks.error) {
+    $("headline").replaceChildren(el("div", { class: "error-text", text: checks.error }));
+  } else {
+    // Every direction, not only the one the story stages: a real model may misjudge
+    // either side's reading, both, or neither.
     $("headline").replaceChildren(
-      el(
-        "div",
-        { class: `headline${h.wrong ? " wrong" : ""}` },
-        el("div", { class: "q", text: `second-order check on ${h.belief}` }),
+      ...secondOrder(snap).map((e) =>
         el(
           "div",
-          { class: "pair" },
-          el("span", { text: "the EU reads the UK as" }), el("b", { text: show(h.truly) }),
-          el("span", { text: "the UK imagines the EU reads" }), el("b", { text: show(h.imagined) }),
+          { class: `headline${e.wrong ? " wrong" : ""}` },
+          el("div", { class: "q", text: `second-order check on ${e.belief}` }),
+          el(
+            "div",
+            { class: "pair" },
+            el("span", { text: `${name(e.reader)} reads ${name(e.subject)} as` }),
+            el("b", { text: show(e.reads) }),
+            el("span", { text: `${name(e.subject)} imagines ${name(e.reader)} reads` }),
+            el("b", { text: show(e.imagined) }),
+          ),
+          el("div", { class: "verdict", text: e.wrong ? `✗ ${misjudged(e)}` : "✓ the two levels agree" }),
         ),
-        el("div", { class: "verdict", text: h.wrong ? "✗ the UK is wrong about what the EU concluded" : "✓ the two levels agree" }),
       ),
     );
-  } else {
-    $("headline").replaceChildren();
   }
 
   if (snap.models.error) {

@@ -112,7 +112,9 @@ def test_the_replay_reaches_no_model(played: list[Message]):
     assert all("reused from pin" in line for line in replayed)
 
 
-def test_the_headline_matches_the_story_at_each_round_end(played: list[Message], tmp_path: Path):
+def test_the_second_order_check_matches_the_story_at_each_round_end(
+    played: list[Message], tmp_path: Path
+):
     """
     The page's second-order check is the story's :class:`Mismatch`, measured again.
 
@@ -128,7 +130,13 @@ def test_the_headline_matches_the_story_at_each_round_end(played: list[Message],
     closes = [
         f for f in _frames(played, "live") if any(e["type"] == "RoundClosed" for e in f["events"])
     ]
-    assert [f["snapshot"]["headline"]["wrong"] for f in closes] == expected
+    eu_reads_uk = [
+        next(
+            e for e in f["snapshot"]["second_order"] if (e["reader"], e["subject"]) == ("eu", "uk")
+        )
+        for f in closes
+    ]
+    assert [e["wrong"] for e in eu_reads_uk] == expected
     assert expected[0], "the story's point: the UK is wrong after round one"
 
 
@@ -233,3 +241,20 @@ def test_a_bad_run_request_is_refused_with_the_reason(server: str):
         urllib.request.urlopen(request, timeout=5)
     assert refused.value.code == 400
     assert "unknown role" in json.loads(refused.value.read())["error"]
+
+
+def test_the_second_order_check_runs_both_ways(played: list[Message]):
+    """
+    Each side's read of the other, checked in both directions, not only the staged one.
+
+    The scripted story fools the UK, but a real model may misjudge either side or both,
+    and a page that only asked about the UK would report nothing when the EU is fooled.
+    """
+    final = _frames(played, "live")[-1]["snapshot"]["second_order"]
+    pairs = {(e["reader"], e["subject"]) for e in final}
+    assert pairs == {("eu", "uk"), ("uk", "eu")}
+    after_round_one = next(
+        f for f in _frames(played, "live") if any(e["type"] == "RoundClosed" for e in f["events"])
+    )["snapshot"]["second_order"]
+    wrong = {(e["reader"], e["subject"]) for e in after_round_one if e["wrong"]}
+    assert wrong == {("eu", "uk")}, "the story's mistake, and only that one, after round one"
