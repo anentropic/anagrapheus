@@ -7,6 +7,16 @@
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
+  <!-- Transport icons, drawn rather than typed: Unicode has no single-triangle "step"
+       glyphs, and the double-triangle ones render differently from font to font. -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="i-first" viewBox="0 0 16 16"><rect x="1" y="3" width="2" height="10"/><path d="M9 3v10L3.5 8zM15 3v10L9.5 8z"/></symbol>
+    <symbol id="i-prev" viewBox="0 0 16 16"><rect x="3" y="3" width="2" height="10"/><path d="M13 3v10L6 8z"/></symbol>
+    <symbol id="i-play" viewBox="0 0 16 16"><path d="M4 2.5v11L13 8z"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 16 16"><rect x="4" y="3" width="3" height="10"/><rect x="9" y="3" width="3" height="10"/></symbol>
+    <symbol id="i-next" viewBox="0 0 16 16"><rect x="11" y="3" width="2" height="10"/><path d="M3 3v10L10 8z"/></symbol>
+    <symbol id="i-last" viewBox="0 0 16 16"><rect x="13" y="3" width="2" height="10"/><path d="M7 3v10L12.5 8zM1 3v10L6.5 8z"/></symbol>
+  </svg>
   <header class="bar">
     <h1>negotiation <span class="sub">anagrapheus demo</span></h1>
     <form id="run-form" class="run">
@@ -33,11 +43,11 @@
       <div id="phases" class="phases"></div>
     </div>
     <div class="row scrub">
-      <button id="first" title="First frame (Home)">⏮</button>
-      <button id="prev" title="Previous frame (←)">◀</button>
-      <button id="play" title="Play (space)">▶</button>
-      <button id="next" title="Next frame (→)">▶︎|</button>
-      <button id="last" title="Latest frame (End)">⏭</button>
+      <button id="first" title="First (Home)" aria-label="First"><svg class="icon" aria-hidden="true"><use href="#i-first"/></svg></button>
+      <button id="prev" title="Previous (←)" aria-label="Previous"><svg class="icon" aria-hidden="true"><use href="#i-prev"/></svg></button>
+      <button id="play" title="Play (space)" aria-label="Play"><svg class="icon" aria-hidden="true"><use href="#i-play"/></svg></button>
+      <button id="next" title="Next (→)" aria-label="Next"><svg class="icon" aria-hidden="true"><use href="#i-next"/></svg></button>
+      <button id="last" title="Latest (End)" aria-label="Latest"><svg class="icon" aria-hidden="true"><use href="#i-last"/></svg></button>
       <input id="scrubber" type="range" min="0" max="0" value="0" aria-label="Frame">
       <label class="follow"><input id="follow" type="checkbox" checked> follow</label>
     </div>

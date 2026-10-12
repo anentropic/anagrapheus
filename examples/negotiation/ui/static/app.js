@@ -219,7 +219,8 @@ function renderTimeline() {
   scrubber.max = Math.max(0, stage.frames.length - 1);
   scrubber.value = Math.max(0, pos);
   $("follow").checked = state.follow;
-  $("play").textContent = state.playing ? "⏸" : "▶";
+  $("play").querySelector("use").setAttribute("href", state.playing ? "#i-pause" : "#i-play");
+  $("play").setAttribute("aria-label", state.playing ? "Pause" : "Play");
 
   // One chip per beat: setup, then each round's say/leak/read/close.
   const groups = beats(stage);

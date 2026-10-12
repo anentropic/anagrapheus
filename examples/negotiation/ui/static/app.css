@@ -65,6 +65,7 @@ button {
 }
 button:hover { border-color: var(--accent); }
 button:disabled { opacity: .5; cursor: default; }
+.icon { width: 14px; height: 14px; fill: currentColor; vertical-align: -2px; }
 
 /* ---- header ---------------------------------------------------------------------- */
 
