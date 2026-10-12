@@ -47,11 +47,9 @@ def test_a_party_is_shown_no_belief_from_another_partys_private_scope(table: Tab
     """R29, asserted on what the prompt was built from rather than on what it says."""
     other = next(p for p in PARTIES if p != party)
     clause = next(iter(table.clauses))
-    view = table.view(party).settled()
-
     for context in (
-        proposing(view, other, clause),
-        reading(view, other, clause, observed="eu offered: hold firm (testing)"),
+        proposing(table.view(party).settled(), other, clause),
+        reading(table.view(party).settled(), other, clause, observed="eu offered: hold firm"),
     ):
         scopes = _scopes(context)
         assert scopes, "the brief read beliefs, so the comparison is not vacuous"

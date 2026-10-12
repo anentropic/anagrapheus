@@ -21,7 +21,7 @@ from anagrapheus.timeline.registry import EventKey
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from anagrapheus.timeline.envelope import DomainEvent, StoredEvent
+    from anagrapheus.timeline.envelope import DomainEvent, Envelope, StoredEvent
     from anagrapheus.timeline.registry import EventTypeRegistry
     from anagrapheus.timeline.store import EventStore
 
@@ -85,9 +85,26 @@ class EventReader:
         self._upcasts = upcasts
         self._types = types
 
-    def read_raw(self, since_seq: int = 0, limit: int | None = None) -> Iterator[StoredEvent]:
-        """Yield stored events with payloads upcast to the latest known version."""
+    def read_raw(
+        self,
+        since_seq: int = 0,
+        limit: int | None = None,
+        *,
+        upto_seq: int | None = None,
+        where: Callable[[Envelope], bool] | None = None,
+    ) -> Iterator[StoredEvent]:
+        """
+        Yield stored events with payloads upcast to the latest known version.
+
+        ``upto_seq`` stops the read and ``where`` skips an event, both on the stored
+        envelope and *before* any upcast: an event the caller has excluded is never
+        touched, so it cannot fail a read it was never part of.
+        """
         for event in self._store.read(since_seq, limit):
+            if upto_seq is not None and event.seq > upto_seq:
+                return
+            if where is not None and not where(event.envelope):
+                continue
             env = event.envelope
             target = self._types.latest_version(env.namespace, env.type)
             version, payload = self._upcasts.apply(
@@ -106,10 +123,19 @@ class EventReader:
                 )
 
     def read(
-        self, since_seq: int = 0, limit: int | None = None
+        self,
+        since_seq: int = 0,
+        limit: int | None = None,
+        *,
+        upto_seq: int | None = None,
+        where: Callable[[Envelope], bool] | None = None,
     ) -> Iterator[tuple[StoredEvent, DomainEvent]]:
-        """Yield ``(stored, decoded)`` pairs: upcast, then validated into the model."""
-        for event in self.read_raw(since_seq, limit):
+        """
+        Yield ``(stored, decoded)`` pairs: upcast, then validated into the model.
+
+        ``upto_seq`` and ``where`` filter first, as for :meth:`read_raw`.
+        """
+        for event in self.read_raw(since_seq, limit, upto_seq=upto_seq, where=where):
             env = event.envelope
             key = EventKey(env.namespace, env.type, env.schema_version)
             yield event, self._types.decode(key, event.payload)

@@ -166,6 +166,44 @@ def test_a_log_slice_never_hands_out_what_admit_refuses(rig: Rig):
     assert all(isinstance(s, EventRef) for s in log.handed_out())
 
 
+def test_a_grant_must_be_frozen():
+    """Otherwise the assembler could swap a slice for a store after the check."""
+
+    @dataclass
+    class Mutable:
+        contract: Given[str]
+
+    with pytest.raises(TypeError, match="not frozen"):
+        assemble("narrator", lambda _g: [], Mutable(Given("contract", "c")))
+
+
+def test_a_grant_is_read_for_one_assembly_only():
+    """A reused grant would carry one call's reads into the next call's context."""
+    grant = Narrating(Given("contract", "c"))
+    assemble("narrator", lambda g: [Part("c", Register.binding, g.contract.value)], grant)
+
+    with pytest.raises(AssemblyError, match="already read"):
+        assemble("narrator", lambda _g: [], grant)
+
+
+def test_a_refused_event_is_never_decoded(rig: Rig):
+    """
+    A log slice filters before upcasting and decoding.
+
+    Read through a registry that does not know the library's belief events, every one
+    of them would fail to decode. Refused by `admit`, none of them is touched.
+    """
+    from anagrapheus.timeline import EventTypeRegistry
+
+    rig.commit(rig.asserted("location", uuid.uuid7()))
+    stranger = EventReader(rig.store, UpcastRegistry(), EventTypeRegistry())
+
+    def none(_env: Envelope) -> bool:
+        return False
+
+    assert LogSlice(stranger, upto_seq=rig.store.last_seq(), admit=none).events() == []
+
+
 def test_slices_at_two_positions_are_refused(rig: Rig):
     @dataclass(frozen=True)
     class Torn:
@@ -210,15 +248,31 @@ def _cite(sections: Sequence[Section], register: Register) -> list[Part]:
 
 def test_chronicle_prose_cited_as_canon_is_refused(rig: Rig):
     """R61 clause 4: model-written prose is advisory, and a prompt must not say otherwise."""
-    grant = Recalling(_chronicle(rig))
+    chronicle = _chronicle(rig)
 
-    with pytest.raises(MislabelledPart):
-        assemble("thinker", lambda g: _cite(g.chronicle.sections(), Register.considered), grant)
+    def again() -> Recalling:
+        return Recalling(
+            ChronicleSlice(SQLiteChronicleStore(rig.store.connection), upto_seq=chronicle.upto_seq)
+        )
+
+    with pytest.raises(MislabelledPart, match="cites chronicle prose"):
+        assemble("thinker", lambda g: _cite(g.chronicle.sections(), Register.considered), again())
 
     context = assemble(
-        "thinker", lambda g: _cite(g.chronicle.sections(), Register.generated), grant
+        "thinker", lambda g: _cite(g.chronicle.sections(), Register.generated), again()
     )
     assert [p.register for p in context.parts] == [Register.generated]
+
+
+def test_prose_cannot_lose_its_label_by_losing_its_citation(rig: Rig):
+    """Read a section and show it uncited, and it is still refused: it was read."""
+    grant = Recalling(_chronicle(rig))
+
+    def uncited(g: Recalling) -> list[Part]:
+        return [Part("recall", Register.considered, s.prose) for s in g.chronicle.sections()]
+
+    with pytest.raises(MislabelledPart, match="no generated part cites"):
+        assemble("thinker", uncited, grant)
 
 
 # -- the budget ------------------------------------------------------------------------

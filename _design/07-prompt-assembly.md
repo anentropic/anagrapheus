@@ -262,3 +262,22 @@ case.
 - **The summarizer's gate moved from rendering to reading.** `_render` used to skip
   `SideRemarkOverheard` while rendering. Now the summarizer's slice never hands it
   out, so a test can check the sources and not the wording.
+
+### 8a. What review round 1 changed
+
+Four findings, all real, and each one a bypass of something the note claims:
+
+- **A grant must be frozen.** Any dataclass was accepted, so an assembler could
+  replace a checked slice with a store after `assemble` checked it.
+- **A grant is read for one assembly.** Ledgers live on the slices, so a reused grant
+  carried the last call's reads into the next context and let a part cite what that
+  call never read. `assemble` now refuses a grant whose slices have already handed
+  something out.
+- **Every section read must be cited by a `generated` part.** Checking only the
+  citations a part lists let prose in under another register by leaving the citation
+  off. What remains unpreventable is an assembler that cites a section and also copies
+  its words into another part; structure cannot see text.
+- **A log slice filters before decoding.** `EventReader.read` and `read_raw` gained
+  `upto_seq` and `where`, applied to the stored envelope before any upcast, so an event
+  past the position or refused by `admit` cannot fail a read it was never part of.
+

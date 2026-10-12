@@ -89,7 +89,8 @@ class LogSlice:
     """
     Events up to ``upto_seq`` that ``admit`` accepts, decoded and upcast.
 
-    ``admit`` sees the envelope only, so a refused event is never decoded. It is where a
+    ``admit`` sees the stored envelope only, so a refused event is never upcast or
+    decoded. It is where a
     class gate goes — R58's "every projection declares which classes it folds" — and
     where an application keeps a private event out of a shared prompt.
     """
@@ -114,11 +115,9 @@ class LogSlice:
     def events(self, *, since_seq: int = 0) -> list[tuple[StoredEvent, DomainEvent]]:
         """Admitted events above ``since_seq`` and up to this slice's position."""
         out: list[tuple[StoredEvent, DomainEvent]] = []
-        for stored, decoded in self._reader.read(since_seq):
-            if stored.seq > self._upto:
-                break
-            if self._admit is not None and not self._admit(stored.envelope):
-                continue
+        # Filtered on the stored envelope before upcast and decode, so an event past
+        # this slice's position, or one `admit` refuses, is never touched at all.
+        for stored, decoded in self._reader.read(since_seq, upto_seq=self._upto, where=self._admit):
             self._ledger.note(EventRef(stored.seq, stored.envelope.event_id))
             out.append((stored, decoded))
         return out
