@@ -47,6 +47,11 @@ _VOLATILE = frozenset(
     {"timestamp", "id", "tool_call_id", "provider_name", "provider_details", "metadata"}
 )
 
+#: Request parameters about how the call is delivered, not what the model is asked.
+#: ``cache`` is prompt-caching configuration: the same prompt drawn with or without a
+#: cache hit is the same draw, the same reason ``model_settings`` stays out of the key.
+_DELIVERY = frozenset({"cache"})
+
 
 class CallPolicy(Protocol):
     """
@@ -134,11 +139,15 @@ class SemanticCallPolicy:
 
         Tool lists are sorted by name, because declaring the same capabilities in
         another order is the same capability set and the model is not told the order.
+        The fields in :data:`_DELIVERY` are dropped: they change how the request travels,
+        not what is drawn.
         """
         dumped = cast("Json", to_jsonable_python(parameters, fallback=repr))
         if not isinstance(dumped, dict):
             return dumped
-        return {key: self._ordered(key, value) for key, value in dumped.items()}
+        return {
+            key: self._ordered(key, value) for key, value in dumped.items() if key not in _DELIVERY
+        }
 
     @staticmethod
     def _ordered(field: str, value: Json) -> Json:

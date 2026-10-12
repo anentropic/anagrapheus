@@ -44,7 +44,7 @@ from doxastica import EdgeType
 from examples.negotiation import domain
 from examples.negotiation.nesting import reconstruct
 from examples.negotiation.scopes import held, stated
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from pydantic_ai import Agent, ModelRetry
 
 from anagrapheus.provider import PinnedModel, pinned_tool
@@ -61,6 +61,7 @@ if TYPE_CHECKING:
     from anagrapheus.timeline.pins import PinResolver
 
 __all__ = [
+    "BottomLine",
     "Negotiator",
     "Offer",
     "Reading",
@@ -79,6 +80,11 @@ class Offer(BaseModel):
     clause: str
     concede: bool
     because: str
+
+
+#: What a bottom line can be. The same words a position is stated and leaked in, so a
+#: reading compares with everything else the belief layer holds about a party.
+type BottomLine = Literal["concede", "hold_firm", "never"]
 
 
 class Reading(BaseModel):
@@ -105,6 +111,15 @@ class Reading(BaseModel):
     the model's prose, it goes to the transcript, and it never reaches a belief value.
     A belief whose value was a sentence is a belief no divergence query can compare, and
     the whole belief layer exists to compare them.
+
+    **And ``value`` was a bare ``str``, so a sentence is what it got.** The docstring
+    above said so and the type did not: asked for a bottom line, Claude Haiku 5.5 wrote
+    *"unknown: no confirmed furthest movement; 60/40 coastal-state split is a reference
+    range, not a stated limit"* -- a fine sentence, stored as a belief value, read back
+    into the next brief, and compared with nothing. The scripted model and the recorded
+    real route had only ever used three words, so the vocabulary existed in the data and
+    nowhere else. It is :data:`BottomLine` now, described in the schema the model is
+    shown, and a value outside it is sent back like a misnamed clause.
     """
 
     #: A seated party, by the name the brief used.
@@ -112,8 +127,13 @@ class Reading(BaseModel):
     #: A tabled clause, by title.
     clause: str
     predicate: Literal["red_line"]
-    #: The position itself — ``"concede"``, ``"never"``, whatever the domain says.
-    value: str
+    value: BottomLine = Field(
+        description=(
+            "Their bottom line, as one of three words. 'concede': they will give way on "
+            "this clause. 'hold_firm': they will not move yet, but have not ruled it "
+            "out. 'never': they will not give way at all. Put any nuance in `because`."
+        )
+    )
     #: Why, in the model's words. For the reader, not for the store.
     because: str
 
@@ -354,7 +374,8 @@ class Negotiator:
             f"{observed}\n\n"
             f"{brief_for(self._view, other, clause)}\n\n"
             f"Record one conclusion about {other}: their bottom line, the furthest "
-            f"they will move on this clause.",
+            f"they will move on this clause -- concede, hold_firm or never. Your "
+            f"reasoning goes in `because`, not in the value.",
             deps=_Asked(other, clause),
         ).output
 

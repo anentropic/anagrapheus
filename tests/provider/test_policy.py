@@ -191,6 +191,20 @@ def test_capabilities_beyond_the_function_tools_are_keyed():
     assert plain != thinking
 
 
+def test_prompt_caching_does_not_change_the_key():
+    """
+    A cache hit serves the same prompt for less; the model is asked nothing different.
+
+    Reducing by exclusion keys every field pydantic-ai adds, which is the safe default,
+    but ``cache`` arrived between pydantic-ai 2.42 and 2.55 and re-keyed every committed
+    corpus.
+    """
+    plain = POLICY.material([], "m", ModelRequestParameters())
+    cached = POLICY.material([], "m", ModelRequestParameters(cache="1h"))
+
+    assert plain == cached
+
+
 def test_tool_order_does_not_change_the_key():
     """
     The same tools declared in another order are the same capability set.

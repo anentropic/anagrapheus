@@ -570,3 +570,45 @@ def test_everything_said_is_believed_to_have_been_heard(table: Table):
         ]
         assert len(witnessed) == 4, "two offers, each believed heard by both parties"
     assert table.model_held_by("eu", "uk").beliefs, "and the model built from them is not empty"
+
+
+def test_a_bottom_line_written_as_a_sentence_is_sent_back(table: Table):
+    """
+    A reading's value is one of three words, and a sentence is returned to the model.
+
+    Found live: Claude Haiku 5.5 answered a bottom line with *"unknown: no confirmed
+    furthest movement; 60/40 coastal-state split is a reference range, not a stated
+    limit"*, and with ``value: str`` that sentence became a belief value -- read back
+    into the next brief and comparable with nothing. The schema refuses it now; the
+    nuance belongs in ``because``.
+    """
+    _opened(table)
+    told: list[str] = []
+
+    def hedges(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        """Answer in prose until told the value is a choice of three."""
+        retries = [
+            part
+            for message in messages
+            if isinstance(message, ModelRequest)
+            for part in message.parts
+            if isinstance(part, RetryPromptPart)
+        ]
+        told.extend(str(part.content) for part in retries)
+        args = {
+            "about": "uk",
+            "clause": CLAUSE,
+            "predicate": "red_line",
+            "value": "hold_firm" if retries else "unknown: no confirmed furthest movement",
+            "because": "they have not moved, and nothing says they cannot",
+        }
+        return ModelResponse(parts=[ToolCallPart("final_result", args)])
+
+    ledger = PinLedger(table.store, table.types)
+    reading = _agents(table, FunctionModel(hedges), ledger)["eu"].update(
+        "uk", CLAUSE, observed="uk offered: hold firm"
+    )
+
+    assert reading.value == "hold_firm"
+    assert told, "the model was never told what was wrong"
+    assert "concede" in told[0] and "never" in told[0], "the retry names the choices"

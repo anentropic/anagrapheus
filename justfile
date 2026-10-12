@@ -24,6 +24,16 @@ docs-serve port="8000":
     uvx git-cliff -o CHANGELOG.md
     uv run mkdocs serve --dev-addr 127.0.0.1:{{port}} --livereload
 
+# Run the negotiation demo with API keys from .env; pass --model specs, or none for scripted
+[positional-arguments]
+demo *args:
+    uv run --env-file .env python -m examples.negotiation "$@"
+
+# Watch the negotiation in a browser: beliefs, derived models, and every model call
+[positional-arguments]
+demo-ui *args:
+    uv run --env-file .env python -m examples.negotiation.ui "$@"
+
 # Re-record the committed pin corpora after a deliberate prompt change; commit the diff
 record-fixtures:
     uv run python -m tests.fixtures.record

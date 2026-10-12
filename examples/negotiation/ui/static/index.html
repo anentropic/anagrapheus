@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>anagrapheus · negotiation</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <!-- Transport icons, drawn rather than typed: Unicode has no single-triangle "step"
+       glyphs, and the double-triangle ones render differently from font to font. -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="i-first" viewBox="0 0 16 16"><rect x="1" y="3" width="2" height="10"/><path d="M9 3v10L3.5 8zM15 3v10L9.5 8z"/></symbol>
+    <symbol id="i-prev" viewBox="0 0 16 16"><rect x="3" y="3" width="2" height="10"/><path d="M13 3v10L6 8z"/></symbol>
+    <symbol id="i-play" viewBox="0 0 16 16"><path d="M4 2.5v11L13 8z"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 16 16"><rect x="4" y="3" width="3" height="10"/><rect x="9" y="3" width="3" height="10"/></symbol>
+    <symbol id="i-next" viewBox="0 0 16 16"><rect x="11" y="3" width="2" height="10"/><path d="M3 3v10L10 8z"/></symbol>
+    <symbol id="i-last" viewBox="0 0 16 16"><rect x="13" y="3" width="2" height="10"/><path d="M7 3v10L12.5 8zM1 3v10L6.5 8z"/></symbol>
+  </svg>
+  <header class="bar">
+    <h1>negotiation <span class="sub">anagrapheus demo</span></h1>
+    <form id="run-form" class="run">
+      <label for="models" class="visually-hidden">Model specs</label>
+      <input id="models" name="models" spellcheck="false" autocomplete="off"
+             placeholder="scripted (offline) — or e.g. anthropic:claude-haiku-5-5  update=…">
+      <button type="submit" id="run-button">Run</button>
+    </form>
+    <div class="modes" role="group" aria-label="View">
+      <button type="button" data-mode="story" title="Plain language, one step of the story at a time">Story</button>
+      <button type="button" data-mode="workings" title="Every belief, derived model, event and model call">Workings</button>
+    </div>
+    <div id="status" class="status idle" role="status">idle</div>
+  </header>
+  <div id="run-error" class="banner error" role="alert" hidden></div>
+  <div id="verdict" class="banner ok" role="status" hidden></div>
+
+  <section class="timeline" aria-label="Timeline">
+    <div class="row">
+      <div class="tabs" role="tablist">
+        <button role="tab" data-stage="live" class="tab active" aria-selected="true">Live run</button>
+        <button role="tab" data-stage="replay" class="tab" aria-selected="false">Replay <span class="hint">fresh store, no model</span></button>
+      </div>
+      <div id="phases" class="phases"></div>
+    </div>
+    <div class="row scrub">
+      <button id="first" title="First (Home)" aria-label="First"><svg class="icon" aria-hidden="true"><use href="#i-first"/></svg></button>
+      <button id="prev" title="Previous (←)" aria-label="Previous"><svg class="icon" aria-hidden="true"><use href="#i-prev"/></svg></button>
+      <button id="play" title="Play (space)" aria-label="Play"><svg class="icon" aria-hidden="true"><use href="#i-play"/></svg></button>
+      <button id="next" title="Next (→)" aria-label="Next"><svg class="icon" aria-hidden="true"><use href="#i-next"/></svg></button>
+      <button id="last" title="Latest (End)" aria-label="Latest"><svg class="icon" aria-hidden="true"><use href="#i-last"/></svg></button>
+      <input id="scrubber" type="range" min="0" max="0" value="0" aria-label="Frame">
+      <label class="follow"><input id="follow" type="checkbox" checked> follow</label>
+    </div>
+    <div id="frame-label" class="frame-label">no frames yet — press Run</div>
+  </section>
+
+  <section id="plain" class="plain" aria-label="The story so far">
+    <details class="intro" id="intro">
+      <summary>What am I looking at?</summary>
+      <p>Two AI negotiators, one for the EU and one for the UK, bargain over a single clause.
+        Each has a <b>private goal</b>, says things <b>in public</b>, and builds a picture of
+        what the other side wants, and of what the other side thinks <em>it</em> knows.</p>
+      <p>Everything that happens is written to a log, and each side's beliefs are worked out
+        from what it could have seen. So a side can be wrong, for example if it thinks a slip
+        went unnoticed when it didn't. That gap is the point of the demo.</p>
+      <p>Step through with <b>◀ ▶</b> or the arrow keys. After the live run, the whole thing is
+        <b>replayed</b> from the log alone: the same story, with no AI called at all.</p>
+    </details>
+    <div id="plain-body"></div>
+  </section>
+
+  <main class="grid">
+    <section class="panel" aria-labelledby="beliefs-h">
+      <h2 id="beliefs-h">What each party holds <span class="hint">stored scopes</span></h2>
+      <div id="beliefs"></div>
+    </section>
+
+    <section class="panel" aria-labelledby="minds-h">
+      <h2 id="minds-h">Minds as modelled <span class="hint">derived on demand, never stored</span></h2>
+      <div id="headline"></div>
+      <div id="model-cards"></div>
+      <h3>Chronicle <span class="hint">advisory prose, one per closed round</span></h3>
+      <ol id="chronicle" class="chronicle"></ol>
+    </section>
+
+    <section class="panel activity" aria-labelledby="activity-h">
+      <h2 id="activity-h">Backend activity</h2>
+      <div class="filters" id="filters">
+        <label><input type="checkbox" data-cat="model" checked> model &amp; tool calls</label>
+        <label><input type="checkbox" data-cat="round" checked> round steps</label>
+        <label><input type="checkbox" data-cat="pins" checked> pins &amp; chronicle</label>
+        <label><input type="checkbox" data-cat="store"> store &amp; folds</label>
+      </div>
+      <ol id="log" class="log"></ol>
+    </section>
+  </main>
+
+  <section class="panel events" aria-labelledby="events-h">
+    <h2 id="events-h">Event log <span class="hint">the only canon; click a row for its payload</span></h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>seq</th><th>type</th><th>what happened</th></tr></thead>
+        <tbody id="events"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <details class="panel story" id="story-panel">
+    <summary>The story, as the command-line demo prints it</summary>
+    <div id="story"></div>
+  </details>
+
+  <script src="/static/plain.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

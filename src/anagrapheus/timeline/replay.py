@@ -10,6 +10,7 @@ run continuing the same history, announced — never a different run wearing the
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Literal, Self, cast
@@ -34,6 +35,8 @@ if TYPE_CHECKING:
 
 
 __all__ = ["Divergence", "PinMiss", "ReplayPins"]
+
+_log = logging.getLogger(__name__)
 
 type ExtractFn = Callable[[StoredEvent, DomainEvent], tuple[PinKey, Json] | None]
 
@@ -285,6 +288,7 @@ class ReplayPins:
     def _miss(self, key: PinKey, kind: str) -> None:
         """Apply the ``on_miss`` policy: raise, or announce the first and carry on."""
         miss = Divergence(missed_key=key, kind=kind, after_hits=self._hits)
+        _log.warning("replay missed %s after %d hit(s) (%s)", key, self._hits, self._on_miss)
         if self._on_miss == "strict":
             if self._divergence is None:
                 self._divergence = miss

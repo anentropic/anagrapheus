@@ -29,6 +29,8 @@ from __future__ import annotations
 
 import functools
 import inspect
+import logging
+import time
 from typing import TYPE_CHECKING, Any, cast, get_origin, get_type_hints
 
 from anyio.to_thread import run_sync
@@ -44,6 +46,8 @@ if TYPE_CHECKING:
     from anagrapheus.timeline.pins import PinResolver
 
 __all__ = ["PIN_KIND", "pinned_tool"]
+
+_log = logging.getLogger(__name__)
 
 #: The pin kind every tool invocation is recorded under.
 PIN_KIND = "tool_call"
@@ -130,7 +134,13 @@ def pinned_tool[**P, R](
 
     @functools.wraps(func)
     async def pinned(*args: P.args, **kwargs: P.kwargs) -> Any:  # noqa: ANN401
+        drawn = False
+        started = time.perf_counter()
+        asked = material(args, kwargs)
+
         async def draw() -> Any:  # noqa: ANN401
+            nonlocal drawn
+            drawn = True
             if inspect.iscoroutinefunction(func):
                 return await cast("Any", func(*args, **kwargs))
             # Offloaded so a slow tool does not block the loop, exactly as pydantic-ai
@@ -142,11 +152,30 @@ def pinned_tool[**P, R](
             # does, which is the one thing a wrapper must not do.
             return await result if inspect.isawaitable(result) else result
 
-        return await resolver.resolve_async(
-            pin_key(kind, material(args, kwargs)),
-            kind=kind,
-            effect=draw,
-            interpret=lambda raw: raw,
+        key = pin_key(kind, asked)
+        try:
+            result = await resolver.resolve_async(
+                key, kind=kind, effect=draw, interpret=lambda raw: raw
+            )
+        except Exception as error:
+            _log.warning(
+                "tool %s(%s) failed after %.2fs: %s %s",
+                tool_name,
+                asked["arguments"],
+                time.perf_counter() - started,
+                error,
+                key,
+            )
+            raise
+        _log.info(
+            "tool %s(%s) %s in %.2fs -> %r %s",
+            tool_name,
+            asked["arguments"],
+            "drawn" if drawn else "reused from pin",
+            time.perf_counter() - started,
+            result,
+            key,
         )
+        return result
 
     return cast("Callable[P, Coroutine[Any, Any, R]]", pinned)

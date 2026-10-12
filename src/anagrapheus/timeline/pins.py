@@ -20,6 +20,7 @@ material — is the application's to own. This module owns the mechanism.
 
 from __future__ import annotations
 
+import logging
 import uuid
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Protocol, cast
@@ -51,6 +52,8 @@ __all__ = [
     "pin_key",
     "register_builtin_events",
 ]
+
+_log = logging.getLogger(__name__)
 
 type PinKey = str
 
@@ -325,6 +328,7 @@ class PinLedger:
             # the value never has to stand in for "nothing".
             return False, None
         self._store.scratch_bump(self.unit_id, key)
+        _log.debug("pin reused: %s", key)
         # The stored value round-tripped through JSON; the key guarantees it is
         # the same draw this effect would have produced.
         return True, existing.result
@@ -339,6 +343,7 @@ class PinLedger:
         self._store.scratch_put(
             ScratchRow(unit_id=self.unit_id, pin_key=key, kind=kind, result=raw, attempts=1)
         )
+        _log.debug("pin drawn: %s", key)
         return raw
 
     def commit(self, *, correlation_id: UUID | None = None) -> int:
@@ -354,6 +359,7 @@ class PinLedger:
             batch = [self._promotion(row, correlation_id) for row in rows]
             last_seq = self._store.append(batch) if batch else self._store.last_seq()
             self._store.scratch_clear(self.unit_id)
+        _log.info("committed %d pin(s) from unit %s into the log", len(rows), self.unit_id)
         return last_seq
 
     def abandon(self, *, reason: str = "") -> int:
@@ -374,6 +380,7 @@ class PinLedger:
         with self._store.transaction():
             last_seq = self._store.append([self._registry.pending(summary)])
             self._store.scratch_clear(self.unit_id)
+        _log.warning("abandoned unit %s, discarding %d pin(s): %s", self.unit_id, len(rows), reason)
         return last_seq
 
     def _promotion(self, row: ScratchRow, correlation_id: UUID | None) -> PendingEvent:

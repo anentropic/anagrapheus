@@ -22,6 +22,7 @@ already running on a projector of its own.
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, NamedTuple, Protocol
 
 from anagrapheus.chronicle.sections import Anchor, Section
@@ -37,6 +38,8 @@ if TYPE_CHECKING:
     from anagrapheus.timeline.upcast import EventReader
 
 __all__ = ["Consolidation", "ChronicleFold", "Summarizer", "UnitBoundary", "FOLD_NAME"]
+
+_log = logging.getLogger(__name__)
 
 #: The default position key.
 FOLD_NAME = "chronicle"
@@ -151,7 +154,9 @@ class ChronicleFold:
         events = list(self._reader.read_raw(since_seq=start - 1, limit=event.seq - start + 1))
         if not events:
             return
-        self._prepared[event.seq] = (start, self._summarize(events))
+        drawn = self._summarize(events)
+        _log.info("consolidated seq %d..%d: %s", start, event.seq, drawn.prose)
+        self._prepared[event.seq] = (start, drawn)
 
     def apply(self, event: StoredEvent, txn: object) -> None:
         """Write what :meth:`prepare` drew. Nothing slow happens here."""

@@ -13,12 +13,15 @@ that reached it, which is most of what replay is for.
 
 from __future__ import annotations
 
+import logging
+import time
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import TypeAdapter
 from pydantic_ai.messages import ModelResponse
 from pydantic_ai.models.wrapper import WrapperModel
+from pydantic_core import to_jsonable_python
 
 from anagrapheus.provider.policy import SemanticCallPolicy
 from anagrapheus.provider.stream import PinnedStreamedResponse
@@ -43,6 +46,8 @@ __all__ = ["PIN_KIND", "PinnedModel"]
 PIN_KIND = "model_call"
 
 _RESPONSE = TypeAdapter(ModelResponse)
+
+_log = logging.getLogger(__name__)
 
 
 class PinnedModel(WrapperModel):
@@ -98,12 +103,21 @@ class PinnedModel(WrapperModel):
         is *asked*. An application that disagrees supplies its own policy.
         """
         key = self._key(messages, model_request_parameters)
-        return await self._resolver.resolve_async(
-            key,
-            kind=self._kind,
-            effect=lambda: self._draw(messages, model_settings, model_request_parameters),
-            interpret=_interpret,
-        )
+        call = _Call(self, key, messages, model_request_parameters)
+
+        async def draw() -> Json:
+            call.drawn = True
+            return await self._draw(messages, model_settings, model_request_parameters)
+
+        try:
+            response = await self._resolver.resolve_async(
+                key, kind=self._kind, effect=draw, interpret=_interpret
+            )
+        except Exception as error:
+            call.failed(error)
+            raise
+        call.done(response)
+        return response
 
     @asynccontextmanager
     async def request_stream(
@@ -128,8 +142,10 @@ class PinnedModel(WrapperModel):
         miss.
         """
         key = self._key(messages, model_request_parameters)
+        call = _Call(self, key, messages, model_request_parameters)
 
         def live() -> AbstractAsyncContextManager[StreamedResponse]:
+            call.drawn = True
             return super(PinnedModel, self).request_stream(
                 messages, model_settings, model_request_parameters, run_context
             )
@@ -140,14 +156,22 @@ class PinnedModel(WrapperModel):
                 pinned=_interpret(raw),
             )
 
-        async with self._resolver.resolve_stream(
-            key,
-            kind=self._kind,
-            effect=live,
-            capture=_capture,
-            interpret=replayed,
-        ) as stream:
-            yield stream
+        # Around the whole context, not only the caller's use of the stream: opening it
+        # can fail (the provider refuses), and so can closing it (the pin is written on
+        # the way out). Success is logged only once the stream has closed cleanly.
+        try:
+            async with self._resolver.resolve_stream(
+                key,
+                kind=self._kind,
+                effect=live,
+                capture=_capture,
+                interpret=replayed,
+            ) as stream:
+                yield stream
+        except Exception as error:
+            call.failed(error)
+            raise
+        call.done(stream.get())
 
     def _key(self, messages: list[ModelMessage], parameters: ModelRequestParameters) -> PinKey:
         """Build this call's key, and report it to ``on_key`` if one was given."""
@@ -187,3 +211,89 @@ def _interpret(raw: Json) -> ModelResponse:
     and a shape the validator would reject fails at the draw rather than a run later.
     """
     return _RESPONSE.validate_python(raw)
+
+
+class _Call:
+    """
+    One request's log line, timed from the key to the answer.
+
+    ``drawn`` is set by the effect itself, which is the only reliable witness: the
+    resolver decides whether to draw and does not say which it chose, and a reused pin
+    and a fresh draw return the same type. The DEBUG record carries the conversation and
+    the answer as ``detail`` -- structured, for a handler that wants to show them -- and
+    is built only when something is listening at that level, since it serializes the
+    whole conversation.
+    """
+
+    def __init__(
+        self,
+        model: PinnedModel,
+        key: PinKey,
+        messages: list[ModelMessage],
+        parameters: ModelRequestParameters,
+    ) -> None:
+        self.model = model
+        self.key = key
+        self.messages = messages
+        self.parameters = parameters
+        self.drawn = False
+        self.started = time.perf_counter()
+
+    def done(self, response: ModelResponse) -> None:
+        seconds = time.perf_counter() - self.started
+        usage = response.usage
+        _log.info(
+            "%s %s %s in %.2fs (%d in / %d out tokens) %s",
+            self.model.model_id,
+            self.model._kind,
+            "drawn" if self.drawn else "reused from pin",
+            seconds,
+            usage.input_tokens,
+            usage.output_tokens,
+            self.key,
+            extra={"detail": self._detail(seconds, response)}
+            if _log.isEnabledFor(logging.DEBUG)
+            else {},
+        )
+
+    def failed(self, error: Exception) -> None:
+        _log.warning(
+            "%s %s failed after %.2fs: %s",
+            self.model.model_id,
+            self.model._kind,
+            time.perf_counter() - self.started,
+            error,
+        )
+
+    def _detail(self, seconds: float, response: ModelResponse) -> dict[str, Json]:
+        params = self.parameters
+        return {
+            "model": self.model.model_id,
+            "kind": self.model._kind,
+            "key": self.key,
+            "drawn": self.drawn,
+            "seconds": round(seconds, 3),
+            "usage": {
+                "input_tokens": response.usage.input_tokens,
+                "output_tokens": response.usage.output_tokens,
+            },
+            "tools": [t.name for t in params.function_tools],
+            "output_tools": [t.name for t in params.output_tools],
+            "request": [_message(m) for m in self.messages],
+            "response": _message(response),
+        }
+
+
+#: The part fields worth reading; the rest is bookkeeping (see the call policy).
+_SHOWN = ("part_kind", "content", "tool_name", "args")
+
+
+def _message(message: ModelMessage) -> Json:
+    """One message as its parts' readable content, for a log handler to render."""
+    parts: list[Json] = []
+    for part in message.parts:
+        dumped = to_jsonable_python(part, fallback=repr)
+        if isinstance(dumped, dict):
+            fields = cast("dict[str, Json]", dumped)
+            parts.append({k: fields[k] for k in _SHOWN if k in fields})
+    return {"kind": message.kind, "parts": parts}

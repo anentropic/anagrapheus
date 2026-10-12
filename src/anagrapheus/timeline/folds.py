@@ -21,6 +21,7 @@ but so is a portrait regenerator or any other read model whose content a model w
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Literal, Protocol, cast
 
 from anagrapheus.timeline.errors import TimelineError
@@ -40,6 +41,8 @@ __all__ = [
     "ProjectionFold",
     "Projector",
 ]
+
+_log = logging.getLogger(__name__)
 
 #: A fold's replay grade. ``"deterministic"`` folds satisfy fold-replay: same log, same
 #: projection. ``"generative"`` folds do not — their ``apply`` draws from a model, so
@@ -243,6 +246,7 @@ class Projector:
             for event in batch:
                 fold.apply(event, None)
             self._store.commit_position(fold.name, new_position)
+        _log.debug("fold %s: %d -> %d (%d event(s))", fold.name, position, new_position, len(batch))
         return new_position
 
     def positions(self) -> Iterator[tuple[str, int]]:
