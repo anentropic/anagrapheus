@@ -191,6 +191,50 @@ def test_an_edge_survives_a_rebuild(rig: Rig):
     assert [(s.scope_id, s.value) for s in reached] == [("analyst", "BBC")]
 
 
+def test_a_crash_between_a_state_and_its_edge_loses_neither(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch
+):
+    """
+    The state is in doxastica and the position rolled back, so the retry must lay the edge.
+
+    Skipping a state already folded is not enough: the crash can fall after the state
+    was written and before its edges were, and a retry that skipped the whole operation
+    would commit the position with the dependency lost for good.
+    """
+    alice = uuid.uuid7()
+    premise = rig.believer("agent").revise("location", (alice,), "London")
+    rig.append(
+        rig.events.revise(
+            "analyst", "employer", (alice,), "BBC", edges=(Edge(StateRef.of(premise)),)
+        )
+    )
+
+    def crash(*_args: object) -> None:
+        raise RuntimeError("the process died here")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(rig.core, "add_edge", crash)
+        with pytest.raises(RuntimeError):
+            rig.projector.catch_up()
+    assert len(rig.core.query_scope("analyst", BeliefFilter())) == 1, "the state got in"
+
+    rig.projector.catch_up()
+
+    assert len(rig.core.query_scope("analyst", BeliefFilter())) == 1, "and only once"
+    reached = rig.core.get_impact(premise.state_id).reached
+    assert [(s.scope_id, s.value) for s in reached] == [("analyst", "BBC")]
+
+
+def test_an_unresolved_edge_refuses_the_operation_before_writing_it(rig: Rig):
+    """Targets resolve first, so a refused operation leaves no state behind without its edge."""
+    ghost = StateRef("agent", rig.predicates.belief_id("location", uuid.uuid7()), uuid.uuid7())
+    rig.append(rig.events.revise("agent", "location", (uuid.uuid7(),), "x", edges=(Edge(ghost),)))
+
+    with pytest.raises(UnresolvedStateRef):
+        rig.projector.catch_up()
+    assert rig.core.query_scope("agent", BeliefFilter()) == []
+
+
 def test_an_edge_to_a_state_the_log_does_not_hold_is_refused(rig: Rig):
     """The store would lay nothing and say nothing; the fold says so."""
     ghost = StateRef("agent", rig.predicates.belief_id("location", uuid.uuid7()), uuid.uuid7())

@@ -252,8 +252,12 @@ coincide, which is the case that motivated wanting them to.
 
 `Projector` commits a fold's position inside the log's transaction. doxastica is not
 in it, so a crash between the two re-applies the last batch, and `revise` is not
-idempotent. The fold therefore skips any operation whose scope already holds a state
-for this belief sourced from this event, found through `get_revision_chain`. That is
+idempotent. So an operation whose scope already holds a state for this belief sourced
+from this event, found through `get_revision_chain`, reuses that state rather than
+writing another, and lays its edges again, because a crash can fall between a state
+and its edges and `add_edge` is idempotent. Every edge target also resolves before
+anything is written, so an unresolvable edge refuses its operation whole. Recognising
+the state is
 exact rather than heuristic because of the source rule, and because one event may
 write one proposition in one scope **at most once**. An interpreter that writes it
 twice is refused: the second write could not be told apart from a replay of the

@@ -12,10 +12,12 @@ and identical in everything else.
 
 - **Idempotence.** :class:`~anagrapheus.timeline.folds.Projector` commits a fold's
   position in the store's transaction, and doxastica is not in it, so a crash between
-  the two re-applies the last batch. doxastica's ``revise`` is not idempotent, so each
-  operation is skipped if the scope already holds a state carrying this event's id for
-  this belief. That is exact, because a state's ``source_event_id`` is always the event
-  it was folded from (see :mod:`~anagrapheus.beliefs.ops`) and one event may write a
+  the two re-applies the last batch. doxastica's ``revise`` is not idempotent, so an
+  operation whose scope already holds a state carrying this event's id for this belief
+  reuses that state instead of writing another, and lays its edges again (``add_edge``
+  is idempotent), since a crash can fall between the state and its edges. Recognising
+  the state is exact, because a state's ``source_event_id`` is always the event it was
+  folded from (see :mod:`~anagrapheus.beliefs.ops`) and one event may write a
   proposition in a scope at most once.
 - **Determinism.** The fold mints through the registry it holds and the interpreter is
   required to be pure. Edges name their target by :class:`~anagrapheus.beliefs.ops.StateRef`,
@@ -40,7 +42,7 @@ from typing import TYPE_CHECKING
 
 from anagrapheus.beliefs.errors import UnresolvedStateRef
 from anagrapheus.beliefs.events import BUILTIN_INTERPRETERS
-from anagrapheus.beliefs.ops import Contract, Expand, Revise
+from anagrapheus.beliefs.ops import Contract, Revise
 from anagrapheus.beliefs.store import BeliefRow
 from anagrapheus.timeline.registry import EventKey
 
@@ -157,21 +159,26 @@ class BeliefFold:
         minted = self._predicates.mint(op.predicate, *op.entity_ids)
         belief_id = self._predicates.render(minted)
         self._index.minted(BeliefRow(belief_id, op.predicate, minted.entity_ids, seq))
-        if self._written(op.scope_id, belief_id, event_id) is not None:
-            _log.debug("skip %s in %s: already folded from %s", belief_id, op.scope_id, event_id)
-            return
-        match op:
-            case Revise():
-                state = self._store.revise(op.scope_id, belief_id, op.value, event_id, op.stance)
-            case Expand():
-                state = self._store.expand(op.scope_id, belief_id, op.value, event_id, op.stance)
-            case Contract():
+        if isinstance(op, Contract):
+            if self._written(op.scope_id, belief_id, event_id) is None:
                 self._store.contract(op.scope_id, belief_id, event_id)
                 _log.debug("contract %s: %s", op.scope_id, belief_id)
-                return
+            return
+        # Every target resolves before anything is written, so an edge the log cannot
+        # satisfy refuses the operation whole rather than leaving its state half-laid.
+        targets = [(self._resolve(edge.to), edge.type) for edge in op.edges]
+        state = self._written(op.scope_id, belief_id, event_id)
+        if state is not None:
+            # A replay of a batch that was cut short: the state may be here and its
+            # edges not, so they are laid again below. `add_edge` is idempotent.
+            _log.debug("reuse %s in %s: already folded from %s", belief_id, op.scope_id, event_id)
+        elif isinstance(op, Revise):
+            state = self._store.revise(op.scope_id, belief_id, op.value, event_id, op.stance)
+        else:
+            state = self._store.expand(op.scope_id, belief_id, op.value, event_id, op.stance)
         _log.debug("%s %s: %s = %r", type(op).__name__.lower(), op.scope_id, belief_id, op.value)
-        for edge in op.edges:
-            self._store.add_edge(state.state_id, self._resolve(edge.to).state_id, edge.type)
+        for target, edge_type in targets:
+            self._store.add_edge(state.state_id, target.state_id, edge_type)
 
     def state(self, ref: StateRef) -> BeliefState | None:
         """
