@@ -46,6 +46,8 @@ from examples.negotiation.scopes import held, stated
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent, ModelRetry
 
+from anagrapheus.assembly import Given, Part, Register, SectionRef, assemble
+from anagrapheus.beliefs import StateRef
 from anagrapheus.provider import PinnedModel, pinned_tool
 
 if TYPE_CHECKING:
@@ -57,6 +59,7 @@ if TYPE_CHECKING:
     from pydantic_ai.models import Model
     from pydantic_ai.tools import RunContext
 
+    from anagrapheus.assembly import Context
     from anagrapheus.timeline.pins import PinResolver
 
 __all__ = [
@@ -65,7 +68,14 @@ __all__ = [
     "Offer",
     "Reading",
     "UnrecordableOutput",
+    "Proposing",
+    "Updating",
     "brief_for",
+    "brief_parts",
+    "proposing",
+    "reading",
+    "render_proposing",
+    "render_reading",
     "precedent_tool",
     "record_offer",
     "check_reading",
@@ -200,6 +210,18 @@ def brief_for(view: PartyView, other: str, clause: str) -> str:
     confidently about the wrong proposition — the kind of wrong that never raises. It
     has happened here once; note 06 §5b records it.
     """
+    return "\n".join(str(part.content) for part in brief_parts(view, other, clause))
+
+
+def brief_parts(view: PartyView, other: str, clause: str) -> list[Part]:
+    """
+    :func:`brief_for` as parts: one per line, each citing the belief it read.
+
+    All ``considered``. A brief is what this party believes, and believing is not
+    binding: the model may weigh any line against the others. The modelled line cites
+    nothing, because it is derived from many beliefs rather than read from one; the
+    view still records every belief the derivation read.
+    """
     wanted = view.position_id(view.party, clause)
     theirs = view.position_id(other, clause)
 
@@ -213,13 +235,152 @@ def brief_for(view: PartyView, other: str, clause: str) -> str:
     # Our own scope, so readable; a belief *about* them, so R28's exception applies.
     concluded = view.own_belief(view.red_line_id(other, clause))
 
+    def line(slot: str, text: str, state: BeliefState | None = None) -> Part:
+        cites = () if state is None else (StateRef.of(state),)
+        return Part(slot, Register.considered, text, sources=cites)
+
+    return [
+        line("clause", f"Clause: {clause}"),
+        line("ours", f"Our position: {'unknown' if ours is None else ours.value}", ours),
+        line(
+            "theirs",
+            f"Their stated position: {'unknown' if said is None else said.value}",
+            said,
+        ),
+        line(
+            "modelled",
+            f"What we believe they actually want: {'unknown' if modelled is None else modelled}",
+        ),
+        line(
+            "concluded",
+            f"Our read of their bottom line: {'unknown' if concluded is None else concluded.value}",
+            concluded,
+        ),
+    ]
+
+
+# ---- what each call is shown -----------------------------------------------------------
+#
+# One grant and one assembler per pinned call. The grant is what the call may read and
+# nothing else, and the context it produces knows every source it was built from (note
+# 07). The renderers reproduce the prompts M8 sent byte for byte, which is the bar the
+# committed recordings hold this to: a different byte is a pin miss.
+
+
+@dataclass(frozen=True)
+class Proposing:
+    """What a party is granted to propose: its own view. Nothing else at the table."""
+
+    view: PartyView
+
+
+@dataclass(frozen=True)
+class Updating:
+    """What a party is granted to read the round: its view, and what it saw happen."""
+
+    view: PartyView
+    observed: Given[str]
+
+
+def proposing(view: PartyView, other: str, clause: str) -> Context:
+    """
+    The propose call's context: the ask, the brief, and the rounds so far as summarised.
+
+    The summaries are ``generated``: chronicle prose is advisory, and the label is
+    structure now rather than a sentence in the prompt (note 07 §1).
+    """
+
+    def assembler(grant: Proposing) -> list[Part]:
+        ask = Part(
+            "ask",
+            Register.binding,
+            f"You are negotiating for {grant.view.party}. Given the brief, propose whether "
+            f"to concede this clause.",
+        )
+        recap = [
+            Part(
+                "recap",
+                Register.generated,
+                section.prose,
+                sources=(
+                    SectionRef(
+                        section.anchor.section_id, section.anchor.from_seq, section.anchor.to_seq
+                    ),
+                ),
+            )
+            for section in grant.view.summaries()
+        ]
+        return [ask, *brief_parts(grant.view, other, clause), *recap]
+
+    return assemble("propose", assembler, Proposing(view))
+
+
+def render_proposing(context: Context) -> str:
+    """The propose prompt, as M8 sent it."""
+    ask = _content(context, "ask")
+    brief = "\n".join(_content(context, slot) for slot in _BRIEF)
+    recap = [str(p.content) for p in context.parts if p.slot == "recap"]
+    if not recap:
+        return f"{ask}\n\n{brief}"
+    prose = "\n".join(f"- {line}" for line in recap)
     return (
-        f"Clause: {clause}\n"
-        f"Our position: {'unknown' if ours is None else ours.value}\n"
-        f"Their stated position: {'unknown' if said is None else said.value}\n"
-        f"What we believe they actually want: {'unknown' if modelled is None else modelled}\n"
-        f"Our read of their bottom line: {'unknown' if concluded is None else concluded.value}"
+        f"{ask}\n\n{brief}\n\nEarlier rounds, as summarised (advisory prose, not canon):\n{prose}"
     )
+
+
+def reading(view: PartyView, other: str, clause: str, *, observed: str) -> Context:
+    """
+    The update call's context: what this party saw, its brief, and what to conclude.
+
+    ``observed`` is handed in rather than read, because the round loop computed it from
+    the offers in hand and this party's own belief about who overheard what. It is a
+    :class:`~anagrapheus.assembly.Given` with no event behind it, and the context says
+    so.
+    """
+
+    def assembler(grant: Updating) -> list[Part]:
+        party = grant.view.party
+        return [
+            Part(
+                "ask",
+                Register.binding,
+                f"You are negotiating for {party}. This round you observed:",
+            ),
+            Part(
+                "observed",
+                Register.considered,
+                grant.observed.value,
+                sources=(grant.observed.ref,),
+            ),
+            *brief_parts(grant.view, other, clause),
+            Part(
+                "conclude",
+                Register.binding,
+                f"Record one conclusion about {other}: their bottom line, the furthest "
+                f"they will move on this clause -- concede, hold_firm or never. Your "
+                f"reasoning goes in `because`, not in the value.",
+            ),
+        ]
+
+    return assemble("update", assembler, Updating(view, Given("observed", observed)))
+
+
+def render_reading(context: Context) -> str:
+    """The update prompt, as M8 sent it."""
+    brief = "\n".join(_content(context, slot) for slot in _BRIEF)
+    return (
+        f"{_content(context, 'ask')}\n\n"
+        f"{_content(context, 'observed')}\n\n"
+        f"{brief}\n\n"
+        f"{_content(context, 'conclude')}"
+    )
+
+
+_BRIEF = ("clause", "ours", "theirs", "modelled", "concluded")
+
+
+def _content(context: Context, slot: str) -> str:
+    return str(next(p.content for p in context.parts if p.slot == slot))
 
 
 def precedent_tool(
@@ -315,6 +476,7 @@ class Negotiator:
         view: PartyView,
         archive: Callable[[str], str] | None = None,
         update: Model | None = None,
+        on_context: Callable[[Context], None] | None = None,
     ) -> None:
         # The tool is offered only when there is an archive to reach. An agent given a
         # tool that answers nothing is worse than an agent given none: it spends a turn
@@ -334,6 +496,7 @@ class Negotiator:
         )
         self._read.output_validator(_check_reading_named)
         self._view = view
+        self._assembled = on_context or _ignore
 
     @property
     def party(self) -> str:
@@ -345,21 +508,18 @@ class Negotiator:
         """The information set this agent holds — read-only, and all it was given."""
         return self._view
 
-    def propose(self, other: str, clause: str, *, context: str = "") -> Offer:
+    def propose(self, other: str, clause: str) -> Offer:
         """
         Read the brief and offer a move. The model call is pinned like any other.
 
-        ``context`` is the chronicle's contribution — the consolidated rounds so far,
-        which is advisory prose and marked as such in the prompt. It is appended rather
-        than interleaved, because a section that read like a belief would be a
-        generative projection wearing canon's clothes, and note 05 exists to keep those
-        apart.
+        The chronicle's consolidated rounds come in through this party's own view, as
+        ``generated`` parts — advisory prose, appended rather than interleaved, because
+        a section that read like a belief would be a generative projection wearing
+        canon's clothes, and note 05 exists to keep those apart.
         """
-        return self._propose.run_sync(
-            f"You are negotiating for {self.party}. Given the brief, propose whether to "
-            f"concede this clause.\n\n" + brief_for(self._view, other, clause) + context,
-            deps=_Asked(other, clause),
-        ).output
+        context = proposing(self._view.settled(), other, clause)
+        self._assembled(context)
+        return self._propose.run_sync(render_proposing(context), deps=_Asked(other, clause)).output
 
     def update(self, other: str, clause: str, *, observed: str) -> Reading:
         """
@@ -370,15 +530,9 @@ class Negotiator:
         the transcript would hand it the other side's private reasoning and undo R29 one
         prompt below where :class:`~examples.negotiation.view.PartyView` defends it.
         """
-        return self._read.run_sync(
-            f"You are negotiating for {self.party}. This round you observed:\n\n"
-            f"{observed}\n\n"
-            f"{brief_for(self._view, other, clause)}\n\n"
-            f"Record one conclusion about {other}: their bottom line, the furthest "
-            f"they will move on this clause -- concede, hold_firm or never. Your "
-            f"reasoning goes in `because`, not in the value.",
-            deps=_Asked(other, clause),
-        ).output
+        context = reading(self._view.settled(), other, clause, observed=observed)
+        self._assembled(context)
+        return self._read.run_sync(render_reading(context), deps=_Asked(other, clause)).output
 
 
 def record_offer(
@@ -532,3 +686,7 @@ def record_reading(
 def _position(offer: Offer) -> str:
     """The offer as the domain's vocabulary, which is what a belief compares."""
     return "concede" if offer.concede else "hold_firm"
+
+
+def _ignore(_context: Context) -> None:
+    """The default ``on_context``: nobody is watching."""

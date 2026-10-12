@@ -1,7 +1,7 @@
 # Prompt assembly — design (M9)
 
-**Created 2026-10-12. Status: design for review, nothing built.** This note proposes
-what `anagrapheus` should own of "what a model is shown", and what it should leave to
+**Created 2026-10-12. Built in M9 the same day** (`anagrapheus.assembly`); §8 records
+where the build departed from the design. This note sets out what `anagrapheus` should own of "what a model is shown", and what it should leave to
 the application. Spec authority is
 [`agent-core` doc 00 §1–§2](https://github.com/anentropic/narrative-vm/blob/main/_design/agent-core/00-agent-core-architecture.md):
 the transcript is derived from the log, and never the reverse. Doc 00 draws the
@@ -85,11 +85,12 @@ of read-only slices, all opened at one log position:
 - `LogSlice`: events up to `upto_seq` that an `admit(envelope)` predicate accepts.
   This is where R58's class gate goes. The application reads `event_class` from its
   own models; see "R58" under §6.
-- `BeliefSlice`: named scopes only, read **as of** the event at `upto_seq`. doxastica
-  already supports that read (`get_scope_at`), so a fold that catches up during
-  assembly cannot tear the context.
-- `ChronicleSlice`: `Prose` and `Anchors` up to `upto_seq`. Both are already separate
-  objects (note 05).
+- `BeliefSlice`: granted scopes only, from a store whose fold is at `upto_seq`. It
+  refuses to read (`StaleRead`) when the fold is anywhere else, so a fold that moves
+  during assembly cannot tear the context (§8).
+- `ChronicleSlice`: sections reaching no further than `upto_seq`.
+- `EventsSlice`: a fixed run of events through `admit`, for a generative fold, which
+  is handed its range rather than reading the log.
 - `Given`: a value the application hands in that did not come from a projection, such
   as NVM's `RenderContract`, which is the Thinker's pinned output. It carries the id
   of the event it came from.
@@ -110,26 +111,27 @@ not on wording, so it still holds when the rendering changes.
 
 ```python
 class Register(StrEnum):
-    binding = "binding"        # must hold; never shed
+    binding = "binding"  # must hold; never shed
     considered = "considered"  # advisory, ranked, shed by rank
-    craft = "craft"            # load on relevance
-    generated = "generated"    # model-written prose: advisory, labelled as such
+    craft = "craft"  # load on relevance
+    generated = "generated"  # model-written prose: advisory, labelled as such
+
 
 @dataclass(frozen=True)
 class Part:
-    slot: str                  # the application's name: "binding", "context", ...
+    slot: str  # the application's name: "binding", "context", ...
     register: Register
-    content: JsonValue         # structured; rendering is the application's
-    rank: int = 0              # within a register; higher survives longer
-    sources: tuple[Source, ...] = ()   # EventRef | StateRef | SectionRef | GivenRef
+    content: JsonValue  # structured; rendering is the application's
+    rank: int = 0  # within a register; higher survives longer
+    sources: tuple[Source, ...] = ()  # EventRef | StateRef | SectionRef | GivenRef
 ```
 
 The registers are NVM's three plus R61's `generated`, which the library adds:
 
 - `binding` maps to INVARIANTS, `considered` to CONSIDERATIONS, and `craft` to CRAFT.
-- `generated` is assigned automatically to any part whose sources include chronicle
-  prose. An assembler cannot drop the label by mistake, because the slice it read from
-  decides the register.
+- `generated` is required of any part that cites chronicle prose: `assemble` refuses
+  (`MislabelledPart`) a part citing a section under any other register, so an
+  assembler cannot drop the label by mistake.
 
 `content` is structured, never pre-rendered. NVM's position is "structured at source,
 legible at surface", and its re-serialization A/B (NVM 15:155–173) pins everything
@@ -142,8 +144,8 @@ except the serialization. A rendered string would make that experiment impossibl
 class Context:
     role: str
     upto_seq: int
-    parts: tuple[Part, ...]     # what survived, in assembly order
-    shed: tuple[Part, ...]      # what the budget dropped, and so what was not shown
+    parts: tuple[Part, ...]  # what survived, in assembly order
+    shed: tuple[Part, ...]  # what the budget dropped, and so what was not shown
 ```
 
 `assemble(role, assembler, grant, *, budget=None) -> Context`. A `Budget` is a port:
@@ -207,18 +209,21 @@ The cost is that once the structure code changes, an old call's exact context ca
 longer be rebuilt. It is open (§7) whether NVM wants a record-only manifest for that
 case.
 
-## 6. What this would change elsewhere
+## 6. What this changed elsewhere
 
 - **The demo** is ported as the proving consumer. Each model call (propose, update and
   the round summary) gets its own assembler and grant. **The acceptance bar is
   byte-identical prompts, so the committed recordings replay without being
-  re-recorded.** The `SideRemarkOverheard` regression becomes a source assertion.
-- **R58.** The registry's `model_for(key)` lookup, noted in the PR #19 thread, becomes
-  needed: `LogSlice.admit` reads `event_class` off the application's model without
-  decoding the payload. It is additive.
-- **Note 05.** `Brief` (tail plus depth) stays as it is and becomes the slices'
-  implementation underneath. Its tail-from-the-log guarantee (R61 clause 4) carries
-  over into `LogSlice` unchanged.
+  re-recorded.** Met: both recordings replay strictly. The `SideRemarkOverheard`
+  regression is now a source assertion (`tests/negotiation/test_assembly.py`), and
+  `PartyView` is built from the library's slices and is a slice itself.
+- **R58.** Not needed yet. `LogSlice.admit` sees the envelope, and the demo gates on
+  namespace and type. NVM's class gate will want to read `event_class` off its own
+  model without decoding, which is the additive `model_for(key)` lookup noted in the
+  PR #19 thread; it lands when that consumer does.
+- **Note 05.** `Brief` (tail plus depth) is unchanged and sits beside the slices.
+  Its tail-from-the-log guarantee (R61 clause 4) holds for `LogSlice` the same way,
+  since a log slice reads the log and never the chronicle.
 
 ## 7. Open questions
 
@@ -237,3 +242,23 @@ case.
 - **The judged-validate call's input** conflicts in NVM. Doc 22 says a judge "sees
   only a contract", while R49 queries commitments about the entities involved. A
   grant would make whichever wins explicit. Flagged for NVM.
+
+## 8. What the build changed — [ours]
+
+- **No as-of read for beliefs.** The design read a belief slice "as of" the event at
+  its position, through doxastica's `get_scope_at`. The build refuses instead: a slice
+  is told how to ask where the belief fold is, and raises `StaleRead` unless it is
+  exactly at the slice's position. That is simpler, it needs no assumption about how
+  doxastica orders source events, and a torn context is still impossible: it becomes
+  an error instead of a quiet mix.
+- **A grant is a dataclass of slices, checked.** A field that is not a slice, such as
+  a store or a table, is refused. Slices that disagree on a position are refused too.
+  An application's own reader qualifies by implementing the two-member `Slice`
+  protocol, which is how the demo's `PartyView` takes part.
+- **Settling comes before a settled view.** A pin committed by the ledger lands in the
+  log without passing through `Table.append`, so the belief fold could sit a few events
+  behind for no reason that matters to a belief. `PartyView.settled()` brings the pure
+  folds up first, then opens at the log's position.
+- **The summarizer's gate moved from rendering to reading.** `_render` used to skip
+  `SideRemarkOverheard` while rendering. Now the summarizer's slice never hands it
+  out, so a test can check the sources and not the wording.

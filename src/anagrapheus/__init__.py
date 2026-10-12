@@ -5,12 +5,13 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from . import beliefs, chronicle, identity, provider, timeline
+from . import assembly, beliefs, chronicle, identity, provider, timeline
 
 if TYPE_CHECKING:
     from anagrapheus.timeline.registry import EventTypeRegistry
 
 __all__ = [
+    "assembly",
     "beliefs",
     "chronicle",
     "identity",
