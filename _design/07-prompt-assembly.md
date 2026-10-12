@@ -280,4 +280,3 @@ Four findings, all real, and each one a bypass of something the note claims:
 - **A log slice filters before decoding.** `EventReader.read` and `read_raw` gained
   `upto_seq` and `where`, applied to the stored envelope before any upcast, so an event
   past the position or refused by `admit` cannot fail a read it was never part of.
-
