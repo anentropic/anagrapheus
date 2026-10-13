@@ -21,7 +21,9 @@ whatever the assembler does:
 
 **Determinism is the contract this rests on.** Same log, same position, same grant: same
 parts, so the same rendered bytes, so a replay hits its pins. Nothing here can check
-that an assembler is pure, so the golden test does instead.
+that an assembler is pure. The application's own tests can: build a context over a fixed
+log at a fixed position, and compare
+:meth:`~anagrapheus.assembly.parts.Context.describe` with a stored golden.
 """
 
 # Design: note 07 §4; upstream NVM U42 (the binding layer never sheds).
