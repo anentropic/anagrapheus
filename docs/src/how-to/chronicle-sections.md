@@ -120,7 +120,7 @@ fold = ChronicleFold(
 consolidate = Projector(store, reader, [fold])
 ```
 
-Each projector keeps an independent position per fold, so you can run belief and identity folds after every append and run `consolidate.catch_up()` on its own schedule, for example at the end of each round. From async code, await `consolidate.catch_up_async()` instead; see [Consolidate from async code](#consolidate-from-async-code). The chronicle fold is **generative**, meaning its `apply` makes a model call, and it makes that call before taking the database's write lock, so a slow summary never blocks appends.
+Each projector keeps an independent position per fold, so you can run belief and identity folds after every append and run `consolidate.catch_up()` on its own schedule, for example at the end of each round. From async code, await `consolidate.catch_up_async()` instead; see [Consolidate from async code](#consolidate-from-async-code). The chronicle fold is **generative**, meaning its content comes from a model call. The fold makes that call in its preparation step, `prepare` or `prepare_async`, before the projector takes the database's write lock; `apply` then only writes the summary it was given, so a slow summary never blocks appends.
 
 ## 3. Close units and consolidate
 
@@ -293,7 +293,8 @@ Only the summaries are awaited. The projector awaits each one with no transactio
 Some things to know about the awaited path:
 
 - **It takes synchronous folds too.** Belief and identity folds, and a generative fold with only a synchronous `prepare`, run under `catch_up_async()` as they do under `catch_up()`, so one projector can hold both kinds.
-- **`catch_up()` refuses an async summariser.** It raises `TypeError` without calling the model, because it has no way to await the summary.
+- **A synchronous summariser blocks the loop.** Under `catch_up_async()` it is called on the event loop's thread and holds the loop until it returns. It cannot call `Agent.run_sync`, which raises inside a running loop, so a summariser that calls a model from async code should be a coroutine like `AwaitedRoundSummary`.
+- **`catch_up()` and `rebuild()` refuse an async summariser.** They raise `TypeError` before folding or resetting anything, so the model is not called and existing sections are kept. The fold recognises an `async def` function or a class whose `__call__` is `async def`.
 - **Rebuild with [`rebuild_async()`][projector-rebuild-async].** It takes the same arguments as `rebuild()` and refuses a generative fold in the same way.
 - **Each fold's position is unchanged by a failed batch.** If a summary raises, nothing from that batch is written, and the next `catch_up_async()` starts the batch again.
 - **Do not run one projector from two tasks at once.** Each would fold the same batch.
@@ -312,11 +313,11 @@ The summary prompt changed between recording and replay. The usual cause is rend
 
 ### `RuntimeError: This event loop is already running` from async code
 
-The summariser calls `Agent.run_sync` and something called `catch_up()` from inside an event loop. Make the summariser a coroutine that calls `Agent.run`, and await `catch_up_async()` instead, as in [Consolidate from async code](#consolidate-from-async-code).
+The summariser calls `Agent.run_sync` from inside an event loop, either because something called `catch_up()` there or because the projector was driven with `catch_up_async()`, which calls a synchronous summariser on the loop's thread. Make the summariser a coroutine that calls `Agent.run`, and await `catch_up_async()` instead, as in [Consolidate from async code](#consolidate-from-async-code).
 
-### `TypeError: 'chronicle' has an async summarizer`
+### `TypeError: 'chronicle' only prepares asynchronously`
 
-The fold's summariser is a coroutine, and its projector was driven with `catch_up()` or `rebuild()`. Use `catch_up_async()` or `rebuild_async()`.
+The fold's summariser is a coroutine, and its projector was driven with `catch_up()` or `rebuild()`. Nothing was folded or reset. Use `catch_up_async()` or `rebuild_async()`. A summariser that is a plain function returning an awaitable is only found out once called, and raises `TypeError: 'chronicle' has an async summarizer` instead; write it as an `async def`.
 
 ### The tail contains `PinPromoted` events
 

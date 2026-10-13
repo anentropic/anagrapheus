@@ -69,6 +69,11 @@ class SQLiteEventStore:
         """
         return self._conn
 
+    @property
+    def in_transaction(self) -> bool:
+        """Whether a transaction is open on the connection, by :meth:`transaction` or not."""
+        return self._conn.in_transaction
+
     def close(self) -> None:
         """Close the underlying connection."""
         self._conn.close()

@@ -10,6 +10,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from anagrapheus.timeline.envelope import DomainEvent, StoredEvent
+from anagrapheus.timeline.errors import TimelineError
 from anagrapheus.timeline.folds import GenerativeRebuild, Projector
 from anagrapheus.timeline.registry import EventTypeRegistry
 from anagrapheus.timeline.sqlite import SQLiteEventStore
@@ -555,3 +556,77 @@ def test_rebuild_async_refolds_through_the_awaited_path(tmp_path: Path):
     )
     assert asyncio.run(rebuilt) == 2
     assert fold.rows() == [1, 2]
+
+
+def test_an_owned_position_is_refused_inside_an_open_transaction(tmp_path: Path):
+    """
+    An outer rollback would undo the events but not the fold's state or position.
+
+    Were it allowed, the rolled-back seqs would be reused by the next append and the
+    fold, positioned above them, would skip the new events.
+    """
+    types, store, reader = make_stack(tmp_path / "t.db")
+    store.append([types.pending(StepTaken(n=1))])
+    fold = OwnedLog()
+    projector = Projector(store, reader, [fold, MemoryLog()])
+
+    with store.transaction():
+        store.append([types.pending(StepTaken(n=2))])
+        with pytest.raises(TimelineError, match="owned_log"):
+            projector.catch_up()
+        with pytest.raises(TimelineError, match="owned_log"):
+            projector.rebuild("owned_log", reset=lambda: None)
+    assert fold.seen == []
+    assert fold.position == 0
+
+    projector.catch_up()
+    assert fold.seen == [1, 2]
+
+
+def test_a_store_positioned_fold_may_catch_up_inside_a_transaction(tmp_path: Path):
+    """Its position is in the store, so it rolls back with everything else."""
+    types, store, reader = make_stack(tmp_path / "t.db")
+    store.append([types.pending(StepTaken(n=1))])
+    projector = Projector(store, reader, [SqlSum()])
+
+    class Abort(Exception):
+        pass
+
+    with pytest.raises(Abort), store.transaction():
+        store.append([types.pending(StepTaken(n=2))])
+        assert projector.catch_up() == {"sql_sum": 2}
+        raise Abort
+    assert store.read_position("sql_sum") == 0
+    assert SqlSum.total(store) == 0
+
+
+def test_catch_up_refuses_an_async_only_fold_before_folding_anything(tmp_path: Path):
+    """No fold in the projector runs, so none is left ahead of the others."""
+    types, store, reader = make_stack(tmp_path / "t.db")
+    store.append([types.pending(StepTaken(n=i)) for i in (1, 2)])
+    projector = Projector(store, reader, [SqlSum(), AsyncDrawn(store)])
+
+    with pytest.raises(TypeError, match="catch_up_async"):
+        projector.catch_up()
+    assert store.read_position("sql_sum") == 0
+    assert SqlSum.total(store) == 0
+
+
+def test_catch_up_async_refuses_an_owned_position_inside_an_open_transaction(tmp_path: Path):
+    types, store, reader = make_stack(tmp_path / "t.db")
+    store.append([types.pending(StepTaken(n=1))])
+    owned = OwnedAsyncDrawn()
+    projector = Projector(store, reader, [owned])
+
+    async def inside() -> None:
+        with store.transaction():
+            with pytest.raises(TimelineError, match="owned_async"):
+                await projector.catch_up_async()
+            with pytest.raises(TimelineError, match="owned_async"):
+                await projector.rebuild_async(
+                    "owned_async", reset=lambda: None, discard_generated=True
+                )
+
+    asyncio.run(inside())
+    assert owned.seen == []
+    assert asyncio.run(projector.catch_up_async()) == {"owned_async": 1}

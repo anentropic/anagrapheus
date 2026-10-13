@@ -21,6 +21,7 @@ from anagrapheus.timeline.folds import (
     GenerativeFold,
     GenerativeRebuild,
     OwnsPosition,
+    PreparesSynchronously,
     ProjectionFold,
     Projector,
 )
@@ -81,6 +82,7 @@ __all__ = [
     "GenerativeFold",
     "GenerativeRebuild",
     "OwnsPosition",
+    "PreparesSynchronously",
     "ProjectionFold",
     "Projector",
     "Recording",

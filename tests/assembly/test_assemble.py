@@ -29,6 +29,7 @@ from anagrapheus.assembly import (
 from anagrapheus.beliefs import FOLD_NAME, StateRef
 from anagrapheus.chronicle import Anchor, Section, SQLiteChronicleStore
 from anagrapheus.timeline import (
+    DomainEvent,
     EventReader,
     PinLedger,
     Projector,
@@ -228,6 +229,25 @@ def test_a_slice_past_the_end_of_the_log_refuses(rig: Rig):
 
     with pytest.raises(StaleRead, match="the log ends before"):
         _over(rig, upto_seq=rig.store.last_seq() + 1).scope("world")
+
+
+def test_an_ignored_event_at_the_slice_position_is_never_upcast(rig: Rig):
+    """Whether the log reaches the slice is asked of the store, not of an upcast read."""
+
+    class Noted(DomainEvent, frozen=True):
+        text: str
+
+    class NotedV2(DomainEvent, frozen=True):
+        text: str
+        by: str
+
+    held = rig.believer("world").revise("location", (uuid.uuid7(),), "London")
+    rig.types.event("demo", "Noted")(Noted)
+    last = rig.append(rig.types.pending(Noted(text="an aside")))
+    rig.types.event("demo", "Noted", version=2)(NotedV2)  # and no upcast from version 1
+    assert rig.projector.position(FOLD_NAME) < last, "the fold has not seen the aside"
+
+    assert _over(rig, upto_seq=last).scope("world") == [held]
 
 
 def test_a_slice_over_a_fold_the_projector_does_not_run_is_refused(rig: Rig):

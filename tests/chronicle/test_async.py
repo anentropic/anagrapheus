@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 from typing import TYPE_CHECKING
 
 import pytest
@@ -18,7 +19,7 @@ from anagrapheus.timeline import PinLedger, Projector, ReplayPins
 from .conftest import NAMESPACE, build_rig
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Awaitable, Sequence
     from pathlib import Path
 
     from pydantic_ai.messages import ModelMessage
@@ -150,3 +151,83 @@ def test_a_failed_async_draw_leaves_the_chronicle_and_position_unchanged(rig: Ri
         asyncio.run(projector.catch_up_async())
     assert list(rig.anchors.all()) == []
     assert rig.store.read_position(FOLD_NAME) == 0
+
+
+def test_rebuild_refuses_an_async_summarizer_before_resetting(rig: Rig):
+    """The old sections survive, since no synchronous redraw could replace them."""
+    rig.append(rig.step("a"), rig.close("one"))
+    rig.projector.catch_up()
+    before = [(s.anchor, s.prose) for s in rig.chronicle.sections()]
+    drawn: list[int] = []
+    projector = install(rig, AwaitedSummary(PinLedger(rig.store, rig.types), drawn))
+
+    with pytest.raises(TypeError, match="rebuild_async"):
+        projector.rebuild(
+            FOLD_NAME,
+            reset=rig.chronicle.reset,
+            reset_in_transaction=True,
+            discard_generated=True,
+        )
+    assert [(s.anchor, s.prose) for s in rig.chronicle.sections()] == before
+    assert rig.store.read_position(FOLD_NAME) == 2
+    assert drawn == []
+
+
+def test_a_marked_async_summarizer_is_refused_without_being_called(rig: Rig):
+    """Recognised before the call, so not even its synchronous part runs."""
+    calls: list[int] = []
+
+    def summarize(events: Sequence[StoredEvent]) -> Awaitable[Consolidation]:
+        calls.append(len(events))
+        return asyncio.sleep(0, Consolidation(prose="never"))
+
+    inspect.markcoroutinefunction(summarize)
+    fold = ChronicleFold(
+        rig.chronicle,
+        rig.fold._reader,  # noqa: SLF001
+        boundary=EventTypes((NAMESPACE, "UnitClosed")),
+        summarize=summarize,
+    )
+    assert not fold.prepares_synchronously
+    rig.append(rig.step("a"), rig.close("one"))
+
+    with pytest.raises(TypeError, match="catch_up_async"):
+        Projector(rig.store, rig.fold._reader, [fold]).catch_up()  # noqa: SLF001
+    with pytest.raises(TypeError, match="catch_up_async"):
+        fold.prepare(next(iter(rig.store.read(since_seq=1))))
+    assert calls == []
+
+
+def test_an_unrecognised_awaitable_is_cancelled_by_the_synchronous_path(rig: Rig):
+    """A plain function returning a task is found out only by its result, then cancelled."""
+    drawn: list[int] = []
+
+    async def draw() -> Consolidation:
+        drawn.append(1)
+        return Consolidation(prose="never")
+
+    tasks: list[asyncio.Task[Consolidation]] = []
+
+    def summarize(events: Sequence[StoredEvent]) -> Awaitable[Consolidation]:
+        tasks.append(asyncio.ensure_future(draw()))
+        return tasks[-1]
+
+    fold = ChronicleFold(
+        rig.chronicle,
+        rig.fold._reader,  # noqa: SLF001
+        boundary=EventTypes((NAMESPACE, "UnitClosed")),
+        summarize=summarize,
+    )
+    assert fold.prepares_synchronously
+    rig.append(rig.step("a"), rig.close("one"))
+
+    async def main() -> None:
+        with pytest.raises(TypeError, match="catch_up_async"):
+            Projector(rig.store, rig.fold._reader, [fold]).catch_up()  # noqa: SLF001
+        await asyncio.sleep(0)
+
+    asyncio.run(main())
+    assert len(tasks) == 1
+    assert tasks[0].cancelled()
+    assert drawn == []
+    assert list(rig.anchors.all()) == []
