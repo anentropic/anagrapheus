@@ -8,14 +8,15 @@ opaque string). But ranking candidates is genuinely useful, so the application
 declares its own ladder once and the layer orders by it without knowing what any
 rung means.
 
-Why a ladder of tokens rather than a number: NVM's R21 retired numeric confidence
-because a scalar invites arithmetic over a quantity nothing defines, and because
-ranking advice and epistemic state must stay separate. An integer column here would
-reproduce that at the library boundary — two consumers could disagree about the
-direction and granularity of the scale — and ranks are position-dependent, so
-inserting a rung would silently re-grade every stored row. Tokens survive that;
-their order is declared, not encoded.
+Why a ladder of tokens rather than a number: NVM retired numeric confidence because a
+scalar invites arithmetic over a quantity nothing defines, and because ranking advice
+and epistemic state must stay separate. An integer column here would reproduce that at
+the library boundary — two consumers could disagree about the direction and granularity
+of the scale — and ranks are position-dependent, so inserting a rung would silently
+re-grade every stored row. Tokens survive that; their order is declared, not encoded.
 """
+
+# Design: note 02; upstream NVM R21 (stance replaces numeric confidence).
 
 from __future__ import annotations
 

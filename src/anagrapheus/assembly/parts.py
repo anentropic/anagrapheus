@@ -8,8 +8,10 @@ the structure held still while the bytes change.
 
 The register is structure as well, which the demo learned by hand: a chronicle section
 read beside a belief looks like one unless something says otherwise, and the something
-was a sentence in a prompt (note 07 §1).
+was a sentence in a prompt.
 """
+
+# Design: note 07 §1; upstream NVM R61 (generated prose is advisory).
 
 from __future__ import annotations
 
@@ -33,8 +35,9 @@ class Register(StrEnum):
     """
     What kind of thing a part is, which is what decides whether it may be shed.
 
-    NVM's three labelled registers plus R61's fourth: prose a model wrote is advisory
-    however it is worded, and is labelled as such by where it was read from.
+    NVM's three labelled registers plus a fourth for generated prose: prose a model
+    wrote is advisory however it is worded, and is labelled as such by where it was
+    read from.
     """
 
     #: Must hold. Never shed: a call that cannot carry its invariants is not made.
@@ -43,7 +46,7 @@ class Register(StrEnum):
     considered = "considered"
     #: Technique, loaded on relevance.
     craft = "craft"
-    #: Model-written prose. Advisory only (R61 clause 4).
+    #: Model-written prose. Advisory only: nothing may settle on what it says.
     generated = "generated"
 
 

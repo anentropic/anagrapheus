@@ -1,12 +1,11 @@
 """
 The other side of identity's re-key seam.
 
-Doc 00 §5d gives the payoff: a merge means every belief keyed on the absorbed entity
-is now suspect, and the belief layer turns that into a list of states to re-key. The
-identity layer states the consequence as ``(kind, from_entity, to_entity)`` rows and
-performs no cascade — it does not know what a belief is. This module knows what a
-belief *id* is, which is enough to say which ones are affected and what they would
-become.
+The payoff of the seam: a merge means every belief keyed on the absorbed entity is now
+suspect, and the belief layer turns that into a list of states to re-key. The identity
+layer states the consequence as ``(kind, from_entity, to_entity)`` rows and performs no
+cascade — it does not know what a belief is. This module knows what a belief *id* is,
+which is enough to say which ones are affected and what they would become.
 
 **It plans; it does not apply.** Re-keying a belief is an AGM operation with real
 semantics: whether the old id is contracted or left standing, what happens when the
@@ -14,6 +13,8 @@ new id already carries a belief, whose stance survives a collision. Those are
 judgments about belief, and this library owns the id and not the belief. The plan is
 handed to the caller with everything computed and nothing decided.
 """
+
+# Design: note 02; note 03; upstream agent-core doc 00 §5d.
 
 from __future__ import annotations
 

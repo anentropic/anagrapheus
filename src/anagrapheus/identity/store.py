@@ -10,6 +10,8 @@ This is projection state, so it is disposable by construction: :meth:`reset` emp
 it and :class:`~anagrapheus.timeline.folds.Projector` re-folds the log.
 """
 
+# Design: note 02; upstream agent-core doc 00 §5d.
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, NamedTuple, Protocol
@@ -55,9 +57,9 @@ class RekeyRow(NamedTuple):
     """
     An identity decision that invalidates keys built on ``from_entity``.
 
-    The seam doc 00 §5d describes: a merge means every belief keyed on the absorbed
-    entity is now suspect, and the belief layer's retraction cascade is what turns
-    that into a list of states to re-key.
+    The re-key seam: a merge means every belief keyed on the absorbed entity is now
+    suspect, and the belief layer's retraction cascade is what turns that into a list of
+    states to re-key.
 
     A merge emits exactly one row, naming its target. A split emits one row **per new
     entity** — the target is a choice between them, and which one a given belief
