@@ -32,6 +32,18 @@ bug. A timeout, extra headers, a service tier and prompt-cache configuration cha
 how the request travels and nothing about the draw, so they stay out. When nothing
 survives the reduction the material has no ``settings`` entry at all, so a call made
 with no draw-changing settings keys exactly as it did before settings were keyed.
+
+**Who is asking is not what is asked.** A provider's end-user id, session id or
+cache-affinity id names the conversation or the person behind it, so that the provider
+can route the request to a warm cache or watch for abuse. It is typically derived per
+game or per session, and left in the key it would give every new session fresh keys:
+a recorded run replayed under a new session id would miss every call, silently. So
+``openai_user``, the ``user_id`` in ``anthropic_metadata``, and the identity keys a
+caller sends inside ``extra_body`` (OpenRouter's ``session_id``, OpenAI's ``user``,
+``safety_identifier`` and ``prompt_cache_key``, and the ``user_id`` in a ``metadata``
+object) are dropped. The rest of ``extra_body`` stays in the key, because draw-changing
+settings ride there too: OpenRouter reasoning, Anthropic ``thinking``, a sampling
+parameter the provider's typed settings do not cover yet.
 """
 
 # Design: note 04; upstream agent-core doc 00 §4a, §4c.
@@ -67,6 +79,20 @@ _DELIVERY = frozenset({"cache"})
 #: prompt-cache settings (``anthropic_cache_messages`` and the like) are dropped by
 #: :func:`_delivers` as well, so a new one does not need adding here.
 _DELIVERY_SETTINGS = frozenset({"timeout", "extra_headers", "service_tier", "cache"})
+
+#: Settings that name the end user or session behind a call. ``openai_user`` is OpenAI's
+#: end-user id, sent on the OpenAI and OpenRouter routes alike.
+_IDENTITY_SETTINGS = frozenset({"openai_user"})
+
+#: ``extra_body`` keys that name the session or end user. ``session_id`` is OpenRouter's
+#: provider-affinity id; ``user``, ``safety_identifier`` and ``prompt_cache_key`` are the
+#: OpenAI request fields for the end user and for cache routing.
+_IDENTITY_BODY_KEYS = frozenset({"session_id", "user", "safety_identifier", "prompt_cache_key"})
+
+#: Where a metadata object carries the end-user id: Anthropic's ``metadata.user_id``, set
+#: through the ``anthropic_metadata`` setting or as ``metadata`` inside ``extra_body``.
+_METADATA_SETTINGS = frozenset({"anthropic_metadata"})
+_IDENTITY_METADATA_KEYS = frozenset({"user_id"})
 
 
 class CallPolicy(Protocol):
@@ -185,13 +211,33 @@ class SemanticCallPolicy:
         pydantic-ai adds later, or a provider-specific one, is kept unless it is known
         to be about delivery. Keeping one too many costs a redraw; dropping one that
         mattered replays an answer drawn under different terms, and says nothing.
+
+        Identity ids are removed from inside ``extra_body`` and metadata objects rather
+        than dropping those settings whole, since ``extra_body`` also carries settings
+        that change the draw. A setting left empty by that removal is dropped, so a call
+        that sends only a session id keys as one that sends nothing.
         """
         if not settings:
             return {}
         dumped = cast("Json", to_jsonable_python(settings, fallback=repr))
         if not isinstance(dumped, dict):
             return {}
-        return {key: value for key, value in dumped.items() if not _delivers(key)}
+        drawn: dict[str, Json] = {}
+        for key, value in dumped.items():
+            if _delivers(key):
+                continue
+            if key == "extra_body":
+                value = _without_identity(value, _IDENTITY_BODY_KEYS)
+                if isinstance(value, dict) and "metadata" in value:
+                    metadata = _without_identity(value["metadata"], _IDENTITY_METADATA_KEYS)
+                    value = {k: v for k, v in value.items() if k != "metadata"}
+                    if metadata != {}:
+                        value["metadata"] = metadata
+            elif key in _METADATA_SETTINGS:
+                value = _without_identity(value, _IDENTITY_METADATA_KEYS)
+            if value != {}:
+                drawn[key] = value
+        return drawn
 
     @staticmethod
     def _ordered(field: str, value: Json) -> Json:
@@ -204,5 +250,20 @@ class SemanticCallPolicy:
 
 
 def _delivers(setting: str) -> bool:
-    """Whether a setting changes only how the call travels — including any cache one."""
-    return setting in _DELIVERY_SETTINGS or "cache" in setting.split("_")
+    """
+    Whether a setting changes only how the call travels — including any cache one.
+
+    A setting that only names the user or session behind the call counts too.
+    """
+    return (
+        setting in _DELIVERY_SETTINGS
+        or setting in _IDENTITY_SETTINGS
+        or "cache" in setting.split("_")
+    )
+
+
+def _without_identity(value: Json, keys: frozenset[str]) -> Json:
+    """A JSON object with the given identity keys removed; anything else unchanged."""
+    if not isinstance(value, dict):
+        return value
+    return {key: item for key, item in value.items() if key not in keys}
