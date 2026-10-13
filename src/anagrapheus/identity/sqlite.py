@@ -138,26 +138,27 @@ class SQLiteIdentityStore:
                 # or off whatever the survivor was later merged into. That judgment
                 # stands; the unmerge does not reach past it.
                 continue
+            claim = self._claim(event.absorbed, holder, form, stance, form_seq)
+            if claim is None:
+                continue
             # Still the row the merge moved — on the survivor, or carried on by a later
             # merge of it — means nothing recorded the form for itself, so it goes back.
-            self._release(holder, event.kept, event.absorbed, form, form_seq)
+            self._release(holder, event.kept, event.absorbed, form, claim[1])
             restored.append(form)
-            self._restore_alias(event.absorbed, form, stance, form_seq)
+            self._restore_alias(event.absorbed, form, *claim)
         for form, stance, form_seq in shared:
             # Both held it before the merge, so both hold it again. The survivor's row
             # may be one it holds only for this merge, kept for it when another merge
             # that had moved the form was withdrawn first, and a later merge of the
             # survivor may have carried that row on.
             holder = self._holder(event.kept, form)
-            if holder is not None:
-                self._release(holder, event.kept, event.absorbed, form, form_seq)
-            if self._seq_holder(form, form_seq) not in {None, event.absorbed}:
-                # Another entity holds the very row this merge saw. The absorbed entity
-                # held the form only through an entity merged into it, and an earlier
-                # unmerge already gave the row back there.
+            claim = self._claim(event.absorbed, holder, form, stance, form_seq)
+            if claim is None:
                 continue
+            if holder is not None:
+                self._release(holder, event.kept, event.absorbed, form, claim[1])
             restored.append(form)
-            self._restore_alias(event.absorbed, form, stance, form_seq)
+            self._restore_alias(event.absorbed, form, *claim)
         # Split-shaped: a belief keyed on the survivor may have been about either
         # entity, and only what the belief says can tell which.
         self._rekey(seq, "unmerge", event.kept, event.kept)
@@ -305,13 +306,38 @@ class SQLiteIdentityStore:
         else:
             self._put_alias(holder, form, claim[0], claim[1])
 
-    def _standing_claim(self, kept: UUID, absorbed: UUID, form: str) -> tuple[str, int] | None:
-        """``form``'s stance and sequence from the earliest other standing merge that held it."""
+    def _claim(
+        self, absorbed: UUID, holder: UUID | None, form: str, stance: str, form_seq: int
+    ) -> tuple[str, int] | None:
+        """
+        The stance and sequence at which a withdrawn merge's ``form`` goes back, if any.
+
+        Normally the row the merge recorded. When another entity holds that very row,
+        the absorbed entity held the form only through an entity merged into it, and an
+        earlier unmerge already gave the row back there. The absorbed entity then still
+        holds the form only if another merge into it, still standing, brought it too:
+        it gets that merge's claim back, which is the row the holder kept for it. With
+        no such merge it gets nothing back.
+        """
+        if holder is not None and self._alias_seq(holder, form) == form_seq:
+            return stance, form_seq
+        if self._seq_holder(form, form_seq, besides=(holder, absorbed)) is None:
+            return stance, form_seq
+        return self._standing_claim(absorbed, None, form)
+
+    def _standing_claim(
+        self, kept: UUID, absorbed: UUID | None, form: str
+    ) -> tuple[str, int] | None:
+        """
+        ``form``'s stance and sequence from the earliest standing merge into ``kept`` that held it.
+
+        A merge of ``absorbed``, when one is named, is left out.
+        """
         rows = self._conn.execute(
             "SELECT entity_id, merged_seq FROM identity_entities "
             "WHERE merged_into = ? AND entity_id != ? AND merged_seq IS NOT NULL "
             "ORDER BY merged_seq",
-            (str(kept), str(absorbed)),
+            (str(kept), "" if absorbed is None else str(absorbed)),
         ).fetchall()
         for row in rows:
             merge = self._decision_detail(row["merged_seq"], UUID(row["entity_id"]), "absorbed")
@@ -427,11 +453,16 @@ class SQLiteIdentityStore:
         ).fetchone()
         return None if row is None else int(row["seq"])
 
-    def _seq_holder(self, surface_form: str, seq: int) -> UUID | None:
-        """The entity holding ``surface_form`` at exactly ``seq``, if one does."""
+    def _seq_holder(
+        self, surface_form: str, seq: int, *, besides: tuple[UUID | None, ...] = ()
+    ) -> UUID | None:
+        """An entity other than ``besides`` holding ``surface_form`` at exactly ``seq``, if any."""
+        excluded = [str(entity_id) for entity_id in besides if entity_id is not None]
+        marks = ", ".join("?" for _ in excluded)
         row = self._conn.execute(
-            "SELECT entity_id FROM identity_aliases WHERE surface_form = ? AND seq = ?",
-            (surface_form, seq),
+            "SELECT entity_id FROM identity_aliases WHERE surface_form = ? AND seq = ? "
+            f"AND entity_id NOT IN ({marks}) ORDER BY entity_id",  # noqa: S608 -- placeholders only
+            (surface_form, seq, *excluded),
         ).fetchone()
         return None if row is None else UUID(row["entity_id"])
 

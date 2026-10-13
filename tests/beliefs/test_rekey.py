@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import uuid
 
 import pytest
@@ -17,6 +18,7 @@ from anagrapheus.identity import (
     IdentityFold,
     IdentityRegistry,
     SQLiteIdentityStore,
+    Unmerged,
     establish,
     merge,
     unmerge,
@@ -507,3 +509,63 @@ def test_the_planner_and_the_identity_layer_agree_on_a_double_merge(rig: Rig):
     assert [p.sole() for p in plans] == [
         rig.predicates.belief_id("location", identity.canonical(b))
     ]
+
+
+@pytest.mark.parametrize("steps", [2, 3])
+@pytest.mark.parametrize(
+    "order", list(itertools.permutations(("b from a", "c from a", "a from z"))), ids=" / ".join
+)
+def test_the_planner_and_the_identity_layer_agree_on_unmerges_of_a_chain(
+    rig: Rig, order: tuple[str, ...], steps: int
+):
+    """
+    B and C both bring a form into A, A into Z, then some of the merges are withdrawn.
+
+    Wherever a belief keyed on an absorbed entity is planned to go, identity resolves
+    that entity there too, and every candidate an unmerge offers names an entity that
+    is canonical again.
+    """
+    identity_store = SQLiteIdentityStore(rig.store.connection)
+    identity = IdentityRegistry(identity_store)
+    projector = Projector(
+        rig.store,
+        EventReader(rig.store, UpcastRegistry(), rig.types),
+        [IdentityFold(identity_store, rig.types), rig.fold],
+    )
+    z, ez = establish(rig.types, "z", provenance="x")
+    a, ea = establish(rig.types, "a", provenance="x")
+    b, eb = establish(rig.types, "ACME", provenance="import")
+    c, ec = establish(rig.types, "ACME", provenance="ledger")
+    rig.store.append([ez, ea, eb, ec, *(rig.asserted("location", e) for e in (a, b, c))])
+    projector.catch_up()
+    before = rig.store.last_seq()
+    pairs = {"b from a": (a, b), "c from a": (a, c), "a from z": (z, a)}
+
+    rig.store.append(
+        [
+            merge(rig.types, kept=a, absorbed=b),
+            merge(rig.types, kept=a, absorbed=c),
+            merge(rig.types, kept=z, absorbed=a),
+            *(
+                rig.types.pending(Unmerged(kept=pairs[step][0], absorbed=pairs[step][1]))
+                for step in order[:steps]
+            ),
+        ]
+    )
+    projector.catch_up()
+
+    plans = plan_rekeys(identity.rekeys_since(before), rig.index, rig.predicates)
+    for plan in plans:
+        if plan.kind == "merge":
+            assert plan.sole() == rig.predicates.belief_id(
+                "location", identity.canonical(plan.from_entity)
+            )
+        else:
+            assert plan.kind == "unmerge"
+            assert set(plan.candidates) <= {
+                rig.predicates.belief_id("location", e)
+                for e in (z, a, b, c)
+                if identity.canonical(e) == e
+            }
+    planned = {plan.from_entity for plan in plans if plan.kind == "merge"}
+    assert planned == {e for e in (a, b, c) if identity.canonical(e) != e}

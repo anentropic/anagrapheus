@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import json
 import uuid
 from typing import TYPE_CHECKING
@@ -667,3 +668,88 @@ def test_a_form_another_merge_also_brought_stays_with_the_later_survivor(rig: Ri
     rig.commit(unmerge(rig.types, rig.registry, kept=z, absorbed=a))
     assert {r.entity_id for r in rig.registry.resolve("ACME").candidates} == {b, c}
     _assert_replay_is_idempotent(rig)
+
+
+def _two_claims_carried_on(rig: Rig) -> tuple[UUID, UUID, UUID, UUID]:
+    """B and C both bring "ACME" into A, then A goes into Z; returns Z, A, B, C."""
+    z, ez = establish(rig.types, "z", provenance="x")
+    a, ea = establish(rig.types, "a", provenance="x")
+    b, eb = establish(rig.types, "b", provenance="import")
+    c, ec = establish(rig.types, "c", provenance="ledger")
+    rig.commit(
+        ez,
+        ea,
+        eb,
+        ec,
+        alias(rig.types, b, "ACME", "believed"),
+        alias(rig.types, c, "ACME", "doubted"),
+    )
+    return z, a, b, c
+
+
+def _forms(rig: Rig, *entity_ids: UUID) -> dict[UUID, set[tuple[str, str, int]]]:
+    return {
+        entity_id: {
+            (r.surface_form, r.stance, r.seq) for r in rig.registry.surface_forms(entity_id)
+        }
+        for entity_id in entity_ids
+    }
+
+
+def test_unmerging_the_survivor_restores_the_claim_still_standing_on_it(rig: Rig):
+    """
+    B and C both bring "ACME" into A, A into Z; B out of A, then A out of Z.
+
+    The row A into Z moved was B's, and B has it back. What A still holds the form
+    for is C, so A gets C's claim back off Z, at C's sequence and with C's stance,
+    and Z keeps nothing of it.
+    """
+    z, a, b, c = _two_claims_carried_on(rig)
+    brought = _forms(rig, z, a, b, c)
+    rig.commit(
+        merge(rig.types, kept=a, absorbed=b),
+        merge(rig.types, kept=a, absorbed=c),
+        merge(rig.types, kept=z, absorbed=a),
+    )
+    rig.commit(unmerge(rig.types, rig.registry, kept=a, absorbed=b))
+
+    rig.commit(unmerge(rig.types, rig.registry, kept=z, absorbed=a))
+
+    assert _forms(rig, z, b) == {z: brought[z], b: brought[b]}
+    # C is still merged into A, so A holds C's forms: "c", and "ACME" as C recorded it.
+    assert _forms(rig, a)[a] == brought[a] | brought[c]
+    assert rig.registry.canonical(c) == a
+    _assert_replay_is_idempotent(rig)
+    assert _forms(rig, z, b) == {z: brought[z], b: brought[b]}
+    assert _forms(rig, a)[a] == brought[a] | brought[c]
+
+
+@pytest.mark.parametrize(
+    "order",
+    list(itertools.permutations(("b from a", "c from a", "a from z"))),
+    ids=" / ".join,
+)
+def test_every_order_of_unmerges_gives_back_what_each_entity_brought(
+    rig: Rig, order: tuple[str, ...]
+):
+    """Whichever way the three merges are withdrawn, each entity ends with its own forms."""
+    z, a, b, c = _two_claims_carried_on(rig)
+    brought = _forms(rig, z, a, b, c)
+    rig.commit(
+        merge(rig.types, kept=a, absorbed=b),
+        merge(rig.types, kept=a, absorbed=c),
+        merge(rig.types, kept=z, absorbed=a),
+    )
+    pairs = {"b from a": (a, b), "c from a": (a, c), "a from z": (z, a)}
+
+    for step in order:
+        kept, absorbed = pairs[step]
+        rig.commit(unmerge(rig.types, rig.registry, kept=kept, absorbed=absorbed))
+        # No two entities ever hold one form at the same sequence.
+        rows = [row for forms in _forms(rig, z, a, b, c).values() for row in forms]
+        assert len({(form, seq) for form, _stance, seq in rows}) == len(rows), step
+        _assert_replay_is_idempotent(rig)
+
+    assert _forms(rig, z, a, b, c) == brought
+    for entity_id in (z, a, b, c):
+        assert rig.registry.canonical(entity_id) == entity_id
