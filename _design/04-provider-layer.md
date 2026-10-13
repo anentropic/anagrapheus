@@ -169,8 +169,9 @@ owner.
 correct on its own path, and a hole exactly between them. Because §4 makes a streamed
 call and a plain one **share a key**, a `request()` beginning while a stream is open
 misses, both draw, and the live ledger's second write hits the scratch primary key. In
-record-mode replay it fails silently instead: no primary key to raise, so the last
-completion simply wins.
+record-mode replay it failed silently instead: no primary key to raise, so the last
+completion simply won. (Record mode now draws through a ledger — §7b — so it would hit
+the same key.)
 
 The shape of that mistake is worth keeping. Each guard was written to close a race, and
 each did close the one in front of it; what neither could see was that the *decision to
@@ -270,6 +271,22 @@ Worth recording that this is the second time in this layer that a *correct local
 decision* opened a race one level up. M4's was `resolve_async` putting an await in the
 gap `resolve` did not have; M5's was two guards that were each right about their own
 path. Both were invisible from inside the change and obvious from outside it.
+
+## 7b. Record mode draws into a ledger — [ours, 2026-10-13]
+
+Record-mode `ReplayPins` used to keep its fresh draws in its own memory: no scratch row,
+no commit, and at most one `ReplayDiverged` if `announce` was wired. So a record-mode
+run — the demo's one-role lineup swap, for instance — consumed nondeterminism the canon
+never held, and its own log could not replay it. The module's claim, "a new run
+continuing the same history, announced", was only half true.
+
+Now `on_miss="record"` requires `into=PinLedger(...)` and is refused without it. A miss
+draws through that ledger, so the draw lands in its scratch; a hit is adopted into the
+same scratch with `PinLedger.adopt`, so the ledger holds the whole new run, not only the
+part that differed. `commit()` promotes the pins and a `ReplayDiverged` for the first
+miss in one transaction, which makes `announce_to` optional, and the new log replays the
+new run strictly. The scratch also gives record mode the live ledger's persist-first
+crash behaviour. Strict mode refuses `into=`: it never draws.
 
 ## 8. Open questions
 

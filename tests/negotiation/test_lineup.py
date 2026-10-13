@@ -18,7 +18,7 @@ from examples.negotiation.table import Table
 from pydantic_ai.messages import ModelResponse, ToolCallPart
 from pydantic_ai.models.function import FunctionModel
 
-from anagrapheus.timeline import ReplayPins
+from anagrapheus.timeline import PinLedger, ReplayPins
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -153,7 +153,9 @@ def test_swapping_one_role_draws_only_that_role(tmp_path: Path):
             default=scripted(reached_default.append),
             roles={"update": scripted(contender.append, name="contender")},
         ),
-        resolver=lambda t: ReplayPins.from_events(events, t.types, on_miss="record"),
+        resolver=lambda t: ReplayPins.from_events(
+            events, t.types, on_miss="record", into=PinLedger(t.store, t.types)
+        ),
     )
     try:
         assert len(contender) == 8, "every update call -- two parties, four rounds -- drew"
@@ -163,8 +165,30 @@ def test_swapping_one_role_draws_only_that_role(tmp_path: Path):
         assert divergence is not None, "the replay says where it stopped being one"
         assert divergence.after_hits > 0, "and something replayed before it did"
         assert _offers(swapped) == _offers(baseline), "same behaviour, same negotiation"
+
+        swapped.commit()  # the new run reaches the log, announced as new
+        new_log = list(swapped.table.store.read())
+        assert sum(e.envelope.type == "ReplayDiverged" for e in new_log) == 1
     finally:
         swapped.table.close()
+
+    # ...and that log replays the swapped run strictly: nothing misses, nothing draws.
+    again = negotiate(
+        tmp_path / "again.db",
+        models=Lineup(
+            default=scripted(reached_default.append),
+            roles={"update": scripted(contender.append, name="contender")},
+        ),
+        resolver=lambda t: ReplayPins.from_events(new_log, t.types, on_miss="strict"),
+    )
+    try:
+        assert len(contender) == 8, "the contender was not reached again"
+        assert reached_default == []
+        assert isinstance(again.pins, ReplayPins)
+        assert again.pins.divergence is None
+        assert _offers(again) == _offers(swapped)
+    finally:
+        again.table.close()
 
 
 def test_a_different_update_model_changes_the_negotiation(tmp_path: Path):
@@ -195,7 +219,9 @@ def test_a_different_update_model_changes_the_negotiation(tmp_path: Path):
             default=scripted(reached_default.append),
             roles={"update": scripted(name="pessimist", respond_with=pessimist)},
         ),
-        resolver=lambda t: ReplayPins.from_events(events, t.types, on_miss="record"),
+        resolver=lambda t: ReplayPins.from_events(
+            events, t.types, on_miss="record", into=PinLedger(t.store, t.types)
+        ),
     )
     try:
         before, after = _offers(baseline), _offers(swapped)
