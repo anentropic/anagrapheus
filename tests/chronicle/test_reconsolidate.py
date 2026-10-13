@@ -164,6 +164,52 @@ def test_the_store_refuses_an_overlap_it_does_not_supersede(rig: Rig, strict: bo
         write(_section("2-5", 2, 5, supersedes=None))
 
 
+@pytest.mark.parametrize("strict", [False, True], ids=["append", "append_new"])
+@pytest.mark.parametrize(
+    ("from_seq", "to_seq"),
+    [(2, 2), (1, 1), (1, 5), (0, 2)],
+    ids=["narrower", "shorter", "wider", "earlier"],
+)
+def test_the_store_refuses_a_successor_over_a_different_range(
+    rig: Rig, strict: bool, from_seq: int, to_seq: int
+):
+    """
+    A successor that changes the range would strand the old one's coverage.
+
+    The superseded row still counts towards ``consolidated_through``, yet no current
+    section would cover the seqs the successor dropped, or every seq it claimed.
+    """
+    original = _consolidated(rig)
+    write = rig.chronicle.append_new if strict else rig.chronicle.append
+
+    with pytest.raises(ChronicleFork, match=r"covers 1\.\.2.*must cover the same range"):
+        write(_section("by-hand", from_seq, to_seq, supersedes=original.section_id))
+
+    assert [a.section_id for a in rig.anchors.all()] == ["1-2"]
+    assert [s.anchor.section_id for s in rig.chronicle.export()] == ["1-2"]
+
+
+@pytest.mark.parametrize("strict", [False, True], ids=["append", "append_new"])
+def test_the_store_accepts_a_successor_over_the_same_range(rig: Rig, strict: bool):
+    original = _consolidated(rig)
+    write = rig.chronicle.append_new if strict else rig.chronicle.append
+
+    write(_section("1-2#2", 1, 2, supersedes=original.section_id))
+
+    assert [a.section_id for a in rig.anchors.all()] == ["1-2#2"]
+    assert rig.prose.covering(1) == rig.prose.covering(2) == rig.prose.section("1-2#2")
+
+
+def test_a_load_with_a_successor_over_a_different_range_lands_nothing(rig: Rig):
+    original = _consolidated(rig)
+    incoming = [_section("3-3", 3, 3, None), _section("2-2", 2, 2, original.section_id)]
+
+    with pytest.raises(ChronicleFork, match="must cover the same range"):
+        rig.chronicle.load(incoming)
+
+    assert [s.anchor.section_id for s in rig.chronicle.export()] == ["1-2"]
+
+
 def test_the_store_refuses_to_supersede_a_missing_section(rig: Rig):
     with pytest.raises(UnknownSection):
         rig.chronicle.append(_section("1-2#2", 1, 2, supersedes="1-2"))

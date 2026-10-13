@@ -157,10 +157,22 @@ class SQLiteChronicleStore:
                 raise SectionCollision(f"section {anchor.section_id!r} is already stored")
             return False
         if anchor.supersedes is not None:
-            if self.section(anchor.supersedes) is None:
+            parent = self.section(anchor.supersedes)
+            if parent is None:
                 raise UnknownSection(
                     f"{anchor.section_id!r} supersedes {anchor.supersedes!r}, "
                     "which is not in the store"
+                )
+            # Checked before the parent is excluded from the overlap query below. A
+            # successor over a different range would leave the superseded row counting
+            # towards `consolidated_through` while no current section covers the seqs
+            # the successor dropped -- or would claim seqs nothing consolidated.
+            old, new = parent.anchor, anchor
+            if (new.from_seq, new.to_seq) != (old.from_seq, old.to_seq):
+                raise ChronicleFork(
+                    f"{new.section_id!r} covers {new.from_seq}..{new.to_seq}, but "
+                    f"{old.section_id!r} covers {old.from_seq}..{old.to_seq}: a section "
+                    "that supersedes another must cover the same range"
                 )
             successor = self._conn.execute(
                 "SELECT section_id FROM chronicle_sections WHERE supersedes = ? LIMIT 1",

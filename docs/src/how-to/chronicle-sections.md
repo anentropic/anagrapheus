@@ -369,7 +369,7 @@ Some things to know about re-consolidating:
 - **It is outside the replay guarantee.** Nothing in the log records a re-consolidation, so rebuilding the chronicle discards it and returns generation 1. [Carry the chronicle](#carry-the-chronicle-to-a-new-store) to keep it.
 - **From async code, await [`reconsolidate_async`][reconsolidate-async].** It takes the same arguments and accepts either kind of summariser; `reconsolidate` raises `TypeError` for an async one.
 
-To write a section by hand instead, use the store's [`append_new`][store-append-new], which raises [`SectionCollision`][section-collision] if the id is already stored. Its [`append`][store-append] keeps the existing row on a collision, because that is what a replayed fold batch needs. Both refuse a section that would fork the chronicle: one that supersedes an already-superseded section, or that overlaps a current section without superseding it.
+To write a section by hand instead, use the store's [`append_new`][store-append-new], which raises [`SectionCollision`][section-collision] if the id is already stored. Its [`append`][store-append] keeps the existing row on a collision, because that is what a replayed fold batch needs. Both refuse a section that would fork the chronicle: one that supersedes an already-superseded section, one that supersedes a section over a different range, or one that overlaps a current section without superseding it.
 
 ## Troubleshooting
 
@@ -395,7 +395,7 @@ You passed `reconsolidate` an older generation. Pass the id the message names as
 
 ### `ChronicleFork` from `append` or `load`
 
-The section would leave two current sections over one range. A hand-written section must supersede the current section for its range, and `load` refuses the whole transfer if any incoming section overlaps a current one it does not supersede.
+The section would leave two current sections over one range, or a consolidated range that no current section fully covers. A hand-written section must supersede the current section for its range and cover exactly that range, from the same `from_seq` to the same `to_seq`, and `load` refuses the whole transfer if any incoming section overlaps a current one it does not supersede.
 
 ### The tail contains `PinPromoted` events
 

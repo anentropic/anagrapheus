@@ -30,5 +30,7 @@ class ChronicleFork(ChronicleError):
     The chronicle's current sections partition what it has consolidated: each seq is
     covered by at most one of them. A section that supersedes one already superseded,
     or that overlaps a current section it does not supersede, would break that, and
-    every read of "the section covering this event" would have two answers.
+    every read of "the section covering this event" would have two answers. So would a
+    successor over a different range than the section it supersedes: the old range
+    would still count as consolidated with no current section covering all of it.
     """

@@ -37,9 +37,10 @@ class ChronicleStore(Protocol):
 
         Refuses a fork, whatever the id: raises
         :class:`~anagrapheus.chronicle.errors.ChronicleFork` for a section that
-        supersedes one already superseded, or that overlaps a current section it does
-        not supersede, and :class:`~anagrapheus.chronicle.errors.UnknownSection` for
-        one that supersedes a section not in the store.
+        supersedes one already superseded, that supersedes one over a different range,
+        or that overlaps a current section it does not supersede, and
+        :class:`~anagrapheus.chronicle.errors.UnknownSection` for one that supersedes a
+        section not in the store.
         """
         ...
 

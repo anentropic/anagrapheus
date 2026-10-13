@@ -94,7 +94,7 @@ A superseding section written by hand can go wrong in two silent ways. Written u
 
 - `reconsolidate` only accepts the current section for a range, and refuses a superseded one before calling the summariser.
 - It writes through the store's strict path, [`append_new`][store-append-new], which raises [`SectionCollision`][section-collision] instead of keeping the existing row.
-- Every write the store accepts, through either path and through `load`, keeps the current sections from overlapping. A write that would fork the chronicle raises [`ChronicleFork`][chronicle-fork]. The fold's own [`append`][store-append] still keeps the existing row when it replays a batch, so replay stays idempotent.
+- Every write the store accepts, through either path and through `load`, keeps the current sections from overlapping, and a superseding section must cover exactly the range of the one it supersedes, so a correction never leaves part of a consolidated range uncovered. A write that would fork the chronicle raises [`ChronicleFork`][chronicle-fork]. The fold's own [`append`][store-append] still keeps the existing row when it replays a batch, so replay stays idempotent.
 
 !!! info "Re-consolidation sits outside the replay guarantee"
     Nothing in the log records a re-consolidation, so it is not something a fold can derive: a rebuild discards it and returns the original generation. That is one more reason to carry a chronicle rather than rebuild it. It also changes what later prompts are shown, so runs that read the old prose will no longer replay against the new one. `reconsolidate` logs a warning saying so on every call, through the standard `logging` module, so the divergence is announced rather than silent.
