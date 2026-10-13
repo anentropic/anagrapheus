@@ -78,6 +78,17 @@ MIGRATIONS: Final[tuple[tuple[str, ...], ...]] = (
         ) STRICT
         """,
         "CREATE INDEX ix_identity_claims_entity ON identity_claims (entity_id, surface_form)",
+        # Which merges each claim's path runs through, one row per merge, so an unmerge
+        # finds the claims its merge carried by index instead of reading every path.
+        """
+        CREATE TABLE identity_claim_paths (
+            surface_form  TEXT    NOT NULL,
+            claim_seq     INTEGER NOT NULL,
+            merge_seq     INTEGER NOT NULL,
+            PRIMARY KEY (surface_form, claim_seq, merge_seq)
+        ) STRICT
+        """,
+        "CREATE INDEX ix_identity_claim_paths_merge ON identity_claim_paths (merge_seq)",
         # A projection folded before this version kept no record of which merges
         # carried a row, so each row it shows is taken as its holder's own: an unmerge
         # of a merge it already holds gives nothing back until the projection is

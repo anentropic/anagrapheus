@@ -28,6 +28,7 @@ __all__ = ["SQLiteIdentityStore"]
 _TABLES = (
     "identity_rekeys",
     "identity_decisions",
+    "identity_claim_paths",
     "identity_claims",
     "identity_aliases",
     "identity_entities",
@@ -46,7 +47,9 @@ class SQLiteIdentityStore:
     runs through its merge back to the absorbed entity, wherever later merges of the
     survivor carried it, and drops that merge and every later one from the path. That
     is the whole rule: what an unmerge withdraws is found by the specific rows its
-    merge moved, never by a form's name.
+    merge moved, never by a form's name. Each step of a path is also kept as a row of
+    its own, indexed by the merge, so an unmerge reads only the claims its merge
+    carried, however many claims the projection holds.
 
     An entity shows one row per form, the first of the claims standing on it: its own
     recordings first, newest first, then what merges brought, the earliest merge first
@@ -186,6 +189,10 @@ class SQLiteIdentityStore:
                         "DELETE FROM identity_claims WHERE surface_form = ? AND seq = ?",
                         (normalized, shown[0]),
                     )
+                    self._conn.execute(
+                        "DELETE FROM identity_claim_paths WHERE surface_form = ? AND claim_seq = ?",
+                        (normalized, shown[0]),
+                    )
                 # The split judged the form to be the new entity's, so nothing else
                 # standing behind it on the original shows there again.
                 self._conn.execute(
@@ -240,6 +247,11 @@ class SQLiteIdentityStore:
                 "WHERE surface_form = ? AND seq = ?",
                 (str(kept), json.dumps(path), row["surface_form"], row["seq"]),
             )
+            self._conn.execute(
+                "INSERT OR IGNORE INTO identity_claim_paths (surface_form, claim_seq, merge_seq) "
+                "VALUES (?, ?, ?)",
+                (row["surface_form"], row["seq"], seq),
+            )
         for form in sorted({str(row["surface_form"]) for row in rows}):
             self._show(absorbed, form)
             self._show(kept, form)
@@ -254,18 +266,24 @@ class SQLiteIdentityStore:
         split judged the row it took, not the merge that brought this one.
         """
         rows = self._conn.execute(
-            "SELECT surface_form, seq, entity_id, path FROM identity_claims "
-            "WHERE EXISTS (SELECT 1 FROM json_each(identity_claims.path) WHERE value = ?)",
+            "SELECT c.surface_form, c.seq, c.entity_id, c.path FROM identity_claim_paths p "
+            "JOIN identity_claims c ON c.surface_form = p.surface_form AND c.seq = p.claim_seq "
+            "WHERE p.merge_seq = ? ORDER BY c.surface_form, c.seq",
             (merged_seq,),
         ).fetchall()
         touched: set[tuple[str, str]] = set()
         for row in rows:
             path = _path(row["path"])
-            rest = path[path.index(merged_seq) + 1 :]
+            cut = path.index(merged_seq) + 1
             self._conn.execute(
                 "UPDATE identity_claims SET entity_id = ?, path = ?, aside = 0 "
                 "WHERE surface_form = ? AND seq = ?",
-                (str(absorbed), json.dumps(rest), row["surface_form"], row["seq"]),
+                (str(absorbed), json.dumps(path[cut:]), row["surface_form"], row["seq"]),
+            )
+            self._conn.executemany(
+                "DELETE FROM identity_claim_paths "
+                "WHERE surface_form = ? AND claim_seq = ? AND merge_seq = ?",
+                [(row["surface_form"], row["seq"], dropped) for dropped in path[:cut]],
             )
             touched.add((str(row["entity_id"]), str(row["surface_form"])))
             touched.add((str(absorbed), str(row["surface_form"])))

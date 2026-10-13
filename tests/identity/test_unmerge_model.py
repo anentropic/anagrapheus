@@ -9,6 +9,7 @@ keeps the split's judgment as it was made.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 from uuid import UUID
@@ -257,6 +258,26 @@ def _rows(shown: dict[UUID, set[tuple[str, str, int]]]) -> set[tuple[UUID, Token
     return {(entity, (form, seq)) for entity, rows in shown.items() for form, _, seq in rows}
 
 
+def _path_members(rig: Rig) -> set[tuple[str, int, int]]:
+    """The indexed membership rows: which merges each claim's path runs through."""
+    rows = rig.store.connection.execute(
+        "SELECT surface_form, claim_seq, merge_seq FROM identity_claim_paths"
+    ).fetchall()
+    return {(str(form), int(seq), int(merged)) for form, seq, merged in rows}
+
+
+def _paths_spelled_out(rig: Rig) -> set[tuple[str, int, int]]:
+    """The same membership, read from each claim's own path."""
+    rows = rig.store.connection.execute(
+        "SELECT surface_form, seq, path FROM identity_claims"
+    ).fetchall()
+    return {
+        (str(form), int(seq), int(merged))
+        for form, seq, path in rows
+        for merged in json.loads(path)
+    }
+
+
 @settings(max_examples=400, deadline=None)
 @given(ops=opcodes(min_size=10, max_size=30, kinds=KINDS))
 def test_unmerge_matches_the_model(
@@ -296,6 +317,7 @@ def test_unmerge_matches_the_model(
                 "SELECT surface_form, seq FROM identity_aliases"
             ).fetchall()
             assert len({tuple(row) for row in rows}) == len(rows)
+            assert _path_members(rig) == _paths_spelled_out(rig)
 
             if decision.kind == "unmerge":
                 assert decision.withdraws is not None

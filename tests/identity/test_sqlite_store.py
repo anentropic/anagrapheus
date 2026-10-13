@@ -210,12 +210,22 @@ def _claims(conn: sqlite3.Connection) -> set[tuple[object, ...]]:
     }
 
 
+def _path_members(conn: sqlite3.Connection) -> set[tuple[object, ...]]:
+    return {
+        tuple(row)
+        for row in conn.execute(
+            "SELECT surface_form, claim_seq, merge_seq FROM identity_claim_paths"
+        )
+    }
+
+
 def test_a_populated_v1_projection_backfills_each_shown_row_as_a_claim(tmp_path: Path):
     """
     Every row v1 shows becomes its holder's own claim; nothing else changes.
 
     A's "acme-uk" was dropped by the v1 merge and so has no claim, and the rows the
-    merges moved onto K stand on K with no path: v1 kept no record of what carried them.
+    merges moved onto K stand on K with no path: v1 kept no record of what carried them,
+    so no claim is indexed under any merge either.
     """
     _build_v1(tmp_path / "v1.db")
 
@@ -229,6 +239,7 @@ def test_a_populated_v1_projection_backfills_each_shown_row_as_a_claim(tmp_path:
             ("acme-uk", 4, "certain", K, "[]", 0),
             ("acme-b", 5, "", K, "[]", 0),
         }
+        assert _path_members(conn) == set()
         migrated = snapshot(conn)
         for table, rows in V1_ROWS.items():
             assert sorted(map(repr, migrated[table])) == sorted(map(repr, rows)), table
@@ -284,6 +295,7 @@ def test_an_unmerge_over_a_migrated_v1_merge_gives_nothing_back_until_rebuild(tm
             ("acme-uk", 4, "certain", K, "[]", 0),
             ("acme-b", 5, "", K, "[7]", 0),
         }
+        assert _path_members(rig.store.connection) == {("acme-b", 5, 7)}
         shown = {
             entity: {(r.surface_form, r.stance, r.seq) for r in rig.registry.surface_forms(entity)}
             for entity in (KEPT, ABSORBED, OTHER)
