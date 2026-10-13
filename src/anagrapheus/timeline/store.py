@@ -68,7 +68,17 @@ class TransactionalStore(Protocol):
     """
 
     def transaction(self) -> AbstractContextManager[object]:
-        """One explicit transaction; nested entry joins the outer one."""
+        """One explicit transaction; nested entry becomes a savepoint in the outer one."""
+        ...
+
+    @property
+    def in_transaction(self) -> bool:
+        """
+        Whether a transaction is open on this store right now.
+
+        The projector reads it to refuse work whose effects would outlive an outer
+        transaction's rollback.
+        """
         ...
 
 

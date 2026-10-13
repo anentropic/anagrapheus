@@ -22,12 +22,17 @@ store cannot follow it to a worker thread because a SQLite connection belongs to
 thread that opened it. So the summarizer may be an :class:`AsyncSummarizer`, the fold
 awaits it in :meth:`ChronicleFold.prepare_async`, and
 :meth:`~anagrapheus.timeline.folds.Projector.catch_up_async` awaits that with no
-transaction open before applying the batch on the calling thread. A synchronous
-:class:`Summarizer` works under either path; an async one needs the awaited path.
+transaction open before applying the batch on the calling thread. An async summarizer
+needs the awaited path. A synchronous :class:`Summarizer` runs under either, but under
+the awaited one it is called on the event loop's thread and blocks the loop while it
+draws, and it cannot use a blocking model client that starts a loop of its own
+(``Agent.run_sync`` raises there): a summarizer that calls a model from async code
+should be an :class:`AsyncSummarizer`.
 """
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import logging
 from typing import TYPE_CHECKING, NamedTuple, Protocol
@@ -35,7 +40,7 @@ from typing import TYPE_CHECKING, NamedTuple, Protocol
 from anagrapheus.chronicle.sections import Anchor, Section
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Sequence
+    from collections.abc import Awaitable, Callable, Sequence
 
     from anagrapheus.chronicle.sections import SectionId
     from anagrapheus.chronicle.store import ChronicleStore
@@ -94,6 +99,13 @@ class AsyncSummarizer(Protocol):
     The shape an async application will want, since the model calls it makes are
     coroutines. A fold given one must be driven by
     :meth:`~anagrapheus.timeline.folds.Projector.catch_up_async`.
+
+    The fold tells the two kinds apart **before** calling, so that the synchronous path
+    refuses an async summarizer without starting its draw. It recognises an ``async def``
+    function, a callable object whose ``__call__`` is ``async def``, and anything marked
+    with :func:`inspect.markcoroutinefunction`. Write it as one of those: a plain
+    function that returns a task or other awaitable is only discovered once called, and
+    the synchronous path then has to cancel what it started.
     """
 
     def __call__(self, events: Sequence[StoredEvent]) -> Awaitable[Consolidation]:
@@ -126,6 +138,20 @@ class EventTypes:
         return (event.envelope.namespace, event.envelope.type) in self._types
 
 
+def _awaits(summarize: Callable[..., object]) -> bool:
+    """Whether ``summarize`` is recognisably async, judged without calling it."""
+    call = type(summarize).__call__  # the object's own, where it is a callable instance
+    return inspect.iscoroutinefunction(summarize) or inspect.iscoroutinefunction(call)
+
+
+def _discard(drawn: object) -> None:
+    """Stop an awaitable the synchronous path cannot await, so it draws nothing."""
+    if inspect.iscoroutine(drawn):
+        drawn.close()  # never started, so nothing was drawn
+    elif asyncio.isfuture(drawn):
+        drawn.cancel()
+
+
 class ChronicleFold:
     """
     Consolidates each closed unit into a section. **Generative**, per R61 clause 1.
@@ -151,6 +177,7 @@ class ChronicleFold:
         self._reader = reader
         self._boundary = boundary
         self._summarize = summarize
+        self._awaits = _awaits(summarize)
         self._name = name
         # What `prepare` drew, waiting for `apply` to write it. Emptied as it is
         # consumed, so it never holds more than one batch's worth.
@@ -160,6 +187,16 @@ class ChronicleFold:
     def name(self) -> str:
         """The position key."""
         return self._name
+
+    @property
+    def prepares_synchronously(self) -> bool:
+        """
+        Whether :meth:`prepare` can draw: ``False`` for an :class:`AsyncSummarizer`.
+
+        The projector asks before doing anything, so ``catch_up()`` and ``rebuild()``
+        refuse an async summarizer before folding or resetting anything.
+        """
+        return not self._awaits
 
     def prepare(self, event: StoredEvent) -> None:
         """
@@ -173,28 +210,37 @@ class ChronicleFold:
         The range is read here too, so a unit already covered costs no call at all.
 
         Raises :class:`TypeError` if the summarizer is an :class:`AsyncSummarizer`,
-        which only :meth:`prepare_async` can await.
+        which only :meth:`prepare_async` can await. A recognisably async one is refused
+        without being called; one discovered only by what it returned has that coroutine
+        closed or that task cancelled before the error is raised.
         """
+        if self._awaits:
+            raise self._needs_awaiting()
         unit = self._unit(event)
         if unit is None:
             return
         start, events = unit
         drawn = self._summarize(events)
         if inspect.isawaitable(drawn):
-            if inspect.iscoroutine(drawn):
-                drawn.close()  # never started, so nothing was drawn
-            raise TypeError(
-                f"{self._name!r} has an async summarizer; drive its projector with catch_up_async()"
-            )
+            _discard(drawn)
+            raise self._needs_awaiting()
         self._keep(start, event, drawn)
+
+    def _needs_awaiting(self) -> TypeError:
+        return TypeError(
+            f"{self._name!r} has an async summarizer; drive its projector with catch_up_async()"
+        )
 
     async def prepare_async(self, event: StoredEvent) -> None:
         """
         The awaited twin of :meth:`prepare`, for the awaited catch-up path.
 
         Takes either kind of summarizer: an async one is awaited, a synchronous one is
-        called. Everything else — the range, the skip for a unit already covered, what
-        ``apply`` is left to write — is :meth:`prepare`'s.
+        called. The synchronous call runs on the event loop's thread and blocks the loop
+        until it returns, so it must not start a loop of its own (``Agent.run_sync``
+        raises here); a summarizer that calls a model belongs in an
+        :class:`AsyncSummarizer`. Everything else — the range, the skip for a unit
+        already covered, what ``apply`` is left to write — is :meth:`prepare`'s.
         """
         unit = self._unit(event)
         if unit is None:
