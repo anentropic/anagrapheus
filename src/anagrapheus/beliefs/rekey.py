@@ -18,7 +18,7 @@ handed to the caller with everything computed and nothing decided.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from anagrapheus.beliefs.errors import BeliefError, MergeCycleInBatch, UnrenderableBelief
@@ -40,6 +40,9 @@ type _Key = tuple[int, str, UUID]
 #: Rows gathered by the decision that emitted them.
 type _Grouped = dict[_Key, list[UUID]]
 
+#: A decision that moves an entity on: ``(seq, kind, where it goes)``.
+type _Step = tuple[int, str, UUID]
+
 
 @dataclass(frozen=True, slots=True)
 class _Batch:
@@ -49,11 +52,17 @@ class _Batch:
     ``decisions`` holds the ones that landed. ``withdrawn`` names each merge a later
     unmerge in the batch gave back. ``holders`` names, for each unmerge, the entities
     whose beliefs it re-keys, when that is not simply the entity its rows come from.
+
+    ``steps`` and ``branches`` remember what following an entity through the batch
+    found, so each walk is made once per plan. The two sides of an unmerge can meet
+    again, and walked afresh every time they meet, the walks double with each unmerge.
     """
 
     decisions: _Grouped
     withdrawn: frozenset[_Key]
     holders: dict[_Key, tuple[UUID, ...]]
+    steps: dict[tuple[UUID, int, bool], _Step | None] = field(default_factory=dict)
+    branches: dict[tuple[UUID, int], tuple[UUID, ...]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -293,8 +302,8 @@ def _follow(
         when, kind, onward = step
         if kind == "unmerge":
             # Each side starts afresh: an unmerge is not a step of any ring.
-            ends = _follow(current, when, {current}, origin, batch, branching=True)
-            for end in _follow(onward, when, {onward}, origin, batch, branching=True):
+            ends = list(_branch(current, when, origin, batch))
+            for end in _branch(onward, when, origin, batch):
                 if end not in ends:
                     ends.append(end)
             return ends
@@ -309,7 +318,16 @@ def _follow(
     return [current]
 
 
-def _next(entity: UUID, at: int, batch: _Batch, *, branching: bool) -> tuple[int, str, UUID] | None:
+def _branch(entity: UUID, at: int, origin: UUID, batch: _Batch) -> tuple[UUID, ...]:
+    """One side of an unmerge at ``at``, followed from ``entity``; walked once per plan."""
+    if (ends := batch.branches.get((entity, at))) is None:
+        # A ring raises before anything is kept, so ``origin`` names it on every walk.
+        ends = tuple(_follow(entity, at, {entity}, origin, batch, branching=True))
+        batch.branches[entity, at] = ends
+    return ends
+
+
+def _next(entity: UUID, at: int, batch: _Batch, *, branching: bool) -> _Step | None:
     """
     The next decision in the batch that moves ``entity`` on from position ``at``.
 
@@ -323,7 +341,15 @@ def _next(entity: UUID, at: int, batch: _Batch, *, branching: bool) -> tuple[int
     With ``branching``, an unmerge after ``at`` from where ``entity`` stands is
     followed too, as ``(seq, "unmerge", the entity it gave back)``.
     """
-    found: tuple[int, str, UUID] | None = None
+    key = (entity, at, branching)
+    if key not in batch.steps:
+        batch.steps[key] = _scan(entity, at, batch, branching=branching)
+    return batch.steps[key]
+
+
+def _scan(entity: UUID, at: int, batch: _Batch, *, branching: bool) -> _Step | None:
+    """``_next`` worked out from the batch's decisions."""
+    found: _Step | None = None
     for key, targets in batch.decisions.items():
         seq, kind, from_entity = key
         if kind == "merge" and from_entity == entity and key not in batch.withdrawn:
