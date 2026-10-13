@@ -8,15 +8,20 @@ from uuid import UUID
 import pytest
 
 from anagrapheus.identity import (
+    Aliased,
     Established,
     IdentityFold,
     IdentityRegistry,
     IdentityRole,
     IdentityVocabulary,
+    Merged,
     RoleBinding,
+    Split,
     SQLiteIdentityStore,
+    Unmerged,
     alias,
     establish,
+    merge,
     register_builtin_events,
 )
 from anagrapheus.identity.vocabulary import _expect  # noqa: PLC2701
@@ -219,3 +224,48 @@ def _expect_split():
     from anagrapheus.identity import Split
 
     return _expect(Split)
+
+
+def test_a_vocabulary_may_leave_unmerge_unbound(tmp_path: Path):
+    """
+    A vocabulary written before unmerge existed keeps working.
+
+    It does not fold the library's unmerge event either: an unbound role carries no
+    event type, so the merge stands.
+    """
+    types = EventTypeRegistry()
+    register_builtin_events(types)
+    vocabulary = IdentityVocabulary(
+        {
+            IdentityRole.ESTABLISHED: RoleBinding(
+                RESERVED_NAMESPACE, "established", _expect(Established)
+            ),
+            IdentityRole.ALIASED: RoleBinding(RESERVED_NAMESPACE, "aliased", _expect(Aliased)),
+            IdentityRole.MERGED: RoleBinding(RESERVED_NAMESPACE, "merged", _expect(Merged)),
+            IdentityRole.SPLIT: RoleBinding(RESERVED_NAMESPACE, "split", _expect(Split)),
+        }
+    )
+    assert vocabulary.role_for(RESERVED_NAMESPACE, "unmerged") is None
+
+    store = SQLiteEventStore(tmp_path / "old.db")
+    try:
+        identity_store = SQLiteIdentityStore(store.connection)
+        fold = IdentityFold(identity_store, types, vocabulary=vocabulary)
+        projector = Projector(store, EventReader(store, UpcastRegistry(), types), [fold])
+        registry = IdentityRegistry(identity_store)
+        kept, e1 = establish(types, "kept", provenance="x")
+        absorbed, e2 = establish(types, "absorbed", provenance="x")
+        store.append(
+            [
+                e1,
+                e2,
+                merge(types, kept=kept, absorbed=absorbed),
+                types.pending(Unmerged(kept=kept, absorbed=absorbed)),
+            ]
+        )
+        projector.catch_up()
+
+        assert registry.canonical(absorbed) == kept
+        assert [row.kind for row in registry.history(absorbed)] == ["established", "absorbed"]
+    finally:
+        store.close()
