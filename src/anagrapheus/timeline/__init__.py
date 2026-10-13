@@ -16,10 +16,12 @@ from anagrapheus.timeline.errors import (
     UpcastGap,
 )
 from anagrapheus.timeline.folds import (
+    AsyncGenerativeFold,
     FoldDeterminism,
     GenerativeFold,
     GenerativeRebuild,
     OwnsPosition,
+    PreparesSynchronously,
     ProjectionFold,
     Projector,
 )
@@ -55,6 +57,7 @@ from anagrapheus.timeline.upcast import EventReader, Upcast, UpcastRegistry
 
 __all__ = [
     "RESERVED_NAMESPACE",
+    "AsyncGenerativeFold",
     "ConcurrencyError",
     "DiscardedPin",
     "Divergence",
@@ -78,6 +81,7 @@ __all__ = [
     "GenerativeFold",
     "GenerativeRebuild",
     "OwnsPosition",
+    "PreparesSynchronously",
     "ProjectionFold",
     "Projector",
     "Recording",

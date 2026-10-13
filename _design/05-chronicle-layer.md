@@ -5,8 +5,7 @@ or fills gaps in the upstream design. Spec authority is
 [`agent-core` doc 00 §7](https://github.com/anentropic/narrative-vm/blob/main/_design/agent-core/00-agent-core-architecture.md);
 the grade question is settled by
 [**R61**](https://github.com/anentropic/narrative-vm/blob/main/_design/v2/16-nvm-decision-register.md),
-which is **PROPOSED 2026-08-30 and awaiting sign-off** — nothing here states it as
-current, and if it moves in sign-off this follows.
+which is **RATIFIED 2026-10-12** (proposed 2026-08-30).
 
 Doc 00 §7 keeps four things and discards the rest as commodity: consolidate ranges of
 the log into prose that **cites the range it covers**; supersede rather than correct;
@@ -221,6 +220,35 @@ the whole run replays on a **fresh store**, not the one that recorded it.
 **What is still not exercised.** Four rounds is not the case this layer exists for. The
 recency/depth split is wired and read, but nothing yet runs long enough for consolidated
 prose to be doing work that the verbatim tail could not.
+
+## 7c. The awaited path — [ours]
+
+**The draw could not be made from async code.** `Summarizer`, `GenerativeFold.prepare`
+and `Projector.catch_up` were all synchronous. Inside a running loop the summarizer's
+`Agent.run_sync` raises *"This event loop is already running"*, and handing
+`catch_up` to `asyncio.to_thread` fails too, because the SQLite connection belongs to
+the loop's thread. The `chronicle/fold.py` module docstring called the bridge "the
+summarizer's" to make; there was none to make short of a second store on a worker
+thread.
+
+The fix takes the shape [note 04 §2](04-provider-layer.md) took for `resolve_async`:
+the store stays synchronous, and **the slow part — the draw — is the part awaited**.
+
+- `AsyncGenerativeFold.prepare_async(event)` sits beside `GenerativeFold.prepare`, in
+  `timeline`, for the same reason the grade does: any generative fold may want it.
+- `Projector.catch_up_async()` (and `rebuild_async()`) awaits each `prepare_async` with
+  no transaction open, then runs `apply` and the position commit synchronously on the
+  calling thread. It shares the batch loop and `_apply_batch` with the sync path, so
+  `OwnsPosition` and rollback behave identically; only how a batch is prepared differs.
+  A generative fold without `prepare_async` has its sync `prepare` called, and
+  deterministic folds are untouched, so one projector holds both.
+- `ChronicleFold` accepts an `AsyncSummarizer` (any callable returning an awaitable).
+  Its `prepare_async` awaits one and calls a sync one; its `prepare` refuses an async
+  one with a `TypeError` naming `catch_up_async`, closing the coroutine unstarted so
+  nothing is drawn. Pins need nothing new: an async summarizer drawing through
+  `PinnedModel` already resolves through `resolve_async`, on the loop's thread.
+
+Additive, no events. `check_same_thread=False` stays declined, per note 04 §5.
 
 ## 8. Open questions
 

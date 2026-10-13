@@ -242,7 +242,114 @@ read = context.describe()["read"]
 assert all(source.get("scope") != "party:uk:held" for source in read)
 ```
 
-`context.describe()` returns the whole context (parts, shed parts and sources) as plain data, ready for a golden test or a log line.
+`context.describe()` returns the whole context (parts, shed parts and sources) as plain data, ready for a log line or for the golden test below.
+
+## Check the assembler against a golden
+
+The library cannot check that your assembler is pure, and it ships no golden-test helper. Your own tests can do the check: build a context over a fixed log at a fixed position, and compare `context.describe()` with a file you committed. Comparing structure (parts, registers, ranks, sources) rather than rendered text keeps the test stable when only the wording of your renderer changes.
+
+One thing gets in the way. The sources in `describe()` carry event ids, and a belief's id carries the ids of its entities. These are fresh uuids every time the fixture log is built, so a golden compared as it stands fails on the next run. There are two ways round it:
+
+- **Replace the ids with stable labels** before comparing, as below. Each uuid becomes `id-1`, `id-2` and so on, in the order it first appears, so the test still sees which sources are the same.
+- **Load the same log every time.** Appending stored events keeps their event ids, and entity ids are in the payloads, so a log saved once and loaded into a fresh store gives identical ids and seqs.
+
+This pytest test imports the fixture log, the grant and the assembler from `assemble_prompts.py` above. Importing that script runs it once, against its in-memory store: it prints the example prompt and commits a pin, which moves the end of the log, so the test reads at a fixed position. In your own project, keep the fixture log, the grants and the assemblers in a module that does nothing when imported. Run the test once with `UPDATE_GOLDEN=1` to write the golden, review the file, and commit it:
+
+```python title="test_norway_golden.py"
+import json
+import os
+import re
+from pathlib import Path
+
+from assemble_prompts import budget, norway_assembler, norway_grant
+
+from anagrapheus.assembly import assemble
+
+GOLDEN = Path(__file__).parent / "goldens" / "norway.json"
+UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+
+
+def stable_ids(text: str) -> str:
+    """Replace each uuid with a label numbered in order of first appearance."""
+    labels: dict[str, str] = {}
+    return UUID.sub(lambda m: labels.setdefault(m[0], f"id-{len(labels) + 1}"), text)
+
+
+def test_norway_context_matches_golden() -> None:
+    # Read at a fixed position, not at the end of the log, which pins move.
+    context = assemble("norway", norway_assembler, norway_grant(3), budget=budget)
+    actual = stable_ids(json.dumps(context.describe(), indent=2)) + "\n"
+    if os.environ.get("UPDATE_GOLDEN") == "1":
+        GOLDEN.parent.mkdir(exist_ok=True)
+        GOLDEN.write_text(actual)
+    assert actual == GOLDEN.read_text()
+```
+
+The golden it writes, `goldens/norway.json`:
+
+```json title="goldens/norway.json"
+{
+  "role": "norway",
+  "upto_seq": 3,
+  "parts": [
+    {
+      "slot": "ask",
+      "register": "binding",
+      "rank": 0,
+      "content": "Respond to the latest offer in one sentence.",
+      "sources": [
+        {
+          "given": "ask",
+          "event": null
+        }
+      ]
+    },
+    {
+      "slot": "belief",
+      "register": "considered",
+      "rank": 2,
+      "content": "UK will settle at 8%",
+      "sources": [
+        {
+          "state": "v1:fisheries:position(id-1,id-2)",
+          "scope": "party:norway:held",
+          "event": "id-3"
+        }
+      ]
+    },
+    {
+      "slot": "offer",
+      "register": "considered",
+      "rank": 1,
+      "content": "UK: A 12% cut to the mackerel quota.",
+      "sources": [
+        {
+          "event": "id-4",
+          "seq": 3
+        }
+      ]
+    }
+  ],
+  "shed": [],
+  "read": [
+    {
+      "event": "id-4",
+      "seq": 3
+    },
+    {
+      "state": "v1:fisheries:position(id-1,id-2)",
+      "scope": "party:norway:held",
+      "event": "id-3"
+    },
+    {
+      "given": "ask",
+      "event": null
+    }
+  ]
+}
+```
+
+When the test fails, the assembler built a different context from the same log. If the change was intended, rerun with `UPDATE_GOLDEN=1` and review the diff of the golden before committing it. A change that alters the rendered prompt also shows up on replay, as a pin miss.
 
 ## Put chronicle prose in a prompt
 

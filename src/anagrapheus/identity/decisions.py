@@ -12,6 +12,8 @@ for is :func:`mint_entity_id`, because the replay hazard it addresses is not a
 property of the names.
 """
 
+# Design: note 02; upstream agent-core doc 00 §4a.
+
 from __future__ import annotations
 
 import uuid
@@ -61,10 +63,10 @@ def mint_entity_id(
     """
     Mint an id for a newly established entity, pinned when a resolver is given.
 
-    **Minting consumes entropy**, which makes it exactly the kind of effect §4a says
-    to key on. Under generation-replay an unpinned mint draws a fresh id, and every
-    belief, pin and reference keyed on the original silently orphans — the same
-    failure mode as pin-key drift, reached from the other direction.
+    **Minting consumes entropy**, which makes it exactly the kind of effect a pin keys
+    on. Under generation-replay an unpinned mint draws a fresh id, and every belief, pin
+    and reference keyed on the original silently orphans — the same failure mode as
+    pin-key drift, reached from the other direction.
 
     Pass a ``resolver`` and the id is drawn through the pin ledger under ``material``,
     so a replayed run re-establishes the *same* entity. Without one this is a plain
