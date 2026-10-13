@@ -122,7 +122,13 @@ class Context:
     read: tuple[Source, ...] = ()
 
     def describe(self) -> JsonValue:
-        """The context as plain data, for a golden test or a log line."""
+        """
+        The context as plain data, for a log line or for a golden in your own tests.
+
+        Sources carry event ids, and a belief's id carries its entities' ids, so a fresh
+        fixture log gives different ids on every run. Compare against a golden either
+        over a log loaded with its stored ids, or after replacing ids with stable labels.
+        """
         return {
             "role": self.role,
             "upto_seq": self.upto_seq,
