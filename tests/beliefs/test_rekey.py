@@ -6,6 +6,7 @@ import itertools
 import uuid
 
 import pytest
+from hypothesis import given, settings
 
 from anagrapheus.beliefs import (
     BeliefError,
@@ -17,6 +18,7 @@ from anagrapheus.beliefs import (
 from anagrapheus.identity import (
     IdentityFold,
     IdentityRegistry,
+    Merged,
     SQLiteIdentityStore,
     Unmerged,
     establish,
@@ -26,7 +28,9 @@ from anagrapheus.identity import (
 from anagrapheus.identity.store import RekeyRow
 from anagrapheus.timeline import EventReader, Projector, UpcastRegistry
 
-from .conftest import Rig, build_predicates
+from ..identity.test_fold import opcodes
+from ..identity.test_unmerge_model import KINDS, history
+from .conftest import Rig, build_predicates, build_rig
 
 
 def test_a_merge_computes_one_successor_per_affected_belief(rig: Rig):
@@ -569,3 +573,70 @@ def test_the_planner_and_the_identity_layer_agree_on_unmerges_of_a_chain(
             }
     planned = {plan.from_entity for plan in plans if plan.kind == "merge"}
     assert planned == {e for e in (a, b, c) if identity.canonical(e) != e}
+
+
+@settings(max_examples=200, deadline=None)
+@given(ops=opcodes(min_size=10, max_size=30, kinds=KINDS))
+def test_the_planner_and_the_identity_layer_agree_over_generated_histories(
+    tmp_path_factory: pytest.TempPathFactory, ops: list[tuple[int, int, int]]
+):
+    """
+    Generated merges and unmerges over entities that each hold a belief, in one batch.
+
+    The same agreement as for the chain above: a belief keyed on an entity the batch
+    merged is planned onto the entity identity resolves it to, an unmerge offers only
+    entities that are canonical again, and the entities planned are exactly those the
+    batch left merged.
+    """
+    rig = build_rig(tmp_path_factory.mktemp("rekey-model") / "beliefs.db")
+    try:
+        identity_store = SQLiteIdentityStore(rig.store.connection)
+        identity = IdentityRegistry(identity_store)
+        projector = Projector(
+            rig.store,
+            EventReader(rig.store, UpcastRegistry(), rig.types),
+            [IdentityFold(identity_store, rig.types), rig.fold],
+        )
+        decisions = history(ops)
+        # Every entity is established and holds a belief before the batch, the split
+        # products included: the splits themselves are not part of it.
+        entities = sorted({d.subject for d in decisions} | {d.other for d in decisions if d.other})
+        rig.store.append(
+            [
+                *(
+                    establish(rig.types, "e", provenance="x", entity_id=entity)[1]
+                    for entity in entities
+                ),
+                *(rig.asserted("location", entity) for entity in entities),
+            ]
+        )
+        projector.catch_up()
+        before = rig.store.last_seq()
+        batch = [
+            rig.types.pending(
+                (Merged if d.kind == "merge" else Unmerged)(kept=d.other, absorbed=d.subject)
+            )
+            for d in decisions
+            if d.kind in {"merge", "unmerge"} and d.other is not None
+        ]
+        if not batch:
+            return
+        rig.store.append(batch)
+        projector.catch_up()
+
+        plans = plan_rekeys(identity.rekeys_since(before), rig.index, rig.predicates)
+        for plan in plans:
+            if plan.kind == "merge":
+                assert plan.sole() == rig.predicates.belief_id(
+                    "location", identity.canonical(plan.from_entity)
+                )
+            else:
+                assert set(plan.candidates) <= {
+                    rig.predicates.belief_id("location", e)
+                    for e in entities
+                    if identity.canonical(e) == e
+                }
+        planned = {plan.from_entity for plan in plans if plan.kind == "merge"}
+        assert planned == {e for e in entities if identity.canonical(e) != e}
+    finally:
+        rig.store.close()

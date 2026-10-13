@@ -282,6 +282,29 @@ merges final.
   given back, and an unmerge of a pair the batch left apart. Before this, `_onward`
   followed the first of two merges while the store kept the second; now both keep
   the first.
+- **Unmerge follows rows, not names (added 2026-10-13).** This replaces the `moved`
+  and `shared` reading above and the re-application rules in "Re-applied batches".
+  Chained unmerges (B into A, A into Z, then B out of A) needed a patch per case,
+  because the projection kept only the one row each entity shows per form and the
+  unmerge had to guess, by form name, where the merge's rows had gone. A later
+  recording of the same name on A was taken for B's row, and B got nothing back.
+  Schema v2 adds `identity_claims`: every recording, named by `(surface_form, seq)`,
+  with the entity it stands on and its `path`, the merges that carried it there,
+  latest first. A merge moves every claim on the absorbed entity to the survivor and
+  prepends itself to their paths; an unmerge sends every claim whose path contains
+  its merge back to the absorbed entity and cuts the path there. `identity_aliases`
+  is derived: an entity shows, per form, its own latest recording, else the claim
+  from the earliest merge, recursively. That ordering is what the claims would be
+  had no withdrawn merge happened, so the outcome is the counterfactual. A split
+  deletes the claim it took and sets aside the rest of that form on the original;
+  an unmerge of a merge that carried a set-aside claim sends it back. Every decision
+  now applies once: a re-applied decision finds its own decision row at its position
+  and does nothing, which also stops a re-applied split taking a later alias of the
+  original. `tests/identity/test_unmerge_model.py` checks generated histories,
+  after every step, against a plain model of the counterfactual. The `absorbed` row
+  still records `moved` and `shared`, for the audit trail only. The v2 migration
+  backfills each shown row as its holder's own claim, so an unmerge of a merge folded
+  before it gives nothing back until the projection is rebuilt.
 - **API breaks, before 0.1.0.** `IdentityRole` has a fifth member, and
   `IdentityStore` has a new `unmerged()`, which third-party stores must implement.
   Additive: `IdentityRegistry.merged_into()`, `NotMerged`, `AlreadyMerged`,

@@ -160,16 +160,24 @@ def _script(ops: list[tuple[int, int, int]], types: EventTypeRegistry) -> list[P
     return events
 
 
-@settings(max_examples=25, deadline=None)
-@given(
-    ops=st.lists(
+def opcodes(
+    max_size: int = 24, kinds: st.SearchStrategy[int] | None = None, min_size: int = 0
+) -> st.SearchStrategy[list[tuple[int, int, int]]]:
+    """Histories as opcodes: a decision kind, then two numbers it picks its subjects by."""
+    return st.lists(
         st.tuples(
-            st.integers(min_value=0, max_value=4),
+            st.integers(min_value=0, max_value=4) if kinds is None else kinds,
             st.integers(min_value=0, max_value=9),
             st.integers(min_value=0, max_value=9),
         ),
-        max_size=24,
-    ),
+        min_size=min_size,
+        max_size=max_size,
+    )
+
+
+@settings(max_examples=25, deadline=None)
+@given(
+    ops=opcodes(),
     batch_size=st.integers(min_value=1, max_value=5),
     split_at=st.integers(min_value=0, max_value=10),
 )

@@ -753,3 +753,39 @@ def test_every_order_of_unmerges_gives_back_what_each_entity_brought(
     assert _forms(rig, z, a, b, c) == brought
     for entity_id in (z, a, b, c):
         assert rig.registry.canonical(entity_id) == entity_id
+
+
+def test_a_later_form_of_the_same_name_on_the_survivor_does_not_hide_the_row(rig: Rig):
+    """
+    B into A, A into Z, then A records "bee" itself: B out of A still finds B's row on Z.
+
+    A's own "bee" is a later recording of the same name, not the row the merge moved,
+    so it stays on A, and B takes its own row back off Z.
+    """
+    z, ez = establish(rig.types, "z", provenance="x")
+    a, ea = establish(rig.types, "a", provenance="x")
+    b, eb = establish(rig.types, "b", provenance="x")
+    rig.commit(
+        ez,
+        ea,
+        eb,
+        alias(rig.types, b, "bee", "believed"),
+        merge(rig.types, kept=a, absorbed=b),
+        merge(rig.types, kept=z, absorbed=a),
+    )
+    bee = _forms(rig, z)[z]
+    rig.commit(alias(rig.types, a, "bee", "certain"))
+    own = _forms(rig, a)[a]
+
+    rig.commit(unmerge(rig.types, rig.registry, kept=a, absorbed=b))
+
+    # A still yields to Z, so its own "bee" resolves to Z.
+    assert {(r.entity_id, r.stance) for r in rig.registry.resolve("bee").candidates} == {
+        (z, "certain"),
+        (b, "believed"),
+    }
+    assert _forms(rig, a)[a] == own
+    assert {row for row in bee if row[0] == "bee"} <= _forms(rig, b)[b]
+    assert {r.surface_form for r in rig.registry.surface_forms(z)} == {"z", "a"}
+    _assert_replay_is_idempotent(rig)
+    assert _forms(rig, a)[a] == own
