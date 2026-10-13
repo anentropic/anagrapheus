@@ -106,7 +106,7 @@ Turning a context into messages is your application's job; the library fixes the
 
 An assembler must be a pure function of its grant. Slices read at one position, and everything under them is either a deterministic fold or a pin, so **the same log at the same position gives the same context, part for part**. The rendered bytes are then the same, which is what lets a replay hit its pins.
 
-The library cannot check that your assembler is pure. A golden test can: [`Context.describe()`][context-describe] returns the context as plain data (parts, registers, ranks, sources, what was shed and read), suitable for comparing against a committed expectation built from a fixture log. Comparing structure rather than rendered text keeps the test stable when wording changes.
+The library cannot check that your assembler is pure. A golden test can: [`Context.describe()`][context-describe] returns the context as plain data (parts, registers, ranks, sources, what was shed and read), suitable for comparing against a committed expectation built from a fixture log. Comparing structure rather than rendered text keeps the test stable when wording changes. Event and entity ids are drawn fresh on every run, so the fixture must either be loaded with its stored ids or have its ids replaced with stable labels; [Check the assembler against a golden](../how-to/assemble-prompts.md#check-the-assembler-against-a-golden) shows one way.
 
 A `generated` part is only as stable as its pin. A chronicle rebuilt without its pins has different prose, so a context built over it changes too. That is correct, because a different summary is a different prompt, and the context's sources say which sections it used.
 
