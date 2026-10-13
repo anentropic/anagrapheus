@@ -90,6 +90,8 @@ Each fold has a **position**: the `seq` of the last event it has folded, stored 
 
 A fold whose state does not outlive the process, such as a belief fold over an in-memory store, should not have its position in the file: a reopened database would then claim the empty state was current. Such a fold implements [`OwnsPosition`][owns-position] and keeps its position on itself, starting at 0 in each process, so a reopen replays the whole log into it. [`Projector.position(name)`][projector-position] reads a fold's position wherever it is kept. The belief fold makes the choice explicit with its required `durable` flag; see [Beliefs](beliefs.md#where-the-position-lives).
 
+A position kept on the fold cannot roll back with the store, so the projector refuses to run such a fold while a transaction is open on the store: an outer rollback would remove the events but leave the fold's state and position past them, and the next append would reuse those `seq` values unseen. Call `catch_up()` and `rebuild()` outside any `store.transaction()` block.
+
 The position commit and the fold's writes need to move together. If a crash lands between them, either the projection is ahead of its position (and events would be folded twice) or behind it (and events would be skipped). anagrapheus closes that gap in two ways:
 
 - When the store supports transactions, as [`SQLiteEventStore`][sqlite-store] does, the projector applies each batch and commits the position inside one transaction. A projection whose tables live in the same database file therefore commits atomically with its position.
