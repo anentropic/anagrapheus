@@ -252,7 +252,7 @@ One thing gets in the way. The sources in `describe()` carry event ids, and a be
 - **Replace the ids with stable labels** before comparing, as below. Each uuid becomes `id-1`, `id-2` and so on, in the order it first appears, so the test still sees which sources are the same.
 - **Load the same log every time.** Appending stored events keeps their event ids, and entity ids are in the payloads, so a log saved once and loaded into a fresh store gives identical ids and seqs.
 
-This pytest test imports the fixture log, the grant and the assembler from `assemble_prompts.py` above. Run it once with `UPDATE_GOLDEN=1` to write the golden, review the file, and commit it:
+This pytest test imports the fixture log, the grant and the assembler from `assemble_prompts.py` above. Importing that script runs it once, against its in-memory store: it prints the example prompt and commits a pin, which moves the end of the log, so the test reads at a fixed position. In your own project, keep the fixture log, the grants and the assemblers in a module that does nothing when imported. Run the test once with `UPDATE_GOLDEN=1` to write the golden, review the file, and commit it:
 
 ```python title="test_norway_golden.py"
 import json
@@ -278,7 +278,7 @@ def test_norway_context_matches_golden() -> None:
     # Read at a fixed position, not at the end of the log, which pins move.
     context = assemble("norway", norway_assembler, norway_grant(3), budget=budget)
     actual = stable_ids(json.dumps(context.describe(), indent=2)) + "\n"
-    if os.environ.get("UPDATE_GOLDEN"):
+    if os.environ.get("UPDATE_GOLDEN") == "1":
         GOLDEN.parent.mkdir(exist_ok=True)
         GOLDEN.write_text(actual)
     assert actual == GOLDEN.read_text()
