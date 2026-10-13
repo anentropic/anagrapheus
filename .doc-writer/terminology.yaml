@@ -1,0 +1,59 @@
+version: 1
+
+source_terms:
+  - canonical: "PinnedModel"
+    variants: []
+    source: "class PinnedModel in src/anagrapheus/provider/model.py"
+  - canonical: "PinLedger"
+    variants: []
+    source: "class PinLedger in src/anagrapheus/timeline/pins.py"
+  - canonical: "ReplayPins"
+    variants: []
+    source: "class ReplayPins in src/anagrapheus/timeline/replay.py"
+  - canonical: "BeliefIndex"
+    variants: []
+    source: "class BeliefIndex in src/anagrapheus/beliefs/index.py (prose name: entity index)"
+  - canonical: "Summarizer"
+    variants: []
+    source: "class Summarizer in src/anagrapheus/chronicle/fold.py (code spelling; prose uses 'summariser')"
+  - canonical: "Ladder"
+    variants: []
+    source: "class Ladder in src/anagrapheus/identity/ladder.py (its rungs are 'stance tokens')"
+
+proper_nouns:
+  - canonical: "pydantic-ai"
+    variants: []
+  - canonical: "doxastica"
+    variants: []
+  - canonical: "SQLite"
+    variants: ["sqlite (prose)"]
+  - canonical: "UUIDv7"
+    variants: []
+
+project_terms:
+  - canonical: "entity index"
+    variants: ["belief index", "entity-to-belief index"]
+    note: "the BeliefIndex projection, from each entity to the belief ids that name it"
+  - canonical: "scratch area"
+    variants: ["scratch space"]
+    note: "the PinLedger's uncommitted pin table; 'scratch' alone is acceptable"
+  - canonical: "stance tokens"
+    variants: ["stance words"]
+    note: "identity-layer alias stances ordered by a Ladder; source docstrings say 'token'"
+  - canonical: "names (of an entity)"
+    variants: ["forms", "named forms"]
+    note: "prose term for surface forms; code says surface_form"
+  - canonical: "summariser"
+    variants: ["summarizer (prose)"]
+    note: "British spelling in prose; Summarizer / summarize= stay as code"
+  - canonical: "re-key"
+    variants: ["rekey (prose)"]
+    note: "prose hyphenates; code names rekeys_since, plan_rekeys, BeliefRekey unchanged"
+  - canonical: "position"
+    variants: ["watermark"]
+    note: "never 'watermark' except where the explanation contrasts the two"
+  - canonical: "unit of work"
+    variants: []
+    note: "used both for a PinLedger's commit group and a chronicle consolidation unit, as in the source"
+
+overrides: {}

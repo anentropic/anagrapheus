@@ -84,9 +84,9 @@ class PredicateKind(StrEnum):
       would silently retract the belief about bob — a retraction nobody asked for and
       nothing records.
 
-    Declaring the kind is what lets :class:`~anagrapheus.beliefs.writer.BeliefWriter`
-    reject a relational belief carrying a substantive value; the arity check catches
-    the shape, and the kind catches the intent.
+    Declaring the kind is what lets :meth:`Predicate.check_value` reject a relational
+    belief carrying a substantive value, on every path that writes one; the arity check
+    catches the shape, and the kind catches the intent.
     """
 
     FUNCTIONAL = "functional"
