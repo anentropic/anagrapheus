@@ -361,11 +361,12 @@ def test_record_mode_coalesces_across_transports_too(rig: Rig):
     """
     The same race in record-mode replay, where it fails silently instead of loudly.
 
-    There is no primary key to raise here: both draws simply complete and the last one
-    written wins. A test is the only thing that would notice.
+    Record mode draws through a ledger, so a double draw would now hit the scratch's
+    primary key; before that, both draws completed and the last one written won. The
+    count is the assertion either way.
     """
     counter = Bimodal("Lisbon", delay=0.01)
-    replay = ReplayPins.from_events([], rig.types, on_miss="record")
+    replay = ReplayPins.from_events([], rig.types, on_miss="record", into=rig.ledger)
     model = PinnedModel(counter.model(), replay)
     messages = [_prompt("where?")]
 

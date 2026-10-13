@@ -23,7 +23,9 @@ A key includes the model's id, so replaying a recorded run with
 :class:`~anagrapheus.timeline.ReplayPins` in ``"record"`` mode and *one* role's model
 changed makes exactly that role's calls miss and draw fresh. Every call upstream replays
 bit for bit; calls downstream re-draw only where their prompt actually changed; and the
-replay's ``divergence`` says where it stopped being a replay. That is a controlled
+replay's ``divergence`` says where it stopped being a replay. The replay draws into a
+``PinLedger`` passed as ``into=``, so committing it puts the new run in the log, where
+it replays strictly. That is a controlled
 comparison rather than two independent runs that differ in everything at once.
 
 **Two models with the same id share pins**, and that is the trap in the last paragraph.

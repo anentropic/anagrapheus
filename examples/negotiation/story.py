@@ -68,7 +68,7 @@ from pydantic_ai import Agent
 from anagrapheus.assembly import EventsSlice, Part, Register, assemble
 from anagrapheus.chronicle import Consolidation
 from anagrapheus.provider import PinnedModel
-from anagrapheus.timeline import PinLedger
+from anagrapheus.timeline import PinLedger, ReplayPins
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -115,7 +115,8 @@ class Negotiation:
     table: Table
     rounds: tuple[Round, ...]
     steps: tuple[Step, ...]
-    #: Where the round's draws went: a ledger on a live run, a replay source otherwise.
+    #: Where the round's draws went: a ledger on a live run, a replay source otherwise
+    #: (which, in record mode, draws into a ledger of its own).
     pins: PinResolver
     #: Which model filled which role. Recorded so a result can be attributed to the
     #: models that produced it rather than to the ones somebody meant to pass.
@@ -126,17 +127,21 @@ class Negotiation:
 
     def commit(self) -> None:
         """
-        Promote the run's pins into the log, if this run drew any.
+        Promote the run's pins into the log: a live run's, or a record-mode replay's.
 
         Until this, every draw lives in the scratch — persistent, but never canon — and
         nothing in the log records that it happened, so there is nothing for a replay to
-        read. A replay run has nothing to commit and says so by having no ``commit``:
-        the check is ``isinstance`` rather than ``hasattr`` because a silently skipped
-        commit on a live run would produce a log that replays to zero pins and looks
-        like a passing test.
+        read. A record-mode replay is a new run too: it drew into the ledger it was
+        given as ``into=``, and committing that ledger promotes its pins with the
+        ``ReplayDiverged`` that says where it stopped being a replay. Only a strict
+        replay has nothing to commit, because it drew nothing. The checks are
+        ``isinstance`` rather than ``hasattr`` because a silently skipped commit would
+        produce a log that replays to zero pins and looks like a passing test.
         """
         if isinstance(self.pins, PinLedger):
             self.pins.commit()
+        elif isinstance(self.pins, ReplayPins) and self.pins.ledger is not None:
+            self.pins.ledger.commit()
 
 
 class RoundSummary:
@@ -254,7 +259,9 @@ def negotiate(
     :class:`~anagrapheus.timeline.ReplayPins` for a replay. It takes the table because
     both need the store, and the store is the table's. A replay in ``"record"`` mode
     with a *different* lineup is how one role is evaluated with the rest held fixed;
-    see :mod:`examples.negotiation.lineup`.
+    see :mod:`examples.negotiation.lineup`. Record mode draws into a ledger on the
+    table's store (``into=PinLedger(table.store, table.types)``), so
+    :meth:`Negotiation.commit` promotes the new run like a live one.
 
     ``observe`` is handed the table as soon as it opens, before anything is said at
     it -- the place to attach an ``on_append`` listener and watch the story unfold.
