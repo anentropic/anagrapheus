@@ -34,8 +34,26 @@ if TYPE_CHECKING:
 
 __all__ = ["BeliefRekey", "plan_rekeys"]
 
-#: Rows gathered by the decision that emitted them: ``(seq, kind, from_entity)``.
-type _Grouped = dict[tuple[int, str, UUID], list[UUID]]
+#: One identity decision: ``(seq, kind, from_entity)``.
+type _Key = tuple[int, str, UUID]
+
+#: Rows gathered by the decision that emitted them.
+type _Grouped = dict[_Key, list[UUID]]
+
+
+@dataclass(frozen=True, slots=True)
+class _Batch:
+    """
+    A batch's decisions, as far as the batch itself can tell what each one did.
+
+    ``decisions`` holds the ones that landed. ``withdrawn`` names each merge a later
+    unmerge in the batch gave back. ``holders`` names, for each unmerge, the entities
+    whose beliefs it re-keys, when that is not simply the entity its rows come from.
+    """
+
+    decisions: _Grouped
+    withdrawn: frozenset[_Key]
+    holders: dict[_Key, tuple[UUID, ...]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,9 +68,11 @@ class BeliefRekey:
     - after a **split**, one per product — which product the belief belongs to depends
       on what the belief *says*, and neither this library nor identity may interpret
       that. Several candidates state exactly what is known.
-    - after an **unmerge**, two — the kept entity's own id and the id it gave back. A
-      belief keyed on the kept entity may have been about either all along, which is
-      the split's question again. One, if the same batch merges the pair again.
+    - after an **unmerge**, two — where the kept entity stands and the id it gave back.
+      A belief keyed on the kept entity, or on whatever it has since been merged into,
+      may have been about either all along, which is the split's question again. One,
+      if the same batch merges the pair again; more, if a later unmerge in the batch
+      gives an entity back from one of them.
 
     ``sole()`` is for the merge case, and raises rather than picking so the assumption
     stays visible.
@@ -93,49 +113,137 @@ def plan_rekeys(
 
     A merge that a later unmerge in the same batch withdrew plans nothing: the absorbed
     entity is canonical again, so beliefs keyed on it are already keyed correctly. The
-    unmerge's own rows cover the beliefs keyed on the survivor.
+    unmerge's own rows cover the beliefs keyed on the survivor. Nor does a merge that
+    gives an entity, or gives one to an entity, the batch has already merged and not
+    yet given back: an entity yields to one survivor at a time, and only an entity that
+    has not yielded can survive a merge. The identity layer ignores such a merge, and
+    so does this.
+
+    An unmerge's rows come from where the survivor stands when it happens, which is
+    where the beliefs that may be about the absorbed entity have gone if the survivor
+    has since been merged on. When the merge it withdraws is in the same batch, those
+    beliefs have not moved yet, and the unmerge plans the beliefs keyed on the survivor
+    itself. When that merge is older, they stand on the survivor's holder as the batch
+    found it, which is the entity the rows name or any entity the batch merged into it
+    before the unmerge, so the unmerge plans the beliefs keyed on each of them.
 
     ``skip_unrenderable`` drops beliefs whose ids this process cannot re-mint — a
     scheme it does not know, or a predicate it does not declare — instead of raising.
     Off by default: a belief the caller cannot re-key is a real gap in the cascade, and
     silence about it is the failure mode the whole seam exists to prevent.
     """
-    grouped = _group(rekeys)
+    batch = _landed(_group(rekeys))
     plans: list[BeliefRekey] = []
-    for (seq, kind, from_entity), targets in grouped.items():
-        if kind == "merge" and _withdrawn(seq, from_entity, targets[0], grouped):
+    for key, targets in batch.decisions.items():
+        if key in batch.withdrawn:
             continue
-        for row in index.beliefs_for(from_entity):
-            settled = _settle(kind, from_entity, targets, grouped)
-            candidates = _successors(row.belief_id, from_entity, settled, predicates)
-            if candidates is None:
-                if skip_unrenderable:
-                    continue
-                raise UnrenderableBelief(
-                    f"belief {row.belief_id!r} names {from_entity} but cannot be re-minted "
-                    f"by this registry; pass skip_unrenderable=True to drop it knowingly"
-                ) from _why_unrenderable(row.belief_id, predicates)
-            plans.append(
-                BeliefRekey(
-                    seq=seq,
-                    kind=kind,
-                    belief_id=row.belief_id,
-                    from_entity=from_entity,
-                    candidates=candidates,
+        seq, kind, from_entity = key
+        for holder in batch.holders.get(key, (from_entity,)):
+            # A holder other than the row's own entity stays where it is, or goes
+            # wherever the batch takes it, rather than onto the row's entity.
+            stays = [holder if target == from_entity else target for target in targets]
+            for row in index.beliefs_for(holder):
+                settled = _settle(kind, holder, stays, seq, batch)
+                candidates = _successors(row.belief_id, holder, settled, predicates)
+                if candidates is None:
+                    if skip_unrenderable:
+                        continue
+                    raise UnrenderableBelief(
+                        f"belief {row.belief_id!r} names {holder} but cannot be re-minted "
+                        f"by this registry; pass skip_unrenderable=True to drop it knowingly"
+                    ) from _why_unrenderable(row.belief_id, predicates)
+                plans.append(
+                    BeliefRekey(
+                        seq=seq,
+                        kind=kind,
+                        belief_id=row.belief_id,
+                        from_entity=holder,
+                        candidates=candidates,
+                    )
                 )
-            )
     return plans
 
 
-def _group(rekeys: Iterable[RekeyRow]) -> dict[tuple[int, str, UUID], list[UUID]]:
+def _group(rekeys: Iterable[RekeyRow]) -> _Grouped:
     """Gather the rows of one identity decision, keeping identity's own order."""
-    grouped: dict[tuple[int, str, UUID], list[UUID]] = {}
+    grouped: _Grouped = {}
     for row in rekeys:
         grouped.setdefault((row.seq, row.kind, row.from_entity), []).append(row.to_entity)
     return grouped
 
 
-def _settle(kind: str, from_entity: UUID, targets: Sequence[UUID], grouped: _Grouped) -> list[UUID]:
+def _landed(grouped: _Grouped) -> _Batch:
+    """
+    Drop the decisions that change nothing, walking the batch in order.
+
+    A merge that names, on either side, an entity an earlier merge in the batch
+    absorbed, with no unmerge giving it back in between, is ignored, as is an unmerge
+    of a pair the batch has left apart. An entity the batch has not touched yet is
+    taken as the rows say: it was free to merge or to survive one, or merged into the
+    unmerge's survivor, since identity wrote the row.
+
+    An unmerge's rows name where the survivor stands at that point, so one that
+    withdraws a merge in the batch lands when the batch's own merges lead that merge's
+    survivor to the entity the rows name, or when the rows name the survivor itself.
+    """
+    merged_into: dict[UUID, tuple[UUID, _Key] | None] = {}
+    entities = dict.fromkeys(
+        entity
+        for key in sorted(grouped, key=lambda key: key[0])
+        for entity in (key[2], *grouped[key])
+    )
+
+    def standing(entity: UUID) -> UUID:
+        seen = {entity}
+        while (link := merged_into.get(entity)) is not None and link[0] not in seen:
+            entity = link[0]
+            seen.add(entity)
+        return entity
+
+    ignored: set[_Key] = set()
+    withdrawn: set[_Key] = set()
+    holders: dict[_Key, tuple[UUID, ...]] = {}
+    for key in sorted(grouped, key=lambda key: key[0]):
+        _seq, kind, from_entity = key
+        targets = grouped[key]
+        if kind == "merge":
+            survivor = targets[0]
+            if merged_into.get(from_entity) is not None or merged_into.get(survivor) is not None:
+                ignored.add(key)
+            else:
+                merged_into[from_entity] = (survivor, key)
+        elif kind == "unmerge":
+            held: list[UUID] = []
+            for absorbed in (target for target in targets if target != from_entity):
+                if absorbed not in merged_into:
+                    # Merged before the batch: what may be about it stands wherever the
+                    # survivor's beliefs stood as the batch found them.
+                    merged_into[absorbed] = None
+                    held.extend(
+                        entity
+                        for entity in (from_entity, *entities)
+                        if standing(entity) == from_entity and entity not in held
+                    )
+                    continue
+                link = merged_into[absorbed]
+                if link is None or from_entity not in {link[0], standing(link[0])}:
+                    ignored.add(key)
+                    continue
+                withdrawn.add(link[1])
+                merged_into[absorbed] = None
+                if link[0] not in held:
+                    held.append(link[0])
+            holders[key] = tuple(held)
+    return _Batch(
+        decisions={key: targets for key, targets in grouped.items() if key not in ignored},
+        withdrawn=frozenset(withdrawn),
+        holders=holders,
+    )
+
+
+def _settle(
+    kind: str, from_entity: UUID, targets: Sequence[UUID], seq: int, batch: _Batch
+) -> list[UUID]:
     """
     Follow each target through any later decision in the same batch.
 
@@ -148,53 +256,92 @@ def _settle(kind: str, from_entity: UUID, targets: Sequence[UUID], grouped: _Gro
     A split's products are followed the same way, independently: one may be absorbed
     later while its siblings are not, and each candidate answers for itself.
 
+    An unmerge's candidates are followed through later unmerges too. If ``C`` gives
+    back ``B``, and later in the batch ``B`` gives back ``A``, a belief on ``C`` that
+    was ``B``'s may have been ``A``'s all along: nothing of ``A``'s has moved off ``C``
+    yet, because the second unmerge's rows name ``B``, which holds nothing in the
+    index. So ``A`` is offered as well. That adds a candidate rather than choosing
+    one. A merge's or a split's targets are not followed this way: the belief was
+    keyed on an entity the batch knows, and what an unmerge gives back was never on it.
+
     An unmerge starts from an entity that is still there, so arriving back at it is
     not a ring: the id it gave back was absorbed into it again later in the batch.
     Targets that settle on the same id are one candidate.
     """
     settled: list[UUID] = []
+    branching = kind == "unmerge"
     for target in targets:
-        current = target
-        seen = {current} if kind == "unmerge" else {from_entity, current}
-        while (onward := _onward(current, grouped)) is not None:
-            current = onward
-            if current in seen:
-                raise MergeCycleInBatch(
-                    f"re-key rows lead {from_entity} back to {current}; a ring has no "
-                    f"last element, so there is no successor to re-mint to"
-                )
-            seen.add(current)
-        if current not in settled:
-            settled.append(current)
+        seen = {target} if branching else {from_entity, target}
+        for end in _follow(target, seq, seen, from_entity, batch, branching=branching):
+            if end not in settled:
+                settled.append(end)
     return settled
 
 
-def _onward(entity: UUID, grouped: _Grouped) -> UUID | None:
-    """
-    The single id ``entity`` yields to later in the batch, if it yields to one.
+def _follow(
+    entity: UUID,
+    at: int,
+    seen: set[UUID],
+    origin: UUID,
+    batch: _Batch,
+    *,
+    branching: bool,
+) -> list[UUID]:
+    """Where ``entity`` ends up after position ``at`` in the batch, in time order."""
+    current = entity
+    while (step := _next(current, at, batch, branching=branching)) is not None:
+        when, kind, onward = step
+        if kind == "unmerge":
+            # Each side starts afresh: an unmerge is not a step of any ring.
+            ends = _follow(current, when, {current}, origin, batch, branching=True)
+            for end in _follow(onward, when, {onward}, origin, batch, branching=True):
+                if end not in ends:
+                    ends.append(end)
+            return ends
+        if onward in seen:
+            raise MergeCycleInBatch(
+                f"re-key rows lead {origin} back to {onward}; a ring has no "
+                f"last element, so there is no successor to re-mint to"
+            )
+        seen.add(onward)
+        current = onward
+        at = max(at, when)
+    return [current]
 
-    Only a merge is followed. A split does not supersede its original — the original
+
+def _next(entity: UUID, at: int, batch: _Batch, *, branching: bool) -> tuple[int, str, UUID] | None:
+    """
+    The next decision in the batch that moves ``entity`` on from position ``at``.
+
+    A merge of ``entity`` is followed wherever it falls: one before ``at`` means the
+    entity had already yielded. A split does not supersede its original — the original
     survives it — so an entity that is later split has not moved, and following one of
     its products would be this layer choosing among them, which is the judgment it may
-    not make. An unmerge is not followed for the same reason, and a merge that a later
-    unmerge in the batch withdrew is not followed either: by the end of the batch the
-    entity yields to nothing through it.
+    not make. A merge that a later unmerge in the batch withdrew is not followed either:
+    by the end of the batch the entity yields to nothing through it.
+
+    With ``branching``, an unmerge after ``at`` from where ``entity`` stands is
+    followed too, as ``(seq, "unmerge", the entity it gave back)``.
     """
-    for (seq, kind, from_entity), targets in grouped.items():
-        if kind != "merge" or from_entity != entity:
+    found: tuple[int, str, UUID] | None = None
+    for key, targets in batch.decisions.items():
+        seq, kind, from_entity = key
+        if kind == "merge" and from_entity == entity and key not in batch.withdrawn:
+            if seq <= at:
+                return (seq, kind, targets[0])
+            step = (seq, kind, targets[0])
+        elif (
+            branching
+            and kind == "unmerge"
+            and seq > at
+            and entity in {from_entity, *batch.holders.get(key, ())}
+        ):
+            step = (seq, kind, next(t for t in targets if t != from_entity))
+        else:
             continue
-        if _withdrawn(seq, entity, targets[0], grouped):
-            continue
-        return targets[0]
-    return None
-
-
-def _withdrawn(seq: int, absorbed: UUID, kept: UUID, grouped: _Grouped) -> bool:
-    """Whether a later unmerge in the batch withdrew the merge of ``absorbed`` into ``kept``."""
-    return any(
-        kind == "unmerge" and from_entity == kept and later > seq and absorbed in targets
-        for (later, kind, from_entity), targets in grouped.items()
-    )
+        if found is None or step[0] < found[0]:
+            found = step
+    return found
 
 
 def _why_unrenderable(belief_id: str, predicates: PredicateRegistry) -> BeliefError:

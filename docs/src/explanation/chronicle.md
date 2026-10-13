@@ -56,6 +56,8 @@ The projector normally applies a batch inside one database transaction, so a pro
 
 The draw is also the one part that may be awaited. An async application cannot make a blocking model call from inside its event loop, and it cannot move the projector to a worker thread either, because a SQLite connection belongs to the thread that opened it. So the summariser may be a coroutine, and [`Projector.catch_up_async()`][projector-catch-up-async] awaits each draw with no transaction open, then writes the batch and its position synchronously on the loop's own thread. Only the slow part waits on the network; the store never leaves the thread that opened it. [Consolidate from async code](../how-to/chronicle-sections.md#consolidate-from-async-code) shows it.
 
+If `apply` fails part-way through a batch, the draws it has already used are lost with the batch, so the next `catch_up()` makes those model calls again: that costs money, but the anchors come out the same.
+
 That also means the chronicle should run on its own [`Projector`][projector], driven on its own schedule, separate from the projector that keeps beliefs and identity current before each turn.
 
 ## Two read surfaces at two grades

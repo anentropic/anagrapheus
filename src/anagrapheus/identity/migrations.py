@@ -18,6 +18,8 @@ COMPONENT: Final = "identity"
 
 MIGRATIONS: Final[tuple[tuple[str, ...], ...]] = (
     # v1 — entities, aliases, the audit trail, and the belief-layer re-key seam.
+    # identity_aliases is the row each entity shows for each form; from v2 it is
+    # derived from identity_claims.
     (
         """
         CREATE TABLE identity_entities (
@@ -58,6 +60,43 @@ MIGRATIONS: Final[tuple[tuple[str, ...], ...]] = (
             to_entity    TEXT    NOT NULL,
             PRIMARY KEY (seq, from_entity, to_entity)
         ) STRICT
+        """,
+    ),
+    # v2 — every recorded surface form, with where it stands and the merges that
+    # carried it there. identity_aliases keeps only the row each entity shows; this
+    # keeps the rows behind it too, so an unmerge can find exactly what its merge moved.
+    (
+        """
+        CREATE TABLE identity_claims (
+            surface_form  TEXT    NOT NULL,
+            seq           INTEGER NOT NULL,
+            stance        TEXT    NOT NULL,
+            entity_id     TEXT    NOT NULL,
+            path          TEXT    NOT NULL,
+            aside         INTEGER NOT NULL,
+            PRIMARY KEY (surface_form, seq)
+        ) STRICT
+        """,
+        "CREATE INDEX ix_identity_claims_entity ON identity_claims (entity_id, surface_form)",
+        # Which merges each claim's path runs through, one row per merge, so an unmerge
+        # finds the claims its merge carried by index instead of reading every path.
+        """
+        CREATE TABLE identity_claim_paths (
+            surface_form  TEXT    NOT NULL,
+            claim_seq     INTEGER NOT NULL,
+            merge_seq     INTEGER NOT NULL,
+            PRIMARY KEY (surface_form, claim_seq, merge_seq)
+        ) STRICT
+        """,
+        "CREATE INDEX ix_identity_claim_paths_merge ON identity_claim_paths (merge_seq)",
+        # A projection folded before this version kept no record of which merges
+        # carried a row, so each row it shows is taken as its holder's own: an unmerge
+        # of a merge it already holds gives nothing back until the projection is
+        # rebuilt.
+        """
+        INSERT OR IGNORE INTO identity_claims
+            (surface_form, seq, stance, entity_id, path, aside)
+        SELECT surface_form, seq, stance, entity_id, '[]', 0 FROM identity_aliases
         """,
     ),
 )

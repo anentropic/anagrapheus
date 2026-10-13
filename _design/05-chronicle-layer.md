@@ -14,8 +14,8 @@ is those four, and the retrieval stack §7 declines to extract stays declined.
 
 This milestone also answers doc 00 §10 Q3 — *"whether chronicle anchoring ships as an
 archeion projection helper or stays purely a documented pattern"* — in favour of the
-helper. §10 itself is untouched: R61's consequences list defers the doc sweep to
-ratification.
+helper. R61's doc sweep of §10 was done in narrative-vm PR #24 on ratification
+(2026-10-12).
 
 ---
 

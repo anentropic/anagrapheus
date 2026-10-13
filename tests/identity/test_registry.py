@@ -108,13 +108,16 @@ def test_canonical_of_an_unknown_entity_is_itself(rig: Rig):
 
 
 def test_a_merge_cycle_raises_rather_than_hanging(rig: Rig):
+    """
+    The fold ignores a reverse merge, so only a projection folded before it did holds a cycle.
+
+    Planted directly, as such a projection would hold it.
+    """
     a, ea = establish(rig.types, "a", provenance="x")
     b, eb = establish(rig.types, "b", provenance="x")
-    rig.commit(
-        ea,
-        eb,
-        merge(rig.types, kept=b, absorbed=a),
-        merge(rig.types, kept=a, absorbed=b),
+    rig.commit(ea, eb, merge(rig.types, kept=b, absorbed=a))
+    rig.store.connection.execute(
+        "UPDATE identity_entities SET merged_into = ? WHERE entity_id = ?", (str(a), str(b))
     )
 
     with pytest.raises(MergeCycle):
@@ -225,6 +228,23 @@ def test_re_applying_a_split_keeps_the_stance_it_moved(rig: Rig):
     rig.projector.catch_up()
 
     assert rig.registry.resolve("acme-uk").candidates[0].stance == "certain"
+
+
+def test_re_applying_a_split_leaves_a_later_alias_of_the_original_alone(rig: Rig):
+    """The original records the form again after the split; a replay must not take it."""
+    original, event = establish(rig.types, "acme", provenance="import")
+    rig.commit(event, alias(rig.types, original, "acme-uk", "doubted"))
+    carved = uuid.uuid7()
+    at = rig.commit(split(rig.types, original, [(carved, ["acme-uk"])]))
+    last = rig.commit(alias(rig.types, original, "acme-uk", "certain"))
+
+    rig.store.commit_position("anagrapheus.identity", at - 1)
+    rig.projector.catch_up()
+
+    assert {(r.entity_id, r.stance, r.seq) for r in rig.registry.resolve("acme-uk").candidates} == {
+        (carved, "doubted", at),
+        (original, "certain", last),
+    }
 
 
 def test_a_split_may_not_give_one_form_to_two_entities(rig: Rig):

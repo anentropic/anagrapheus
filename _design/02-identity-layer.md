@@ -265,6 +265,66 @@ merges final.
   same batch merges the pair again, the unmerge's two targets both settle on the
   survivor, which is one successor rather than a ring; targets that settle on the
   same id are reported once.
+- **One survivor at a time (added 2026-10-13).** A merge of
+  an entity that is already merged used to re-point `merged_into` and move nothing,
+  because the first merge had already taken the forms. Those forms stayed on the
+  first survivor, and unmerging the second merge gave none of them back. Now
+  `merge(..., identity=registry)` raises `AlreadyMerged` for an absorbed entity that
+  is merged anywhere, the same survivor included, and says to unmerge first. One that
+  reaches the log anyway is folded as a no-op: the standing merge stays, both
+  entities' history records `merge_ignored`, and no re-key row is emitted. The first
+  application's decision row decides on a re-applied batch, as for an unmerge. The
+  alternative, letting the later merge win, would have had to carry the first
+  survivor's moved forms on to the new one and undo that on unmerge, which is a
+  second unmerge hidden inside a merge. Refusing keeps one merge per withdrawal.
+- **The planner follows the store.** `plan_rekeys` walks the batch in order and drops
+  what identity ignores: a merge of an entity the batch already merged and has not
+  given back, and an unmerge of a pair the batch left apart. Before this, `_onward`
+  followed the first of two merges while the store kept the second; now both keep
+  the first.
+- **Unmerge follows rows, not names (added 2026-10-13).** This replaces the `moved`
+  and `shared` reading above and the re-application rules in "Re-applied batches".
+  Chained unmerges (B into A, A into Z, then B out of A) needed a patch per case,
+  because the projection kept only the one row each entity shows per form and the
+  unmerge had to guess, by form name, where the merge's rows had gone. A later
+  recording of the same name on A was taken for B's row, and B got nothing back.
+  Schema v2 adds `identity_claims`: every recording, named by `(surface_form, seq)`,
+  with the entity it stands on and its `path`, the merges that carried it there,
+  latest first. A merge moves every claim on the absorbed entity to the survivor and
+  prepends itself to their paths; an unmerge sends every claim whose path contains
+  its merge back to the absorbed entity and cuts the path there. `identity_aliases`
+  is derived: an entity shows, per form, its own latest recording, else the claim
+  from the earliest merge, recursively. That ordering is what the claims would be
+  had no withdrawn merge happened, so the outcome is the counterfactual. A split
+  deletes the claim it took and sets aside the rest of that form on the original;
+  an unmerge of a merge that carried a set-aside claim sends it back. Every decision
+  now applies once: a re-applied decision finds its own decision row at its position
+  and does nothing, which also stops a re-applied split taking a later alias of the
+  original. `tests/identity/test_unmerge_model.py` checks generated histories,
+  after every step, against a plain model of the counterfactual. The `absorbed` row
+  still records `moved` and `shared`, for the audit trail only. The v2 migration
+  backfills each shown row as its holder's own claim, so an unmerge of a merge folded
+  before it gives nothing back until the projection is rebuilt.
+- **Only an established, unmerged entity survives a merge (added 2026-10-13).** Two
+  gaps let the planner and the store disagree. A merge naming an entity no
+  `Established` had introduced still wrote `absorbed`/`merged` rows and a re-key row,
+  but no `merged_into` (the update matched no row), so beliefs on that id were planned
+  onto the survivor while it stayed canonical, and a later unmerge of the pair was
+  ignored. And a merge into a survivor that had itself been absorbed (A into Z, then B
+  into A) landed, so B resolved to Z while the planner, which sees one batch at a
+  time, put beliefs on B onto A. Now the fold records both as `merge_ignored`, with
+  `unestablished` or `kept_merged_into` in the detail, and emits no re-key row, so
+  the planner never sees them; the second is the one-survivor rule read from the
+  survivor's side. `merge(..., identity=registry)` raises `AlreadyMerged` when `kept`
+  is merged, after the cycle check so a reverse merge still reports `MergeCycle`. It
+  does not check establishment: an entity established earlier in the same unappended
+  batch is not in the registry yet, and refusing it would refuse a valid batch.
+  `_landed` drops a merge into an entity the batch already absorbed, for rows from a
+  projection folded before this. This amends §7: a cycle can no longer be folded,
+  because the merge that would close one names a survivor that already yields, so
+  `canonical()` meets one only in a projection folded before this change, until it is
+  rebuilt. Such a projection also keeps any merge of these two kinds as it was folded.
 - **API breaks, before 0.1.0.** `IdentityRole` has a fifth member, and
   `IdentityStore` has a new `unmerged()`, which third-party stores must implement.
-  Additive: `IdentityRegistry.merged_into()`, `NotMerged`, `OPTIONAL_ROLES`.
+  Additive: `IdentityRegistry.merged_into()`, `NotMerged`, `AlreadyMerged`,
+  `OPTIONAL_ROLES`.
