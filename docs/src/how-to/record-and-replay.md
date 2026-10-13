@@ -166,14 +166,17 @@ Record once against the provider, commit the recording file to your repository, 
 
 ## Continue past a miss instead of stopping
 
-Strict replay suits tests. When exploring ("what happens if the UK opens differently?"), use `on_miss="record"`: the first miss is recorded as a [`Divergence`][divergence], the call goes to the model, and the run continues as a new run. Pass `announce` to write that divergence into the log as a [`ReplayDiverged`][replay-diverged] event. Here `store` and `ledger` are the live log and ledger from step 3, before the store is closed:
+Strict replay suits tests. When exploring ("what happens if the UK opens differently?"), use `on_miss="record"`: the first miss is recorded as a [`Divergence`][divergence], the call goes to the model, and the run continues as a new run. Pass `announce` to write that divergence into the log as a [`ReplayDiverged`][replay-diverged] event. Here the pins come from the recording loaded in step 4, and the new run gets a store of its own:
 
 ```python
+import uuid
+
+explore = SQLiteEventStore(":memory:")
 replay = ReplayPins.from_events(
-    store.read(),
+    recording.events,
     types,
     on_miss="record",
-    announce=ReplayPins.announce_to(store, types, unit_id=ledger.unit_id),
+    announce=ReplayPins.announce_to(explore, types, unit_id=uuid.uuid7()),
 )
 ```
 

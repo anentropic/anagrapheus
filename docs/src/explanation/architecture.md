@@ -47,7 +47,7 @@ The design pays off in three places.
 
 **Rebuild.** Because projections are disposable, changing how a projection is stored, or fixing a bug in a fold, means dropping the projection and replaying the log. There is no migration of derived data, because derived data is never the source of truth.
 
-**Audit.** Every belief records the event it was folded from, every identity decision is an event with a position in the log, and every assembled prompt records which events, beliefs and sections it was built from. "Why does this agent believe that?" and "what was this call shown?" are questions the log can answer.
+**Audit.** Every belief records the event it was folded from, and every identity decision is an event with a position in the log, so "why does this agent believe that?" is a question the log can answer. An assembled prompt is not written to the log. Its context lists the events, beliefs and sections it was built from, and assembling again from the same grant at the same log position rebuilds it, so "what was this call shown?" can be answered too.
 
 The cost is discipline: anything an agent should remember must reach the log as an event, and anything computed from the log must be computed deterministically, or the rebuild stops reproducing what the run saw. The chronicle is the one deliberate exception, with its own rules for rebuilding; see [The Chronicle](chronicle.md).
 
