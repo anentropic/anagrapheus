@@ -119,7 +119,7 @@ fold = ChronicleFold(
 consolidate = Projector(store, reader, [fold])
 ```
 
-Each projector keeps an independent position per fold, so you can run belief and identity folds after every append and run `consolidate.catch_up()` on its own schedule, for example at the end of each round or in a background task. The chronicle fold is **generative**, meaning its `apply` makes a model call, and it makes that call before taking the database's write lock, so a slow summary never blocks appends.
+Each projector keeps an independent position per fold, so you can run belief and identity folds after every append and run `consolidate.catch_up()` on its own schedule, for example at the end of each round. From async code, await `consolidate.catch_up_async()` instead; see [Consolidate from async code](#consolidate-from-async-code). The chronicle fold is **generative**, meaning its content comes from a model call. The fold makes that call in its preparation step, `prepare` or `prepare_async`, before the projector takes the database's write lock; `apply` then only writes the summary it was given, so a slow summary never blocks appends.
 
 ## 3. Close units and consolidate
 
@@ -224,6 +224,81 @@ Projector(store, reader, [replayed_fold]).rebuild(
 )
 ```
 
+## Consolidate from async code
+
+`consolidate.catch_up()` cannot run inside an event loop when the summariser calls `Agent.run_sync`, which refuses to start while a loop is already running. Moving the call into `asyncio.to_thread` does not help either, because a SQLite connection may only be used by the thread that opened it. Instead, write the summariser as a coroutine, an [`AsyncSummarizer`][async-summarizer], and drive the projector with [`catch_up_async()`][projector-catch-up-async]:
+
+```python title="chronicle.py (continued)"
+import asyncio
+
+
+def round_two_model(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+    return ModelResponse(parts=[TextPart("The UK moved to 10%; Norway met it at 8%.")])
+
+
+class AwaitedRoundSummary:
+    """The same summariser, awaited: it draws with `Agent.run` rather than `run_sync`."""
+
+    def __init__(self, resolver) -> None:
+        self._resolver = resolver
+
+    async def __call__(self, events: Sequence[StoredEvent]) -> Consolidation:
+        lines = [
+            f"{e.payload['party']}: {e.payload['text']}"
+            for e in events
+            if e.envelope.type == "OfferMade"
+        ]
+        keys: list[str] = []
+        model = PinnedModel(FunctionModel(round_two_model), self._resolver, on_key=keys.append)
+        result = await Agent(model).run(
+            "Summarise this round of a fisheries negotiation in one sentence:\n" + "\n".join(lines)
+        )
+        return Consolidation(prose=result.output, pins=tuple(keys))
+
+
+async def close_round_two() -> None:
+    store.append(
+        [
+            types.pending(OfferMade(party="Norway", text="We could go to 8%.")),
+            types.pending(RoundClosed(round_number=2)),
+        ]
+    )
+    ledger = PinLedger(store, types)
+    fold = ChronicleFold(
+        chronicle,
+        reader,
+        boundary=EventTypes(("fisheries", "RoundClosed")),
+        summarize=AwaitedRoundSummary(ledger),
+    )
+    await Projector(store, reader, [fold]).catch_up_async()
+    ledger.commit()
+
+
+asyncio.run(close_round_two())
+for section in brief.depth():
+    print(section.anchor.section_id, section.prose)
+```
+
+```text
+1-3 The UK opened at 12%; Norway held at 5%.
+4-7 The UK moved to 10%; Norway met it at 8%.
+```
+
+Round 2 covers events 4 to 7: the UK offer that was still open in step 3, the pin that `ledger.commit()` promoted into the log, and the two events appended here.
+
+Only the summaries are awaited. The projector awaits each one with no transaction open, then writes the batch and its position synchronously on the calling thread, so the store is only ever used from the thread that opened it. The pinned model resolves its pins through the ledger's awaited path on that same thread.
+
+Some things to know about the awaited path:
+
+- **It takes synchronous folds too.** Belief and identity folds, and a generative fold with only a synchronous `prepare`, run under `catch_up_async()` as they do under `catch_up()`, so one projector can hold both kinds.
+- **A synchronous summariser blocks the loop.** Under `catch_up_async()` it is called on the event loop's thread and holds the loop until it returns. It cannot call `Agent.run_sync`, which raises inside a running loop, so a summariser that calls a model from async code should be a coroutine like `AwaitedRoundSummary`.
+- **`catch_up()` and `rebuild()` refuse an async summariser.** They raise `TypeError` before folding or resetting anything, so the model is not called and existing sections are kept. The fold recognises an `async def` function or a class whose `__call__` is `async def`.
+- **Rebuild with [`rebuild_async()`][projector-rebuild-async].** It takes the same arguments as `rebuild()` and refuses a generative fold in the same way.
+- **Each fold's position is unchanged by a failed batch.** If a summary raises, nothing from that batch is written, and the next `catch_up_async()` starts the batch again.
+- **Do not run one projector from two tasks at once.** Each would fold the same batch.
+
+To write a generative fold of your own that awaits its draws, implement [`AsyncGenerativeFold`][async-generative-fold]'s `prepare_async(event)` beside `apply`.
+
 ## Troubleshooting
 
 ### No sections appear
@@ -236,30 +311,11 @@ The summary prompt changed between recording and replay. The usual cause is rend
 
 ### `RuntimeError: This event loop is already running` from async code
 
-The summariser calls `Agent.run_sync`, and projectors are synchronous, so `catch_up()` cannot run inside an event loop. Moving the same objects into `asyncio.to_thread` fails too, because a SQLite connection may only be used by the thread that opened it. Run consolidation in a worker thread that opens its own store on the same database file:
+The summariser calls `Agent.run_sync` from inside an event loop, either because something called `catch_up()` there or because the projector was driven with `catch_up_async()`, which calls a synchronous summariser on the loop's thread. Make the summariser a coroutine that calls `Agent.run`, and await `catch_up_async()` instead, as in [Consolidate from async code](#consolidate-from-async-code).
 
-```python
-def consolidate_in_this_thread(path: Path) -> int:
-    store = SQLiteEventStore(path)  # this thread's own connection
-    reader = EventReader(store, UpcastRegistry(), types)
-    chronicle = SQLiteChronicleStore(store.connection)
-    ledger = PinLedger(store, types)
-    fold = ChronicleFold(
-        chronicle,
-        reader,
-        boundary=EventTypes(("fisheries", "RoundClosed")),
-        summarize=RoundSummary(ledger),
-    )
-    Projector(store, reader, [fold]).catch_up()
-    ledger.commit()
-    through = chronicle.consolidated_through()
-    store.close()
-    return through
+### `TypeError: 'chronicle' only prepares asynchronously`
 
-
-# inside your async code:
-through = await asyncio.to_thread(consolidate_in_this_thread, Path("talks.db"))
-```
+The fold's summariser is a coroutine, and its projector was driven with `catch_up()` or `rebuild()`. Nothing was folded or reset. Use `catch_up_async()` or `rebuild_async()`. A summariser that is a plain function returning an awaitable is only found out once called, and raises `TypeError: 'chronicle' has an async summarizer` instead; write it as an `async def`.
 
 ### The tail contains `PinPromoted` events
 
@@ -272,6 +328,7 @@ through = await asyncio.to_thread(consolidate_in_this_thread, Path("talks.db"))
 - [The Chronicle](../explanation/chronicle.md): why sections cite their range, and why the chronicle is carried rather than rebuilt.
 
 [summarizer]: ../reference/anagrapheus/chronicle/fold.md#anagrapheus.chronicle.fold.Summarizer
+[async-summarizer]: ../reference/anagrapheus/chronicle/fold.md#anagrapheus.chronicle.fold.AsyncSummarizer
 [consolidation]: ../reference/anagrapheus/chronicle/fold.md#anagrapheus.chronicle.fold.Consolidation
 [chronicle-fold]: ../reference/anagrapheus/chronicle/fold.md#anagrapheus.chronicle.fold.ChronicleFold
 [event-types]: ../reference/anagrapheus/chronicle/fold.md#anagrapheus.chronicle.fold.EventTypes
@@ -287,4 +344,7 @@ through = await asyncio.to_thread(consolidate_in_this_thread, Path("talks.db"))
 [log-slice]: ../reference/anagrapheus/assembly/slices.md#anagrapheus.assembly.slices.LogSlice
 [projector-rebuild]: ../reference/anagrapheus/timeline/folds.md#anagrapheus.timeline.folds.Projector.rebuild
 [replay-pins]: ../reference/anagrapheus/timeline/replay.md#anagrapheus.timeline.replay.ReplayPins
+[projector-catch-up-async]: ../reference/anagrapheus/timeline/folds.md#anagrapheus.timeline.folds.Projector.catch_up_async
+[projector-rebuild-async]: ../reference/anagrapheus/timeline/folds.md#anagrapheus.timeline.folds.Projector.rebuild_async
+[async-generative-fold]: ../reference/anagrapheus/timeline/folds.md#anagrapheus.timeline.folds.AsyncGenerativeFold
 [brief-tail]: ../reference/anagrapheus/chronicle/reading.md#anagrapheus.chronicle.reading.Brief.tail
