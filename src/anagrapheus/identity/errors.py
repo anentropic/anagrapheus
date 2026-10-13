@@ -8,6 +8,7 @@ __all__ = [
     "IdentityError",
     "MergeCycle",
     "NotMerged",
+    "OutOfOrderDecision",
     "UnknownEntity",
 ]
 
@@ -55,6 +56,17 @@ class NotMerged(IdentityError):
     Raised before append by :func:`~anagrapheus.identity.decisions.unmerge` when
     ``absorbed`` is not currently merged directly into ``kept``. An unmerge withdraws
     one merge, so there has to be that merge to withdraw.
+    """
+
+
+class OutOfOrderDecision(IdentityError):
+    """
+    An identity store was handed a decision older than one it has already applied.
+
+    Raised by :class:`~anagrapheus.identity.sqlite.SQLiteIdentityStore`. The store
+    ranks what merges carried by their positions, which only holds when decisions
+    arrive in log order, as the projector folds them. Re-applying a decision already
+    applied is not out of order: it changes nothing.
     """
 
 

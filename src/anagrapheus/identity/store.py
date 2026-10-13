@@ -79,7 +79,16 @@ class RekeyRow(NamedTuple):
 
 
 class IdentityStore(Protocol):
-    """Persistence for the identity registry's folded state."""
+    """
+    Persistence for the identity registry's folded state.
+
+    Every write takes the position of the event it folds, and writes must come in
+    increasing position, as the projector folds them from the log. A store may rely on
+    it: which merge carried a surface form, and so which row an entity shows and what
+    an unmerge sends back, is ranked by position, and a decision written out of order
+    would rank wrongly without anything failing. Writing again a decision already
+    written, as a re-applied batch does, must change nothing.
+    """
 
     def established(self, event: Established, seq: int) -> None:
         """Record a newly tracked entity and its first surface form."""
