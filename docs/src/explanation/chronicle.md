@@ -54,6 +54,8 @@ So the fold builds no key. The summariser does, by drawing through [`PinnedModel
 
 The projector normally applies a batch inside one database transaction, so a projection's state and its position commit together. A model call inside that transaction would hold SQLite's write lock for as long as the model takes to answer, blocking every append in the process. So the chronicle does its drawing in `prepare(event)`, which the projector calls for every event in a batch before it opens the transaction, and `apply` only writes what was prepared. Consolidation is background work; it must never stall the turn that is happening now.
 
+The draw is also the one part that may be awaited. An async application cannot make a blocking model call from inside its event loop, and it cannot move the projector to a worker thread either, because a SQLite connection belongs to the thread that opened it. So the summariser may be a coroutine, and [`Projector.catch_up_async()`][projector-catch-up-async] awaits each draw with no transaction open, then writes the batch and its position synchronously on the loop's own thread. Only the slow part waits on the network; the store never leaves the thread that opened it. [Consolidate from async code](../how-to/chronicle-sections.md#consolidate-from-async-code) shows it.
+
 That also means the chronicle should run on its own [`Projector`][projector], driven on its own schedule, separate from the projector that keeps beliefs and identity current before each turn.
 
 ## Two read surfaces at two grades
@@ -112,6 +114,7 @@ For the procedure, see [How to Consolidate History into Chronicle Sections](../h
 [summarizer]: ../reference/anagrapheus/chronicle/fold.md#anagrapheus.chronicle.fold.Summarizer
 [consolidation]: ../reference/anagrapheus/chronicle/fold.md#anagrapheus.chronicle.fold.Consolidation
 [pinned-model]: ../reference/anagrapheus/provider/model.md#anagrapheus.provider.model.PinnedModel
+[projector-catch-up-async]: ../reference/anagrapheus/timeline/folds.md#anagrapheus.timeline.folds.Projector.catch_up_async
 [projector]: ../reference/anagrapheus/timeline/folds.md#anagrapheus.timeline.folds.Projector
 [anchors]: ../reference/anagrapheus/chronicle/reading.md#anagrapheus.chronicle.reading.Anchors
 [prose]: ../reference/anagrapheus/chronicle/reading.md#anagrapheus.chronicle.reading.Prose

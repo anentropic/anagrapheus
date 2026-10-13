@@ -108,6 +108,8 @@ The `reset_in_transaction=True` flag tells the projector that the projection's s
 
 `catch_up()` runs every fold the projector holds. Some projections must be current before the next turn starts (beliefs, identity); others must not block it (a prose summariser that calls a model). anagrapheus expresses that difference by composition rather than by a flag on the fold: build two projectors over two fold lists and call each on its own schedule. Each fold keeps an independent position, so the two never interfere.
 
+An application running in an event loop awaits [`Projector.catch_up_async()`][projector-catch-up-async] instead. It folds the same way, batch by batch and in one transaction per batch, on the calling thread; the only difference is that a generative fold's draws are awaited rather than called. `catch_up()` stays synchronous, because the store is: a SQLite connection may only be used by the thread that opened it, so the projector cannot be handed to a worker thread.
+
 ## Deterministic and generative folds
 
 Fold replay, the promise that the same log produces the same projection, holds only when `apply` is a pure function of the event and the state so far. Most folds are like that. A fold whose `apply` calls a model is not: the same log yields *a* projection, not *the* projection.
@@ -121,7 +123,7 @@ The grade is required, with no default. A default would have to be `"determinist
 
 The projector treats the two grades differently in two places:
 
-- **A generative fold must also implement [`GenerativeFold`][generative-fold]'s `prepare(event)`.** The projector calls it for every event in a batch *before* opening the write transaction, so the slow model call never holds SQLite's write lock. `apply` then writes what was prepared, with nothing slow left in it.
+- **A generative fold must also implement [`GenerativeFold`][generative-fold]'s `prepare(event)`.** The projector calls it for every event in a batch *before* opening the write transaction, so the slow model call never holds SQLite's write lock. `apply` then writes what was prepared, with nothing slow left in it. A fold whose draw is a coroutine implements [`AsyncGenerativeFold`][async-generative-fold]'s `prepare_async(event)` instead or as well, which `catch_up_async()` awaits.
 - **`rebuild` refuses a generative fold** and raises [`GenerativeRebuild`][generative-rebuild] unless you pass `discard_generated=True`. Rebuilding one re-runs every model call it ever made and returns different content, so it is neither cheap nor exact. The [chronicle](chronicle.md#why-rebuilding-needs-acknowledgement) is the generative fold that ships with the library.
 
 ## Evolving event schemas: upcast on read
@@ -153,6 +155,8 @@ The reader is strict about gaps. If the chain stops short of the latest register
 [upcast-registry]: ../reference/anagrapheus/timeline/upcast.md#anagrapheus.timeline.upcast.UpcastRegistry
 [event-reader]: ../reference/anagrapheus/timeline/upcast.md#anagrapheus.timeline.upcast.EventReader
 [unknown-event-type]: ../reference/anagrapheus/timeline/errors.md#anagrapheus.timeline.errors.UnknownEventType
+[projector-catch-up-async]: ../reference/anagrapheus/timeline/folds.md#anagrapheus.timeline.folds.Projector.catch_up_async
+[async-generative-fold]: ../reference/anagrapheus/timeline/folds.md#anagrapheus.timeline.folds.AsyncGenerativeFold
 [projector-catch-up]: ../reference/anagrapheus/timeline/folds.md#anagrapheus.timeline.folds.Projector.catch_up
 [sqlite-store]: ../reference/anagrapheus/timeline/sqlite.md#anagrapheus.timeline.sqlite.SQLiteEventStore
 [projector-rebuild]: ../reference/anagrapheus/timeline/folds.md#anagrapheus.timeline.folds.Projector.rebuild

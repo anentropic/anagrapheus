@@ -1,6 +1,8 @@
 """Fold dispatch: position-guarded catch-up, crash resume, rebuild, and invariance."""
 
+import asyncio
 import sqlite3
+import threading
 from typing import TYPE_CHECKING
 
 import pytest
@@ -8,7 +10,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from anagrapheus.timeline.envelope import DomainEvent, StoredEvent
-from anagrapheus.timeline.folds import Projector
+from anagrapheus.timeline.folds import GenerativeRebuild, Projector
 from anagrapheus.timeline.registry import EventTypeRegistry
 from anagrapheus.timeline.sqlite import SQLiteEventStore
 from anagrapheus.timeline.upcast import EventReader, UpcastRegistry
@@ -344,3 +346,212 @@ def test_a_fold_answering_none_is_positioned_in_the_store(tmp_path: Path):
     projector = Projector(store, reader, [Durable()])
     projector.catch_up()
     assert store.read_position("owned_log") == projector.position("owned_log") == 1
+
+
+# -- the awaited path -------------------------------------------------------------------
+
+
+class AsyncDrawn:
+    """
+    A generative fold whose draw is awaited, keeping its state in the store's own file.
+
+    Each draw records the thread it ran on and whether a transaction was open, and
+    ``apply`` records its thread too, so the tests can see where the store was touched.
+    """
+
+    name = "async_drawn"
+    fold: FoldDeterminism = "generative"
+
+    def __init__(self, store: SQLiteEventStore, *, fail_draw_at: int | None = None) -> None:
+        self.store = store
+        self.fail_draw_at = fail_draw_at
+        self.fail_apply_at: int | None = None
+        self.drawn: dict[int, int] = {}
+        self.draw_threads: set[int] = set()
+        self.apply_threads: set[int] = set()
+        self.draws_inside_a_transaction = 0
+
+    async def prepare_async(self, event: StoredEvent) -> None:
+        await asyncio.sleep(0)  # a real suspension, as a model call would be
+        if event.seq == self.fail_draw_at:
+            raise RuntimeError("the draw dies here")
+        self.draw_threads.add(threading.get_ident())
+        self.draws_inside_a_transaction += self.store.connection.in_transaction
+        self.drawn[event.seq] = int(event.payload["n"]) * 10  # type: ignore[arg-type]
+
+    def apply(self, event: StoredEvent, txn: object) -> None:
+        assert isinstance(txn, sqlite3.Connection)
+        if event.seq == self.fail_apply_at:
+            raise RuntimeError("the apply dies here")
+        self.apply_threads.add(threading.get_ident())
+        txn.execute("CREATE TABLE IF NOT EXISTS drawn (seq INTEGER PRIMARY KEY, value INTEGER)")
+        txn.execute(
+            "INSERT INTO drawn (seq, value) VALUES (?, ?)", (event.seq, self.drawn.pop(event.seq))
+        )
+
+    def rows(self) -> list[int]:
+        try:
+            rows = self.store.connection.execute("SELECT seq FROM drawn ORDER BY seq").fetchall()
+        except sqlite3.OperationalError:  # the fold never wrote
+            return []
+        return [int(row["seq"]) for row in rows]
+
+
+class SyncDrawn(MemoryLog):
+    """A generative fold with only the synchronous ``prepare``."""
+
+    name = "sync_drawn"
+    fold: FoldDeterminism = "generative"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.prepared: list[int] = []
+
+    def prepare(self, event: StoredEvent) -> None:
+        self.prepared.append(event.seq)
+
+
+class OwnedAsyncDrawn(OwnedLog):
+    """An awaited generative fold that keeps its own position."""
+
+    name = "owned_async"
+    fold: FoldDeterminism = "generative"
+
+    def __init__(self, *, fail_draw_at: int | None = None) -> None:
+        super().__init__()
+        self.fail_draw_at = fail_draw_at
+
+    async def prepare_async(self, event: StoredEvent) -> None:
+        await asyncio.sleep(0)
+        if event.seq == self.fail_draw_at:
+            raise RuntimeError("the draw dies here")
+
+
+def test_catch_up_async_runs_inside_a_running_loop(tmp_path: Path):
+    """Draws are awaited with no transaction open; every store access stays on this thread."""
+    types, store, reader = make_stack(tmp_path / "t.db")
+    store.append([types.pending(StepTaken(n=i)) for i in (1, 2, 3)])
+    fold = AsyncDrawn(store)
+    projector = Projector(store, reader, [fold])
+
+    async def main() -> dict[str, int]:
+        return await projector.catch_up_async(batch_size=2)
+
+    assert asyncio.run(main()) == {"async_drawn": 3}
+    assert fold.rows() == [1, 2, 3]
+    assert store.read_position("async_drawn") == 3
+    assert fold.draws_inside_a_transaction == 0
+    assert fold.draw_threads == fold.apply_threads == {threading.get_ident()}
+
+
+def test_catch_up_async_drives_sync_and_async_folds_together(tmp_path: Path):
+    """Deterministic folds, sync-prepared folds and awaited folds share one projector."""
+    types, store, reader = make_stack(tmp_path / "t.db")
+    store.append([types.pending(StepTaken(n=i)) for i in (1, 2, 3)])
+    awaited, prepared, owned = AsyncDrawn(store), SyncDrawn(), OwnedAsyncDrawn()
+    projector = Projector(store, reader, [SqlSum(), awaited, prepared, owned])
+
+    marks = asyncio.run(projector.catch_up_async(batch_size=2))
+
+    assert marks == {"sql_sum": 3, "async_drawn": 3, "sync_drawn": 3, "owned_async": 3}
+    assert SqlSum.total(store) == 6
+    assert awaited.rows() == [1, 2, 3]
+    assert prepared.prepared == prepared.seen == [1, 2, 3]
+    assert owned.seen == [1, 2, 3]
+    assert owned.position == 3
+    assert store.read_position("owned_async") == 0
+
+
+def test_catch_up_async_matches_catch_up(tmp_path: Path):
+    """The same log through either path leaves the same state at the same positions."""
+    types, store, reader = make_stack(tmp_path / "t.db")
+    store.append([types.pending(StepTaken(n=i)) for i in range(1, 6)])
+    by_sync, by_async = SqlSum(), MemoryLog()
+    assert Projector(store, reader, [by_sync]).catch_up(batch_size=2) == {"sql_sum": 5}
+    assert asyncio.run(Projector(store, reader, [by_async]).catch_up_async(batch_size=2)) == {
+        "memory_log": 5
+    }
+    assert by_async.seen == [1, 2, 3, 4, 5]
+
+
+@pytest.mark.parametrize("fails_in", ["draw", "apply"])
+def test_a_failed_batch_rolls_back_under_catch_up_async(tmp_path: Path, fails_in: str):
+    """A batch that dies mid-way writes nothing, and the stored position stays put."""
+    types, store, reader = make_stack(tmp_path / "t.db")
+    store.append([types.pending(StepTaken(n=i)) for i in (1, 2, 3, 4)])
+    fold = AsyncDrawn(store)
+    if fails_in == "draw":
+        fold.fail_draw_at = 4
+    else:
+        fold.fail_apply_at = 4
+    projector = Projector(store, reader, [fold])
+
+    with pytest.raises(RuntimeError, match=f"the {fails_in} dies here"):
+        asyncio.run(projector.catch_up_async(batch_size=2))
+    assert store.read_position("async_drawn") == 2
+    assert fold.rows() == [1, 2], "nothing from the failed batch survives"
+    assert not store.connection.in_transaction
+
+    fold.fail_draw_at = fold.fail_apply_at = None
+    fold.drawn.clear()
+    asyncio.run(projector.catch_up_async(batch_size=2))
+    assert fold.rows() == [1, 2, 3, 4]
+    assert store.read_position("async_drawn") == 4
+
+
+@pytest.mark.parametrize("fails_in", ["draw", "apply"])
+def test_an_owned_position_does_not_advance_past_a_failed_async_batch(
+    tmp_path: Path, fails_in: str
+):
+    types, store, reader = make_stack(tmp_path / "t.db")
+    store.append([types.pending(StepTaken(n=i)) for i in (1, 2, 3, 4)])
+    fold = OwnedAsyncDrawn(fail_draw_at=3) if fails_in == "draw" else OwnedAsyncDrawn()
+    if fails_in == "apply":
+        fold.fail_at = 3
+    projector = Projector(store, reader, [fold])
+
+    with pytest.raises(RuntimeError):
+        asyncio.run(projector.catch_up_async(batch_size=2))
+    assert fold.position == projector.position("owned_async") == 2
+    assert store.read_position("owned_async") == 0
+
+    fold.fail_draw_at = fold.fail_at = None
+    asyncio.run(projector.catch_up_async(batch_size=2))
+    assert fold.position == 4
+
+
+def test_catch_up_refuses_a_fold_that_only_prepares_asynchronously(tmp_path: Path):
+    types, store, reader = make_stack(tmp_path / "t.db")
+    store.append([types.pending(StepTaken(n=1))])
+    projector = Projector(store, reader, [AsyncDrawn(store)])
+
+    with pytest.raises(TypeError, match="catch_up_async"):
+        projector.catch_up()
+    assert store.read_position("async_drawn") == 0
+
+
+def test_catch_up_async_validates_batch_size(tmp_path: Path):
+    _, store, reader = make_stack(tmp_path / "t.db")
+    projector = Projector(store, reader, [MemoryLog()])
+    with pytest.raises(ValueError, match="batch_size"):
+        asyncio.run(projector.catch_up_async(batch_size=0))
+
+
+def test_rebuild_async_refolds_through_the_awaited_path(tmp_path: Path):
+    types, store, reader = make_stack(tmp_path / "t.db")
+    store.append([types.pending(StepTaken(n=i)) for i in (1, 2)])
+    fold = AsyncDrawn(store)
+    projector = Projector(store, reader, [fold])
+    asyncio.run(projector.catch_up_async())
+
+    def reset() -> None:
+        with store.transaction() as conn:
+            conn.execute("DELETE FROM drawn")
+
+    with pytest.raises(GenerativeRebuild):
+        asyncio.run(projector.rebuild_async("async_drawn", reset=reset))
+    rebuilt = projector.rebuild_async(
+        "async_drawn", reset=reset, reset_in_transaction=True, discard_generated=True
+    )
+    assert asyncio.run(rebuilt) == 2
+    assert fold.rows() == [1, 2]

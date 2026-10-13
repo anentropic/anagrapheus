@@ -30,6 +30,7 @@ Three consequences the API makes structural rather than advisory:
 
 from anagrapheus.chronicle.fold import (
     FOLD_NAME,
+    AsyncSummarizer,
     ChronicleFold,
     Consolidation,
     EventTypes,
@@ -53,6 +54,7 @@ __all__ = [
     "FOLD_NAME",
     "Anchor",
     "Anchors",
+    "AsyncSummarizer",
     "Brief",
     "ChronicleFold",
     "ChronicleStore",

@@ -14,21 +14,28 @@ visible — inside the :class:`Summarizer`, which typically draws through
 :class:`~anagrapheus.provider.model.PinnedModel` and gets the whole request keyed for
 free. The fold records the key it is handed and asserts nothing about it.
 
-**Why ``apply`` stays synchronous.** ``ProjectionFold.apply`` is sync, and consolidation
-is debt — a background pass, not a turn's hot path — so blocking inside it costs
-nothing that matters. An async model call is the summarizer's to bridge, and it is
-already running on a projector of its own.
+**Why the draw can be awaited and ``apply`` cannot.** ``apply`` runs inside the
+projector's write transaction and only writes what was drawn, so it has nothing to
+await. The draw is the slow part, and the one an async application cannot make
+synchronously: a blocking model call refuses to run inside a running event loop, and the
+store cannot follow it to a worker thread because a SQLite connection belongs to the
+thread that opened it. So the summarizer may be an :class:`AsyncSummarizer`, the fold
+awaits it in :meth:`ChronicleFold.prepare_async`, and
+:meth:`~anagrapheus.timeline.folds.Projector.catch_up_async` awaits that with no
+transaction open before applying the batch on the calling thread. A synchronous
+:class:`Summarizer` works under either path; an async one needs the awaited path.
 """
 
 from __future__ import annotations
 
+import inspect
 import logging
 from typing import TYPE_CHECKING, NamedTuple, Protocol
 
 from anagrapheus.chronicle.sections import Anchor, Section
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Awaitable, Sequence
 
     from anagrapheus.chronicle.sections import SectionId
     from anagrapheus.chronicle.store import ChronicleStore
@@ -37,7 +44,14 @@ if TYPE_CHECKING:
     from anagrapheus.timeline.pins import PinKey
     from anagrapheus.timeline.upcast import EventReader
 
-__all__ = ["Consolidation", "ChronicleFold", "Summarizer", "UnitBoundary", "FOLD_NAME"]
+__all__ = [
+    "AsyncSummarizer",
+    "Consolidation",
+    "ChronicleFold",
+    "Summarizer",
+    "UnitBoundary",
+    "FOLD_NAME",
+]
 
 _log = logging.getLogger(__name__)
 
@@ -69,6 +83,26 @@ class Summarizer(Protocol):
         Expected to draw through a :class:`~anagrapheus.timeline.pins.PinResolver` and
         return the resulting key — see the module docstring for why the key belongs
         here rather than in the fold.
+        """
+        ...
+
+
+class AsyncSummarizer(Protocol):
+    """
+    A :class:`Summarizer` whose draw is awaited: an ``async def``, or any callable returning one.
+
+    The shape an async application will want, since the model calls it makes are
+    coroutines. A fold given one must be driven by
+    :meth:`~anagrapheus.timeline.folds.Projector.catch_up_async`.
+    """
+
+    def __call__(self, events: Sequence[StoredEvent]) -> Awaitable[Consolidation]:
+        """
+        Consolidate ``events`` into a section's prose, awaitably.
+
+        The same contract as :meth:`Summarizer.__call__`. Drawing through a pinned
+        model's async path resolves its pins with the ledger's awaited resolve, on the
+        loop's own thread.
         """
         ...
 
@@ -110,7 +144,7 @@ class ChronicleFold:
         reader: EventReader,
         *,
         boundary: UnitBoundary,
-        summarize: Summarizer,
+        summarize: Summarizer | AsyncSummarizer,
         name: str = FOLD_NAME,
     ) -> None:
         self._store = store
@@ -137,9 +171,44 @@ class ChronicleFold:
         the background — blocking the hot path is the one thing it must not do.
 
         The range is read here too, so a unit already covered costs no call at all.
+
+        Raises :class:`TypeError` if the summarizer is an :class:`AsyncSummarizer`,
+        which only :meth:`prepare_async` can await.
         """
-        if not self._boundary.closes_unit(event):
+        unit = self._unit(event)
+        if unit is None:
             return
+        start, events = unit
+        drawn = self._summarize(events)
+        if inspect.isawaitable(drawn):
+            if inspect.iscoroutine(drawn):
+                drawn.close()  # never started, so nothing was drawn
+            raise TypeError(
+                f"{self._name!r} has an async summarizer; drive its projector with catch_up_async()"
+            )
+        self._keep(start, event, drawn)
+
+    async def prepare_async(self, event: StoredEvent) -> None:
+        """
+        The awaited twin of :meth:`prepare`, for the awaited catch-up path.
+
+        Takes either kind of summarizer: an async one is awaited, a synchronous one is
+        called. Everything else — the range, the skip for a unit already covered, what
+        ``apply`` is left to write — is :meth:`prepare`'s.
+        """
+        unit = self._unit(event)
+        if unit is None:
+            return
+        start, events = unit
+        drawn = self._summarize(events)
+        if inspect.isawaitable(drawn):
+            drawn = await drawn
+        self._keep(start, event, drawn)
+
+    def _unit(self, event: StoredEvent) -> tuple[int, list[StoredEvent]] | None:
+        """Where the unit ``event`` closes starts, and its events; ``None`` if nothing to draw."""
+        if not self._boundary.closes_unit(event):
+            return None
         # The store's watermark alone is not enough: a batch can hold several
         # boundaries, and every `prepare` in it runs before any `apply` writes. Reading
         # only `consolidated_through()` would give each of them the same start, so the
@@ -150,11 +219,12 @@ class ChronicleFold:
             # Already covered -- the fold contract allows the last batch to be
             # re-applied after a crash, and re-consolidating would spend a model call
             # to produce a second valid answer for a range that already has one.
-            return
+            return None
         events = list(self._reader.read_raw(since_seq=start - 1, limit=event.seq - start + 1))
-        if not events:
-            return
-        drawn = self._summarize(events)
+        return (start, events) if events else None
+
+    def _keep(self, start: int, event: StoredEvent, drawn: Consolidation) -> None:
+        """Hold a drawn consolidation for ``apply`` to write."""
         _log.info("consolidated seq %d..%d: %s", start, event.seq, drawn.prose)
         self._prepared[event.seq] = (start, drawn)
 
