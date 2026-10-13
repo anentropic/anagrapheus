@@ -356,3 +356,61 @@ def test_re_applying_merges_and_unmerges_is_idempotent(rig: Rig):
         rig.store.commit_position(FOLD_NAME, position)
         rig.projector.catch_up()
         assert snapshot(rig.store.connection) == expected, position
+
+
+def _assert_replay_is_idempotent(rig: Rig) -> None:
+    """Rewinding to every earlier position and catching up changes nothing."""
+    expected = snapshot(rig.store.connection)
+    for position in range(rig.store.last_seq()):
+        rig.store.commit_position(FOLD_NAME, position)
+        rig.projector.catch_up()
+        assert snapshot(rig.store.connection) == expected, position
+    rig.rebuild()
+    assert snapshot(rig.store.connection) == expected
+
+
+def test_re_applying_a_merge_leaves_a_later_alias_of_the_absorbed_entity_alone(rig: Rig):
+    """B into A, then a form recorded on B: re-applying the merge must not move it."""
+    kept, e1 = establish(rig.types, "acme", provenance="crm")
+    absorbed, e2 = establish(rig.types, "acme-old", provenance="import")
+    rig.commit(e1, e2, merge(rig.types, kept=kept, absorbed=absorbed))
+    rig.commit(alias(rig.types, absorbed, "acme-new", "believed"))
+
+    _assert_replay_is_idempotent(rig)
+    assert {r.surface_form for r in rig.registry.surface_forms(kept)} == {"acme", "acme-old"}
+
+
+def test_an_unmerge_re_applied_takes_back_only_what_the_merge_moved(rig: Rig):
+    """A form B recorded while merged was never moved to A, so A never holds it."""
+    kept, absorbed = _pair(rig)
+    rig.commit(alias(rig.types, absorbed, "acme-new", "believed"))
+    rig.commit(unmerge(rig.types, rig.registry, kept=kept, absorbed=absorbed))
+    assert rig.registry.resolve("acme-new").sole() == absorbed
+
+    _assert_replay_is_idempotent(rig)
+    assert rig.registry.resolve("acme-new").sole() == absorbed
+
+
+def test_unmerging_one_entity_keeps_a_form_another_merge_also_brought(rig: Rig):
+    """B and C both bring a form into A; withdrawing B leaves A holding C's claim."""
+    kept, e1 = establish(rig.types, "acme", provenance="crm")
+    b, e2 = establish(rig.types, "ACME", provenance="import")
+    c, e3 = establish(rig.types, "ACME", provenance="ledger")
+    rig.commit(
+        e1,
+        e2,
+        e3,
+        merge(rig.types, kept=kept, absorbed=b),
+        merge(rig.types, kept=kept, absorbed=c),
+    )
+
+    rig.commit(unmerge(rig.types, rig.registry, kept=kept, absorbed=b))
+
+    assert {r.entity_id for r in rig.registry.resolve("ACME").candidates} == {kept, b}
+    _assert_replay_is_idempotent(rig)
+    assert {r.entity_id for r in rig.registry.resolve("ACME").candidates} == {kept, b}
+
+    # And withdrawing C too leaves A with nothing of the form.
+    rig.commit(unmerge(rig.types, rig.registry, kept=kept, absorbed=c))
+    assert {r.entity_id for r in rig.registry.resolve("ACME").candidates} == {b, c}
+    _assert_replay_is_idempotent(rig)

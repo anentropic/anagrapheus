@@ -391,3 +391,27 @@ def test_an_unmerge_from_the_identity_layer_plans_as_ambiguous(rig: Rig):
         rig.predicates.belief_id("location", kept),
         rig.predicates.belief_id("location", absorbed),
     }
+
+
+def test_merged_withdrawn_and_merged_again_leaves_the_survivor_one_successor(rig: Rig):
+    """
+    A belief on the survivor through merge, unmerge, merge in one batch.
+
+    The id the unmerge gave back is absorbed again, so both of the unmerge's targets
+    end on the survivor: one successor, not a ring.
+    """
+    kept, absorbed = uuid.uuid7(), uuid.uuid7()
+    rig.commit(rig.asserted("location", kept))
+
+    plans = plan_rekeys(
+        [
+            RekeyRow(seq=9, kind="merge", from_entity=absorbed, to_entity=kept),
+            RekeyRow(seq=10, kind="unmerge", from_entity=kept, to_entity=kept),
+            RekeyRow(seq=10, kind="unmerge", from_entity=kept, to_entity=absorbed),
+            RekeyRow(seq=11, kind="merge", from_entity=absorbed, to_entity=kept),
+        ],
+        rig.index,
+        rig.predicates,
+    )
+
+    assert [(p.seq, p.sole()) for p in plans] == [(10, rig.predicates.belief_id("location", kept))]

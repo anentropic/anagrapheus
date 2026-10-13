@@ -100,8 +100,9 @@ class IdentityStore(Protocol):
         Withdraw the merge of ``event.absorbed`` into ``event.kept``.
 
         Clears the absorbed entity's ``merged_into``, gives it back the surface forms
-        the merge moved onto ``kept`` (a form ``kept`` has since recorded for itself
-        stays on both) and records the re-key rows. When the absorbed entity is not
+        the merge moved onto ``kept`` (a form ``kept`` has since recorded for itself,
+        or that another merge into ``kept`` still standing also brought, stays on
+        both) and records the re-key rows. When the absorbed entity is not
         directly merged into ``kept``, it changes nothing but both entities' history,
         and must not raise: the event is already in the log.
         """

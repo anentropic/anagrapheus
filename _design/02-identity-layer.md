@@ -239,21 +239,32 @@ merges final.
   into it earlier, which the old "forms it recorded itself" reading of the decision
   rows would have stranded on the survivor. A form the survivor recorded for itself,
   before the merge or since, stays on both. A form a later split carried to a new
-  entity stays there, because the split was its own judgment about that form. To make
+  entity stays there, because the split was its own judgment about that form. Where
+  another merge still standing brought the same form (found already on the survivor,
+  so recorded as `shared`), the survivor keeps the form under that merge's stance and
+  sequence: it holds what it would have held had the withdrawn merge never happened.
+  To make
   this exact, the merge now writes the forms it moved, and the ones it found already
   on the survivor, into its `absorbed` decision row (`moved`, `shared`). No migration:
   the detail column is JSON. A projection folded before this change has no such
   record, and an unmerge over it restores nothing until the projection is rebuilt.
 - **Re-applied batches.** The first application's decision row decides. A re-applied
-  merge keeps its recorded forms (a recount would find none, because they have moved
-  already). A re-applied unmerge or no-op keeps what it did the first time, even
-  where state that already reflects later decisions now says otherwise.
+  merge keeps its recorded forms and takes again only those: a form whose row the
+  absorbed entity still holds as the merge saw it, which a later unmerge gave back.
+  A recount would find nothing the merge moved, and would take forms the absorbed
+  entity recorded after the merge, which no unmerge could then take back. A first
+  application likewise takes only rows recorded at or before the merge. A re-applied
+  unmerge or no-op keeps what it did the first time, even where state that already
+  reflects later decisions now says otherwise.
 - **The seam has the split's shape.** An unmerge emits two rows, `kept→kept` and
   `kept→absorbed`. A belief keyed on the survivor may have been about either entity,
   and only what it says can tell. `plan_rekeys` therefore reports two candidates, and
   `sole()` refuses. Within one batch, `_onward` no longer follows a merge that a later
   unmerge withdrew, and the withdrawn merge's own group plans nothing: the absorbed
-  id is canonical again, so beliefs keyed on it are already keyed correctly.
+  id is canonical again, so beliefs keyed on it are already keyed correctly. If the
+  same batch merges the pair again, the unmerge's two targets both settle on the
+  survivor, which is one successor rather than a ring; targets that settle on the
+  same id are reported once.
 - **API breaks, before 0.1.0.** `IdentityRole` has a fifth member, and
   `IdentityStore` has a new `unmerged()`, which third-party stores must implement.
   Additive: `IdentityRegistry.merged_into()`, `NotMerged`, `OPTIONAL_ROLES`.

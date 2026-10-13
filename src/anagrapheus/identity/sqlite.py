@@ -62,35 +62,21 @@ class SQLiteIdentityStore:
             "UPDATE identity_entities SET merged_into = ?, merged_seq = ? WHERE entity_id = ?",
             (str(event.kept), seq, str(event.absorbed)),
         )
-        # The absorbed id names nothing once it has yielded, so its surface forms
-        # belong to the survivor. Leaving them where they were made the projection
-        # inconsistent with itself — `resolve` canonicalized them onto the survivor
-        # while `surface_forms` did not list them, and a later split of the survivor
-        # could not reach them to disambiguate. `identity_decisions` keeps the record
-        # of which entity originally recorded each form, so nothing is lost.
-        moved: list[list[object]] = []
-        shared: list[list[object]] = []
-        for row in self.aliases(event.absorbed):
-            entry: list[object] = [row.surface_form, row.stance, row.seq]
-            if self._alias_row_exists(event.kept, row.surface_form):
-                # The survivor's own recording of its own name wins over a duplicate
-                # arriving from the absorbed entity. Deterministic without ranking,
-                # which this layer cannot do — the ladder belongs to the caller.
-                shared.append(entry)
-                continue
-            moved.append(entry)
-            self._put_alias(event.kept, row.surface_form, row.stance, row.seq)
-        self._conn.execute(
-            "DELETE FROM identity_aliases WHERE entity_id = ?", (str(event.absorbed),)
-        )
-        self._rekey(seq, "merge", event.absorbed, event.kept)
         detail = {"kept": str(event.kept), "absorbed": str(event.absorbed)}
         # What the merge took off the absorbed entity is what an unmerge gives back, so
         # it is written down here. The first application's record wins: on a
-        # re-applied batch the forms have already moved and a recount would find none.
+        # re-applied batch the state already reflects later decisions, so what the
+        # absorbed entity holds now is not what it held then, and a recount would be
+        # wrong both ways — it would find nothing the merge moved and take forms the
+        # entity recorded afterwards.
         recorded = self._decision_detail(seq, event.absorbed, "absorbed")
-        if recorded is None:
-            recorded = {**detail, "moved": moved, "shared": shared}
+        if recorded is not None and "moved" in recorded:
+            self._retake_forms(event, seq, recorded)
+        else:
+            moved, shared = self._take_forms(event, seq)
+            if recorded is None:
+                recorded = {**detail, "moved": moved, "shared": shared}
+        self._rekey(seq, "merge", event.absorbed, event.kept)
         self._decision(seq, event.absorbed, "absorbed", recorded)
         self._decision(seq, event.kept, "merged", detail)
 
@@ -128,22 +114,20 @@ class SQLiteIdentityStore:
         moved = _entries(merge, "moved") if merge is not None else []
         shared = _entries(merge, "shared") if merge is not None else []
         for form, stance, form_seq in moved:
-            on_kept = self._alias_seq(event.kept, form)
-            if on_kept is None:
+            if self._alias_seq(event.kept, form) is None:
                 # A later decision, a split of the survivor, took the form elsewhere.
                 # That judgment stands; the unmerge does not reach past it.
                 continue
-            if on_kept == form_seq:
-                # Still the row the merge moved: the survivor never recorded the form
-                # for itself, so it goes back.
-                self._conn.execute(
-                    "DELETE FROM identity_aliases WHERE entity_id = ? AND surface_form = ?",
-                    (str(event.kept), form),
-                )
+            # Still the row the merge moved means the survivor never recorded the form
+            # for itself, so it goes back.
+            self._release(event.kept, event.absorbed, form, form_seq)
             restored.append(form)
             self._restore_alias(event.absorbed, form, stance, form_seq)
         for form, stance, form_seq in shared:
-            # Both entities recorded it before the merge, so both hold it again.
+            # Both held it before the merge, so both hold it again. The survivor's row
+            # may be one it holds only for this merge, kept for it when another merge
+            # that had moved the form was withdrawn first.
+            self._release(event.kept, event.absorbed, form, form_seq)
             restored.append(form)
             self._restore_alias(event.absorbed, form, stance, form_seq)
         # Split-shaped: a belief keyed on the survivor may have been about either
@@ -194,6 +178,93 @@ class SQLiteIdentityStore:
             event.original,
             "split",
             {"into": [str(a.entity_id) for a in event.into]},
+        )
+
+    def _take_forms(self, event: Merged, seq: int) -> tuple[list[list[object]], list[list[object]]]:
+        """
+        Move the absorbed entity's forms to the survivor; return what moved and what both held.
+
+        The absorbed id names nothing once it has yielded, so its surface forms belong
+        to the survivor. Leaving them where they were made the projection inconsistent
+        with itself — `resolve` canonicalized them onto the survivor while
+        `surface_forms` did not list them, and a later split of the survivor could not
+        reach them to disambiguate. `identity_decisions` keeps the record of which
+        entity originally recorded each form, so nothing is lost.
+
+        Only rows recorded at or before the merge are taken: a form the absorbed entity
+        recorded later was never the merge's to move.
+        """
+        moved: list[list[object]] = []
+        shared: list[list[object]] = []
+        for row in self.aliases(event.absorbed):
+            if row.seq > seq:
+                continue
+            entry: list[object] = [row.surface_form, row.stance, row.seq]
+            if self._alias_row_exists(event.kept, row.surface_form):
+                # The survivor's own recording of its own name wins over a duplicate
+                # arriving from the absorbed entity. Deterministic without ranking,
+                # which this layer cannot do — the ladder belongs to the caller.
+                shared.append(entry)
+            else:
+                moved.append(entry)
+                self._put_alias(event.kept, row.surface_form, row.stance, row.seq)
+            self._delete_alias(event.absorbed, row.surface_form)
+        return moved, shared
+
+    def _retake_forms(self, event: Merged, seq: int, recorded: dict[str, object]) -> None:
+        """
+        Re-apply a merge from its record: take again exactly the forms it took then.
+
+        A form is taken only while the absorbed entity still holds the row the merge
+        saw — a later unmerge gives that row back — and never one recorded after it.
+        """
+        for form, stance, form_seq in _entries(recorded, "moved"):
+            if self._alias_seq(event.absorbed, form) == form_seq:
+                self._put_alias(event.kept, form, stance, form_seq)
+                self._delete_alias(event.absorbed, form)
+        for form, _stance, form_seq in _entries(recorded, "shared"):
+            if self._alias_seq(event.absorbed, form) == form_seq:
+                self._delete_alias(event.absorbed, form)
+
+    def _release(self, kept: UUID, absorbed: UUID, form: str, form_seq: int) -> None:
+        """
+        Take a form an unmerge gives back off the survivor, unless it has another claim.
+
+        The survivor's row is the withdrawn merge's when its sequence is the one that
+        merge recorded; a row of the survivor's own, or a later decision's, is left be.
+        Another merge still standing may have brought the same form, recorded as held
+        by both because this one got there first; the survivor keeps the form for that
+        one, as it would have had the withdrawn merge never happened.
+        """
+        if self._alias_seq(kept, form) != form_seq:
+            return
+        claim = self._standing_claim(kept, absorbed, form)
+        if claim is None:
+            self._delete_alias(kept, form)
+        else:
+            self._put_alias(kept, form, claim[0], claim[1])
+
+    def _standing_claim(self, kept: UUID, absorbed: UUID, form: str) -> tuple[str, int] | None:
+        """``form``'s stance and sequence from the earliest other standing merge that held it."""
+        rows = self._conn.execute(
+            "SELECT entity_id, merged_seq FROM identity_entities "
+            "WHERE merged_into = ? AND entity_id != ? AND merged_seq IS NOT NULL "
+            "ORDER BY merged_seq",
+            (str(kept), str(absorbed)),
+        ).fetchall()
+        for row in rows:
+            merge = self._decision_detail(row["merged_seq"], UUID(row["entity_id"]), "absorbed")
+            if merge is None:
+                continue
+            for other, stance, other_seq in _entries(merge, "shared"):
+                if other == form:
+                    return stance, other_seq
+        return None
+
+    def _delete_alias(self, entity_id: UUID, surface_form: str) -> None:
+        self._conn.execute(
+            "DELETE FROM identity_aliases WHERE entity_id = ? AND surface_form = ?",
+            (str(entity_id), surface_form),
         )
 
     # ---- reads --------------------------------------------------------------------

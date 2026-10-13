@@ -51,7 +51,7 @@ class BeliefRekey:
       that. Several candidates state exactly what is known.
     - after an **unmerge**, two — the kept entity's own id and the id it gave back. A
       belief keyed on the kept entity may have been about either all along, which is
-      the split's question again.
+      the split's question again. One, if the same batch merges the pair again.
 
     ``sole()`` is for the merge case, and raises rather than picking so the assumption
     stays visible.
@@ -105,7 +105,7 @@ def plan_rekeys(
         if kind == "merge" and _withdrawn(seq, from_entity, targets[0], grouped):
             continue
         for row in index.beliefs_for(from_entity):
-            settled = _settle(from_entity, targets, grouped)
+            settled = _settle(kind, from_entity, targets, grouped)
             candidates = _successors(row.belief_id, from_entity, settled, predicates)
             if candidates is None:
                 if skip_unrenderable:
@@ -134,7 +134,7 @@ def _group(rekeys: Iterable[RekeyRow]) -> dict[tuple[int, str, UUID], list[UUID]
     return grouped
 
 
-def _settle(from_entity: UUID, targets: Sequence[UUID], grouped: _Grouped) -> list[UUID]:
+def _settle(kind: str, from_entity: UUID, targets: Sequence[UUID], grouped: _Grouped) -> list[UUID]:
     """
     Follow each target through any later decision in the same batch.
 
@@ -146,11 +146,15 @@ def _settle(from_entity: UUID, targets: Sequence[UUID], grouped: _Grouped) -> li
 
     A split's products are followed the same way, independently: one may be absorbed
     later while its siblings are not, and each candidate answers for itself.
+
+    An unmerge starts from an entity that is still there, so arriving back at it is
+    not a ring: the id it gave back was absorbed into it again later in the batch.
+    Targets that settle on the same id are one candidate.
     """
     settled: list[UUID] = []
     for target in targets:
         current = target
-        seen = {from_entity, current}
+        seen = {current} if kind == "unmerge" else {from_entity, current}
         while (onward := _onward(current, grouped)) is not None:
             current = onward
             if current in seen:
@@ -159,7 +163,8 @@ def _settle(from_entity: UUID, targets: Sequence[UUID], grouped: _Grouped) -> li
                     f"last element, so there is no successor to re-mint to"
                 )
             seen.add(current)
-        settled.append(current)
+        if current not in settled:
+            settled.append(current)
     return settled
 
 

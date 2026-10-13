@@ -319,7 +319,7 @@ The chooser here, matching a word in the belief's value, stands in for whatever 
 
 ## Undo a merge
 
-A merge that turns out to be wrong is withdrawn with [`unmerge`][unmerge], which appends a new decision rather than editing the old one. The absorbed entity becomes canonical again and takes back the names the merge moved onto the survivor. A name the survivor recorded for itself stays on the survivor too, and a name a later split moved elsewhere stays where it went.
+A merge that turns out to be wrong is withdrawn with [`unmerge`][unmerge], which appends a new decision rather than editing the old one. The absorbed entity becomes canonical again and takes back the names the merge moved onto the survivor. A name the survivor recorded for itself, or that another of its merges also brought, stays on the survivor too, and a name a later split moved elsewhere stays where it went.
 
 `unmerge` takes the registry and checks it before building the event: it raises [`NotMerged`][not-merged] unless `absorbed` is merged directly into `kept`.
 
