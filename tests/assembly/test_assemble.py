@@ -28,7 +28,14 @@ from anagrapheus.assembly import (
 )
 from anagrapheus.beliefs import FOLD_NAME, StateRef
 from anagrapheus.chronicle import Anchor, Section, SQLiteChronicleStore
-from anagrapheus.timeline import EventReader, PinLedger, Projector, UpcastRegistry, pin_key
+from anagrapheus.timeline import (
+    EventReader,
+    PinLedger,
+    Projector,
+    UpcastRegistry,
+    is_bookkeeping,
+    pin_key,
+)
 from tests.beliefs.conftest import Rig, build_rig
 
 if TYPE_CHECKING:
@@ -441,3 +448,15 @@ def test_the_default_renderer_labels_each_register():
 
     assert text.index("MUST HOLD") < text.index("CONSIDER") < text.index("CRAFT")
     assert "advisory prose, not canon" in text
+
+
+def test_a_log_slice_can_leave_the_pin_ledger_out(rig: Rig):
+    """The stock bookkeeping predicate works as a log slice's admit."""
+    rig.commit(rig.asserted("location", uuid.uuid7()))
+    _pin_and_commit(rig)
+
+    everything = _log(rig).events()
+    content = _log(rig, admit=lambda e: not is_bookkeeping(e)).events()
+
+    assert [stored.envelope.type for stored, _ in everything][-1] == "PinPromoted"
+    assert [stored.seq for stored, _ in content] == [everything[0][0].seq]
