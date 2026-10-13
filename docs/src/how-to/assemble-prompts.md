@@ -102,6 +102,7 @@ fold = BeliefFold(
     predicates,
     SQLiteBeliefIndexStore(store.connection),
     types,
+    durable=False,
 )
 projector = Projector(store, reader, [fold])
 
@@ -141,7 +142,7 @@ def norway_grant(upto_seq: int) -> NorwayGrant:
             fold.store,
             visible=lambda scope: scope == "party:norway:held",
             upto_seq=upto_seq,
-            folded_through=lambda: store.read_position(FOLD_NAME),
+            folded_through=lambda: projector.position(FOLD_NAME),
         ),
         ask=Given("ask", "Respond to the latest offer in one sentence."),
     )
@@ -150,7 +151,7 @@ def norway_grant(upto_seq: int) -> NorwayGrant:
 The slices used here:
 
 - [`LogSlice`][log-slice] reads events up to `upto_seq` that `admit` accepts. `admit` sees only the envelope, so a refused event is never even decoded. This is where a private event is kept out of a shared prompt.
-- [`BeliefSlice`][belief-slice] reads the scopes `visible` accepts. `folded_through` reports how far the belief fold has got, and the slice refuses to read if that is not `upto_seq`.
+- [`BeliefSlice`][belief-slice] reads the scopes `visible` accepts. `folded_through` reports how far the belief fold has got, and the slice refuses to read if that is not `upto_seq`. Ask the projector rather than the store: an in-memory fold (`durable=False`) keeps its position on itself, not in the file.
 - [`Given`][given] wraps a value your application computed, such as the instruction.
 
 Two more slices exist: [`ChronicleSlice`][chronicle-slice] for chronicle sections, and [`EventsSlice`][events-slice] for a fixed run of events, such as the range a summariser is given.

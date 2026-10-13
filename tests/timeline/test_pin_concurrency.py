@@ -107,9 +107,9 @@ def test_concurrent_draws_on_different_keys_still_run_in_parallel(tmp_path: Path
 
 def test_replay_record_mode_coalesces_too(tmp_path: Path):
     """Record mode pins a fresh draw, so it has the same gap and needs the same fix."""
-    store, types, _ledger = build(tmp_path / "a.db")
+    store, types, ledger = build(tmp_path / "a.db")
     try:
-        replay = ReplayPins.from_events(list(store.read()), types, on_miss="record")
+        replay = ReplayPins.from_events(list(store.read()), types, on_miss="record", into=ledger)
         fired: list[int] = []
 
         async def effect() -> str:

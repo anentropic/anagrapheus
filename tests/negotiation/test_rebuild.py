@@ -93,3 +93,20 @@ def test_a_reopened_table_holds_what_it_held(tmp_path: Path):
         assert _everything(reopened.core, scopes) == before
     finally:
         reopened.close()
+
+
+def test_a_reopened_table_folds_its_beliefs_back(tmp_path: Path):
+    """No rebuild on open: the fold is not durable, so a fresh process starts it at zero."""
+    path = tmp_path / "reopen.db"
+    table = _replayed(path)
+    try:
+        scopes = table.scopes()
+        before = _everything(table.core, scopes)
+    finally:
+        table.close()
+
+    reopened = Table.open(path)
+    try:
+        assert _everything(reopened.core, scopes) == before
+    finally:
+        reopened.close()
