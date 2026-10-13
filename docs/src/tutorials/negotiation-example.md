@@ -341,7 +341,7 @@ You have run a multi-agent negotiation and taken it apart layer by layer. You ha
 [register]: ../reference/anagrapheus/assembly/parts.md#anagrapheus.assembly.parts.Register
 [merge]: ../reference/anagrapheus/identity/decisions.md#anagrapheus.identity.decisions.merge
 [plan-rekeys]: ../reference/anagrapheus/beliefs/rekey.md#anagrapheus.beliefs.rekey.plan_rekeys
-[belief-index]: ../reference/anagrapheus/beliefs/index.md#anagrapheus.beliefs.index.BeliefIndex
+[belief-index]: ../reference/anagrapheus/beliefs/index-module.md#anagrapheus.beliefs.index.BeliefIndex
 [replay-pins]: ../reference/anagrapheus/timeline/replay.md#anagrapheus.timeline.replay.ReplayPins
 [pin-miss]: ../reference/anagrapheus/timeline/replay.md#anagrapheus.timeline.replay.PinMiss
 [belief-revised]: ../reference/anagrapheus/beliefs/events.md#anagrapheus.beliefs.events.BeliefRevised

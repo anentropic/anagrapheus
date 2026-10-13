@@ -46,7 +46,7 @@ The top-level package adds one function of its own, `anagrapheus.register_builti
 - [`events`](anagrapheus/beliefs/events.md): [`BeliefRevised`](anagrapheus/beliefs/events.md#anagrapheus.beliefs.events.BeliefRevised), [`BeliefExpanded`](anagrapheus/beliefs/events.md#anagrapheus.beliefs.events.BeliefExpanded) and [`BeliefContracted`](anagrapheus/beliefs/events.md#anagrapheus.beliefs.events.BeliefContracted).
 - [`writer`](anagrapheus/beliefs/writer.md): [`BeliefEvents`](anagrapheus/beliefs/writer.md#anagrapheus.beliefs.writer.BeliefEvents), which builds those events from a predicate and its entities.
 - [`fold`](anagrapheus/beliefs/fold.md): [`BeliefFold`](anagrapheus/beliefs/fold.md#anagrapheus.beliefs.fold.BeliefFold).
-- [`index`](anagrapheus/beliefs/index.md): [`BeliefIndex`](anagrapheus/beliefs/index.md#anagrapheus.beliefs.index.BeliefIndex).
+- [`index`](anagrapheus/beliefs/index-module.md): [`BeliefIndex`](anagrapheus/beliefs/index-module.md#anagrapheus.beliefs.index.BeliefIndex).
 - [`store`](anagrapheus/beliefs/store.md) and [`sqlite`](anagrapheus/beliefs/sqlite.md): the index store protocol and [`SQLiteBeliefIndexStore`](anagrapheus/beliefs/sqlite.md#anagrapheus.beliefs.sqlite.SQLiteBeliefIndexStore).
 - [`rekey`](anagrapheus/beliefs/rekey.md): [`plan_rekeys`](anagrapheus/beliefs/rekey.md#anagrapheus.beliefs.rekey.plan_rekeys) and [`BeliefRekey`](anagrapheus/beliefs/rekey.md#anagrapheus.beliefs.rekey.BeliefRekey).
 - [`divergence`](anagrapheus/beliefs/divergence.md): [`divergence`](anagrapheus/beliefs/divergence.md#anagrapheus.beliefs.divergence.divergence) and [`Disagreement`](anagrapheus/beliefs/divergence.md#anagrapheus.beliefs.divergence.Disagreement).

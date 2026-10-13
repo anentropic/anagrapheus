@@ -12,6 +12,10 @@ def main():
     for path in sorted(src.rglob("*.py")):
         module_path = path.relative_to(src).with_suffix("")
         doc_path = path.relative_to(src).with_suffix(".md")
+        # A module named ``index`` would become its section's landing page under
+        # navigation.indexes, so give its page another name.
+        if doc_path.stem == "index":
+            doc_path = doc_path.with_name("index-module.md")
         full_doc_path = Path("reference", doc_path)
 
         parts = tuple(module_path.parts)

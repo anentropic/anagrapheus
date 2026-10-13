@@ -194,7 +194,7 @@ For the procedure, see [How to Keep Per-Agent Beliefs as a Fold](../how-to/per-a
 [contract]: ../reference/anagrapheus/beliefs/ops.md#anagrapheus.beliefs.ops.Contract
 [state-ref]: ../reference/anagrapheus/beliefs/ops.md#anagrapheus.beliefs.ops.StateRef
 [belief-events]: ../reference/anagrapheus/beliefs/writer.md#anagrapheus.beliefs.writer.BeliefEvents
-[beliefs-for]: ../reference/anagrapheus/beliefs/index.md#anagrapheus.beliefs.index.BeliefIndex.beliefs_for
+[beliefs-for]: ../reference/anagrapheus/beliefs/index-module.md#anagrapheus.beliefs.index.BeliefIndex.beliefs_for
 [divergence]: ../reference/anagrapheus/beliefs/divergence.md#anagrapheus.beliefs.divergence.divergence
 [wrong-arity]: ../reference/anagrapheus/beliefs/errors.md#anagrapheus.beliefs.errors.WrongArity
 [outside-vocabulary]: ../reference/anagrapheus/beliefs/errors.md#anagrapheus.beliefs.errors.OutsideVocabulary
