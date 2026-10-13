@@ -120,7 +120,7 @@ def test_the_required_output_shape_is_part_of_the_call():
     A schema the model is *told* to satisfy changes what it generates, so it is in.
 
     This is the one inclusion that looks like it might key on the interpretation, and
-    it does not: §4a forbids keying on the parsing done *after* the draw, which is
+    it does not: the parsing done *after* the draw is never keyed on, because it is
     ``interpret``'s job and never reaches the material.
     """
     messages = [ModelRequest(parts=[UserPromptPart(content="hi")])]
@@ -138,7 +138,7 @@ def test_the_required_output_shape_is_part_of_the_call():
 
 def test_an_application_policy_replaces_the_default(rig: Rig):
     """
-    §4c gives the canonicalization policy to the application, and it means it.
+    The application owns the canonicalization policy, and it means it.
 
     Here a policy that keys on the model alone makes two different prompts one call —
     absurd as a policy, and exactly the point: the library does not get a vote.
@@ -255,8 +255,8 @@ def test_a_setting_that_changes_the_draw_changes_the_key():
     """
     A temperature change is a different draw; replaying the old answer would be a bug.
 
-    The open question 04 §8 left: a consumer who pinned across a settings change and got
-    the earlier answer back would reasonably call that a bug in the default.
+    A consumer who pinned across a settings change and got the earlier answer back
+    would reasonably call that a bug in the default.
     """
     messages = [ModelRequest(parts=[UserPromptPart(content="hi")])]
 
@@ -287,6 +287,66 @@ def test_a_setting_about_delivery_does_not():
     )
 
     assert material(messages, "m", PARAMS, delivered) == material(messages, "m", PARAMS)
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("openai_service_tier", "flex"),
+        ("anthropic_service_tier", "standard_only"),
+        ("google_cloud_service_tier", "flex_only"),
+    ],
+)
+def test_a_provider_service_tier_does_not_change_the_key(name: str, value: str):
+    """A service tier is about delivery whichever provider's prefix it carries."""
+    messages = [ModelRequest(parts=[UserPromptPart(content="hi")])]
+    tiered = cast("ModelSettings", {name: value, "temperature": 0.2})
+
+    assert material(messages, "m", PARAMS, tiered) == material(
+        messages, "m", PARAMS, {"temperature": 0.2}
+    )
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("openai_logprobs", True),
+        ("openai_top_logprobs", 5),
+        ("google_logprobs", True),
+        ("google_top_logprobs", 5),
+        ("xai_logprobs", True),
+        ("xai_top_logprobs", 5),
+        ("openai_continuous_usage_stats", True),
+        ("openrouter_usage", {"include": True}),
+    ],
+)
+def test_a_setting_that_reports_on_the_draw_still_changes_the_key(name: str, value: Json):
+    """
+    Token probabilities and usage accounting stay keyed.
+
+    They do not change what is sampled, but they change the response: a pin recorded
+    without them would answer a call that asked for them with nothing to report.
+    """
+    messages = [ModelRequest(parts=[UserPromptPart(content="hi")])]
+    reported = cast("ModelSettings", {name: value, "temperature": 0.2})
+
+    assert material(messages, "m", PARAMS, reported) != material(
+        messages, "m", PARAMS, {"temperature": 0.2}
+    )
+
+
+def test_storing_the_completion_still_changes_the_key():
+    """
+    ``openai_store`` stays keyed.
+
+    Turning it off on the Responses API leaves earlier image-generation calls out of the
+    history the model is sent, so the draw can differ.
+    """
+    messages = [ModelRequest(parts=[UserPromptPart(content="hi")])]
+    stored = cast("ModelSettings", {"openai_store": True})
+    unstored = cast("ModelSettings", {"openai_store": False})
+
+    assert material(messages, "m", PARAMS, stored) != material(messages, "m", PARAMS, unstored)
 
 
 def test_no_draw_settings_keys_as_it_did_before_settings_were_keyed():

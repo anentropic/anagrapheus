@@ -76,7 +76,8 @@ _VOLATILE = frozenset(
 _DELIVERY = frozenset({"cache"})
 
 #: Settings about how the call is delivered, not what is drawn. Provider-prefixed
-#: prompt-cache settings (``anthropic_cache_messages`` and the like) are dropped by
+#: prompt-cache settings (``anthropic_cache_messages`` and the like) and service tiers
+#: (``openai_service_tier``, ``anthropic_service_tier`` and the like) are dropped by
 #: :func:`_delivers` as well, so a new one does not need adding here.
 _DELIVERY_SETTINGS = frozenset({"timeout", "extra_headers", "service_tier", "cache"})
 
@@ -253,11 +254,15 @@ def _delivers(setting: str) -> bool:
     """
     Whether a setting changes only how the call travels — including any cache one.
 
-    A setting that only names the user or session behind the call counts too.
+    A service tier counts, whichever provider prefixes it, and so does a setting that
+    only names the user or session behind the call. A setting that asks for more to be
+    reported, such as token probabilities or usage accounting, does not: the pinned
+    response would lack what a later call asked for.
     """
     return (
         setting in _DELIVERY_SETTINGS
         or setting in _IDENTITY_SETTINGS
+        or setting.endswith("service_tier")
         or "cache" in setting.split("_")
     )
 
