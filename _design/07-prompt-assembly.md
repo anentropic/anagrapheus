@@ -42,7 +42,7 @@ came out of that, and each one is a design input:
   ignores prose. **A firewall on the readers is not a firewall on the prompt, unless
   the prompt can only be built from the readers.**
 - **Canon and generated prose looked alike.** Chronicle sections are advisory (R61
-  clause 4, PROPOSED). Woven in beside belief lines, they would be indistinguishable
+  clause 4, RATIFIED 2026-10-12). Woven in beside belief lines, they would be indistinguishable
   from canon, so `_context` labels them by hand. **The register a piece of text
   belongs to is structure, not wording.**
 - **Lookups by "the first belief in the scope" answered the wrong question once the

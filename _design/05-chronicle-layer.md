@@ -5,8 +5,7 @@ or fills gaps in the upstream design. Spec authority is
 [`agent-core` doc 00 §7](https://github.com/anentropic/narrative-vm/blob/main/_design/agent-core/00-agent-core-architecture.md);
 the grade question is settled by
 [**R61**](https://github.com/anentropic/narrative-vm/blob/main/_design/v2/16-nvm-decision-register.md),
-which is **PROPOSED 2026-08-30 and awaiting sign-off** — nothing here states it as
-current, and if it moves in sign-off this follows.
+which is **RATIFIED 2026-10-12** (proposed 2026-08-30).
 
 Doc 00 §7 keeps four things and discards the rest as commodity: consolidate ranges of
 the log into prose that **cites the range it covers**; supersede rather than correct;

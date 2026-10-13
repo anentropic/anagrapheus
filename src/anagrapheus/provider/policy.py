@@ -1,17 +1,17 @@
 """
 What counts as "the same model call".
 
-This is the whole design, and doc 00 §4a is unusually specific about it: **hash only
-what consumes the entropy** — for a model call, *"the semantic identity of the call,
-never the serialized request shape and never how you intend to parse the response."*
-Both naive options fail. Key on the entire request and re-framing a decision re-rolls
-it; key on the draw alone while letting the caller see the raw and a threshold can be
-fitted to a result already seen.
+This is the whole design, and the rule is unusually specific: **hash only what consumes
+the entropy** — for a model call, *"the semantic identity of the call, never the
+serialized request shape and never how you intend to parse the response."* Both naive
+options fail. Key on the entire request and re-framing a decision re-rolls it; key on
+the draw alone while letting the caller see the raw and a threshold can be fitted to a
+result already seen.
 
-§4c then says the canonicalization policy is **the application's** — the library owns
-the mechanism, the domain owns what "same" means. So :class:`CallPolicy` is a Protocol
-with a working default, the same arrangement identity's vocabulary and beliefs'
-predicate registry both take.
+The canonicalization policy is **the application's** — the library owns the mechanism,
+the domain owns what "same" means. So :class:`CallPolicy` is a Protocol with a working
+default, the same arrangement identity's vocabulary and beliefs' predicate registry both
+take.
 
 **What the default excludes, and why it must.** pydantic-ai's message parts carry
 `timestamp` on every user, system and tool-return part; `id`, `provider_name` and
@@ -45,6 +45,8 @@ object) are dropped. The rest of ``extra_body`` stays in the key, because draw-c
 settings ride there too: OpenRouter reasoning, Anthropic ``thinking``, a sampling
 parameter the provider's typed settings do not cover yet.
 """
+
+# Design: note 04; upstream agent-core doc 00 §4a, §4c.
 
 from __future__ import annotations
 
@@ -131,10 +133,10 @@ class SemanticCallPolicy:
     how it is delivered.
 
     The **output shape is included** deliberately, and it is the one inclusion that
-    looks like it might violate §4a's "never how you intend to parse the response".
-    It does not: a required output schema is sent *to* the model and changes what it
-    generates, so it consumes entropy. What §4a forbids is keying on the parsing you
-    will do *after* the draw, which is what ``interpret`` handles and what never
+    looks like it might break the rule "never how you intend to parse the response". It
+    does not: a required output schema is sent *to* the model and changes what it
+    generates, so it consumes entropy. What the rule forbids is keying on the parsing
+    you will do *after* the draw, which is what ``interpret`` handles and what never
     reaches this material.
     """
 

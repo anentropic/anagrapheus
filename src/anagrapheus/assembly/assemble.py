@@ -19,10 +19,12 @@ whatever the assembler does:
   the context's ``read`` is exactly this call's.
 - **The budget never sheds a binding part**, and says what it shed.
 
-**Determinism is the contract this rests on** (note 07 §4). Same log, same position,
-same grant: same parts, so the same rendered bytes, so a replay hits its pins. Nothing
-here can check that an assembler is pure, so the golden test does instead.
+**Determinism is the contract this rests on.** Same log, same position, same grant: same
+parts, so the same rendered bytes, so a replay hits its pins. Nothing here can check
+that an assembler is pure, so the golden test does instead.
 """
+
+# Design: note 07 §4; upstream NVM U42 (the binding layer never sheds).
 
 from __future__ import annotations
 
@@ -61,8 +63,8 @@ class Budget:
 
     ``count`` is the application's token counter — the library does not guess at one.
     Parts are shed register by register in ``order``, lowest ``rank`` first and, among
-    equals, the later part first. ``binding`` may not appear in ``order``: "the binding
-    layer never sheds" (U42).
+    equals, the later part first. ``binding`` may not appear in ``order``: the binding
+    layer never sheds, because a context missing a binding fact is wrong, not short.
     """
 
     total: int

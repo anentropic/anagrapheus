@@ -1,11 +1,11 @@
 """
 Pinning a tool call, which is a nondeterministic effect like any other.
 
-Doc 00 §4 lists the effects worth pinning as *"a model call, an RNG draw, a tool
-invocation, an external fetch"* — the last two are tools. Pinning only the model side
-of a run gives a replay that reproduces what was *said* while re-running what was
-*done*: the fetch repeats, the row is written twice, the payment is made again. That is
-not a replay, and it fails silently, because the model half looks perfect.
+The effects worth pinning are *"a model call, an RNG draw, a tool invocation, an
+external fetch"* — the last two are tools. Pinning only the model side of a run gives a
+replay that reproduces what was *said* while re-running what was *done*: the fetch
+repeats, the row is written twice, the payment is made again. That is not a replay, and
+it fails silently, because the model half looks perfect.
 
 **Which tools to pin is the caller's judgment, and it matters in both directions.** A
 tool that reads the world (a search, a fetch, a query) wants pinning: replay should see
@@ -24,6 +24,8 @@ caller's thread, and a sync tool body is offloaded so a slow one still does not 
 the loop. The split is exactly what
 :meth:`~anagrapheus.timeline.pins.PinResolver.resolve_async` exists to allow.
 """
+
+# Design: note 04; upstream agent-core doc 00 §4.
 
 from __future__ import annotations
 

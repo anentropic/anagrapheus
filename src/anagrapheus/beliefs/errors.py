@@ -1,5 +1,7 @@
 """Belief-layer error types."""
 
+# Design: note 03; upstream agent-core doc 00 §6b.
+
 from __future__ import annotations
 
 __all__ = [
@@ -23,9 +25,9 @@ class UnknownPredicate(BeliefError):
     """
     A predicate name the registry does not declare.
 
-    Predicates are schema and live in code, so this is the import-time-ish failure doc
-    00 §6b asks for: minting an undeclared predicate is a bug in the caller, not a
-    reason to invent one on the fly.
+    Predicates are schema and live in code, so this is an import-time-ish failure:
+    minting an undeclared predicate is a bug in the caller, not a reason to invent one
+    on the fly.
     """
 
 
@@ -44,10 +46,10 @@ class OutsideVocabulary(BeliefError, ValueError):
     """
     A value for a predicate that declares its answers, and this is not one of them.
 
-    The vocabulary is schema in the same sense the predicate is (doc 00 §6b): a value
-    outside it is a belief nothing else can be compared with, and accepting it would let
-    one spelling of an answer quietly become a second answer. Also a ``ValueError``,
-    because that is what it is to a caller who has never heard of this library's types.
+    The vocabulary is schema in the same sense the predicate is: a value outside it is a
+    belief nothing else can be compared with, and accepting it would let one spelling of
+    an answer quietly become a second answer. Also a ``ValueError``, because that is
+    what it is to a caller who has never heard of this library's types.
     """
 
 
