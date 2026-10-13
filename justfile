@@ -17,12 +17,12 @@ setup-agent-cli agent="claude":
 # Build the docs site (strict mode)
 docs-build:
     uvx git-cliff -o CHANGELOG.md
-    uv run mkdocs build --strict
+    uv run --group docs mkdocs build --strict
 
 # Serve the docs dev server (default port 8000)
 docs-serve port="8000":
     uvx git-cliff -o CHANGELOG.md
-    uv run mkdocs serve --dev-addr 127.0.0.1:{{port}} --livereload
+    uv run --group docs mkdocs serve --dev-addr 127.0.0.1:{{port}} --livereload
 
 # Run the negotiation demo with API keys from .env; pass --model specs, or none for scripted
 [positional-arguments]
