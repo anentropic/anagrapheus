@@ -5,20 +5,21 @@ Three events, one per AGM operation, for an application whose domain has no even
 already carries the belief — a seeded goal, a conclusion a model wrote, a re-key. An
 application whose events *do* carry it (an observation, a remark overheard) binds its
 own types to an :data:`~anagrapheus.beliefs.ops.Interpreter` instead and never emits
-these: doc 00 §8's rule, *the library ships the shape, the application owns the
-name*.
+these: *the library ships the shape, the application owns the name*.
 
 **They replace ``BeliefMinted``**, which recorded that an id was minted and nothing
 about what was believed under it. The value, the stance and the holder went straight
-into doxastica, so dropping the belief store lost them and doc 00 §2's one load-bearing
+into doxastica, so dropping the belief store lost them and the stack's one load-bearing
 rule — a layer that cannot be dropped and rebuilt has escaped its station — was broken
 by the layer's own front door. Minting needs no event of its own: it is a pure function
-of the predicate and the entities (note 03 §3), so the fold mints as it applies and
-writes the index row directly.
+of the predicate and the entities, so the fold mints as it applies and writes the index
+row directly.
 
-The payload names a belief by predicate and entities, never by id (doc 00 §6a), and a
-stance by its name, which is doxastica's own wire form for it.
+The payload names a belief by predicate and entities, never by id, and a stance by its
+name, which is doxastica's own wire form for it.
 """
+
+# Design: note 03 §3; upstream agent-core doc 00 §2, §6a, §8.
 
 from __future__ import annotations
 

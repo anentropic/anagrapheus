@@ -2,23 +2,25 @@
 Building belief events, checked before they reach the log.
 
 doxastica's seam takes a ``belief_id: str``, so any string will do and the minting
-discipline is honour-based. Doc 00 §6c's divergence query works *only* if every scope
-minted through the same registry, which is the argument for making the registry the
-only way to mint — so a caller holding a :class:`BeliefEvents` never types a belief id.
+discipline is honour-based. The divergence query works *only* if every scope minted
+through the same registry, which is the argument for making the registry the only way to
+mint — so a caller holding a :class:`BeliefEvents` never types a belief id.
 
 **It writes nothing.** Each method returns the event to append, and the belief appears
 in doxastica when :class:`~anagrapheus.beliefs.fold.BeliefFold` folds it. An earlier
 ``BeliefWriter`` wrote straight into the store and returned a ``BeliefMinted`` to
-append, which left the value, the stance and the holder in the one place that could
-not be rebuilt (note 03 §9). Returning the event also keeps the rule every helper in
-this library follows: a belief changes *because* something happened, and the caller
-owns that batch and its transaction.
+append, which left the value, the stance and the holder in the one place that could not
+be rebuilt. Returning the event also keeps the rule every helper in this library
+follows: a belief changes *because* something happened, and the caller owns that batch
+and its transaction.
 
 **The checks run here, before append**, because once an event is canon a refusal in the
 fold is a projection stuck on it forever. Pass the event that caused the belief as
 ``causation_id``; it is the envelope's, so "why does this scope believe that" is a
 question the log answers the way it answers every other.
 """
+
+# Design: note 03 §9; upstream agent-core doc 00 §6c; upstream NVM R21 (stance).
 
 from __future__ import annotations
 
@@ -48,8 +50,9 @@ __all__ = ["BeliefEvents", "RelationalValue"]
 
 #: What a relational belief's value may be: whether the proposition holds, and nothing
 #: else. *How firmly* is a separate axis, and doxastica already has a parameter for it —
-#: putting a grade in the value would merge the two, which is the merge R21 forbids and
-#: which doxastica's own encoding refuses anyway (values are JSON; ``Stance`` is not).
+#: putting a grade in the value would merge the two, which NVM's stance ruling forbids
+#: and which doxastica's own encoding refuses anyway (values are JSON; ``Stance`` is
+#: not).
 type RelationalValue = bool
 
 

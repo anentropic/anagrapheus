@@ -42,7 +42,7 @@ came out of that, and each one is a design input:
   ignores prose. **A firewall on the readers is not a firewall on the prompt, unless
   the prompt can only be built from the readers.**
 - **Canon and generated prose looked alike.** Chronicle sections are advisory (R61
-  clause 4, PROPOSED). Woven in beside belief lines, they would be indistinguishable
+  clause 4, RATIFIED 2026-10-12). Woven in beside belief lines, they would be indistinguishable
   from canon, so `_context` labels them by hand. **The register a piece of text
   belongs to is structure, not wording.**
 - **Lookups by "the first belief in the scope" answered the wrong question once the
@@ -63,7 +63,7 @@ the shape is how a context is put together, and the names are everything in it.
 | parts that carry a register, a rank and their sources | the slots (`binding`, `technique`, …) and their content |
 | a budget pass that never sheds binding parts and reports what it shed | the token counter, the total, salience |
 | determinism: same log and same position give the same context | rendering parts into messages (NVM 21:909: "the *structure* of `TurnBrief` is fixed here, its *rendering* is not") |
-| a golden-test helper over a fixture log | the `TurnBrief` and `RenderContract` schemas, continuity window sizing |
+| a golden-test helper over a fixture log: **deferred** until NVM's WP6 starts (§4) | the `TurnBrief` and `RenderContract` schemas, continuity window sizing |
 
 **It is not a chat transcript.** No consumer accumulates message history across
 turns. NVM's Thinker makes a fresh call each turn, and a repair is "a *fresh call*
@@ -177,10 +177,31 @@ in the prefix" (NVM 22:342), and a byte-stable prompt prefix (NVM 29:975).
 
 Two consequences:
 
-- **The golden test is a library helper.** Given a fixture log, a role, an assembler
-  and a position, it compares the context against a committed expectation, on parts
-  and sources rather than rendered text. That is NVM's WP6 exit criterion, and the
-  demo's committed recordings already give it a fixture log.
+- **The golden test is a library helper, deferred until WP6** [amended 2026-10-13].
+  Given a fixture log, a role, an assembler and a position, it would compare the
+  context against a committed expectation, on parts and sources rather than rendered
+  text. That is NVM's WP6 exit criterion, so WP6 is its named consumer, and it is not
+  built until WP6 starts: note 06 §7's rule is to widen the library when a consumer
+  asks, not before. M9 shipped only `Context.describe()`, and the docstrings that
+  pointed at a golden test now say what an application can do with it in its own
+  tests (the assemble-prompts how-to has a recipe).
+
+  **The id problem the helper has to settle.** `describe()` sources carry uuid7 event
+  ids, and a belief id carries its entities' uuids. A golden built over the demo's
+  pin-only corpora, replayed into a fresh store, therefore differs on every run, so
+  "the demo's committed recordings already give it a fixture log" was wrong. A golden
+  needs one of two things:
+
+  - **a whole-log fixture.** `SQLiteEventStore.append` keeps each envelope's
+    `event_id`, and entity ids live in payloads, so a log loaded from stored envelopes
+    reproduces seqs and ids exactly;
+  - **ids normalised** before comparing: event ids to their seqs, or every uuid to a
+    label numbered by first appearance (a `StateRef`'s event has no seq in
+    `describe()`, so the second is the general form).
+
+  Which one is NVM's fixture shape decides, so the choice waits for WP6 rather than
+  being guessed now.
+
 - **A generated part is only as deterministic as its pin.** Chronicle prose is
   regenerated on a cold rebuild (note 05), and a context built over it changes with
   it. That is correct, because a different chronicle *is* a different prompt. The
