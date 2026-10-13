@@ -181,8 +181,10 @@ class ChronicleFold:
         self._summarize = summarize
         self._awaits = _awaits(summarize)
         self._name = name
-        # What `prepare` drew, waiting for `apply` to write it. Emptied as it is
-        # consumed, so it never holds more than one batch's worth.
+        # What `prepare` drew, waiting for `apply` to write it, keyed by boundary seq.
+        # `apply` consumes its own entry, so a batch that fails part-way leaves the
+        # entries it never reached behind; a retry draws those units again and
+        # overwrites them.
         self._prepared: dict[int, tuple[int, Consolidation]] = {}
 
     @property
@@ -261,8 +263,11 @@ class ChronicleFold:
         # boundaries, and every `prepare` in it runs before any `apply` writes. Reading
         # only `consolidated_through()` would give each of them the same start, so the
         # second would claim a range overlapping the first. The pending draws are the
-        # rest of the answer, and they clear themselves as `apply` consumes them.
-        start = max([self._store.consolidated_through(), *self._prepared]) + 1
+        # rest of the answer, and they clear themselves as `apply` consumes them. Only
+        # those below this event count: any above it were left by a failed batch, whose
+        # writes rolled back, and are redrawn when the retry reaches them.
+        prior = (seq for seq in self._prepared if seq < event.seq)
+        start = max([self._store.consolidated_through(), *prior]) + 1
         if event.seq < start:
             # Already covered -- the fold contract allows the last batch to be
             # re-applied after a crash, and re-consolidating would spend a model call
