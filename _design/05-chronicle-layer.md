@@ -5,8 +5,7 @@ or fills gaps in the upstream design. Spec authority is
 [`agent-core` doc 00 §7](https://github.com/anentropic/narrative-vm/blob/main/_design/agent-core/00-agent-core-architecture.md);
 the grade question is settled by
 [**R61**](https://github.com/anentropic/narrative-vm/blob/main/_design/v2/16-nvm-decision-register.md),
-which is **PROPOSED 2026-08-30 and awaiting sign-off** — nothing here states it as
-current, and if it moves in sign-off this follows.
+which is **RATIFIED 2026-10-12** (proposed 2026-08-30).
 
 Doc 00 §7 keeps four things and discards the rest as commodity: consolidate ranges of
 the log into prose that **cites the range it covers**; supersede rather than correct;
@@ -270,7 +269,13 @@ Additive, no events. `check_same_thread=False` stays declined, per note 04 §5.
 - **Re-consolidation invalidates replay for runs that read the old prose.** Correct
   behaviour under R56 — the divergence is announced, not silent — but it means
   re-consolidating is a heavier operation than it looks, and nothing currently warns at
-  the call site.
+  the call site. **The warning now has a home (2026-10-13):** `reconsolidate()` and
+  `reconsolidate_async()` in `chronicle/reconsolidation.py` log a warning on every call
+  that runs which read the old prose will diverge on replay. They also refuse a
+  superseded section and write through `ChronicleStore.append_new`, which raises on an
+  id collision; every store write, `append` and `load` included, now refuses a fork (two
+  current sections over one range). Fold replay keeps `append`'s keep-the-existing-row
+  rule. The divergence itself stands: re-consolidation remains outside anchor replay.
 - **The default retriever is a placeholder and should stay one.** Named
   `substring_retriever` so it cannot be mistaken for ranked retrieval. The risk is the
   opposite of the usual one: a default that looked competent would discourage replacing

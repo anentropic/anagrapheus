@@ -1,16 +1,18 @@
 """
 Where two holders disagree.
 
-Doc 00 §6c's payoff, shipped rather than quoted: three lines of query, and the whole
-multi-agent-disagreement case — *but only if both scopes minted their ids through the
-same registry*. That condition is what :mod:`anagrapheus.beliefs.writer` exists to
-make structural rather than aspirational.
+The payoff of minting belief ids by rule, shipped rather than quoted: three lines of
+query, and the whole multi-agent-disagreement case — *but only if both scopes minted
+their ids through the same registry*. That condition is what
+:mod:`anagrapheus.beliefs.writer` exists to make structural rather than aspirational.
 
 The comparison is on values, and values are opaque to doxastica and to this library
 alike. Two holders "disagree" here when they hold different values under the same
 belief id; whether that difference *matters* is the application's reading of its own
 values.
 """
+
+# Design: note 03; upstream agent-core doc 00 §6c.
 
 from __future__ import annotations
 

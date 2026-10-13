@@ -1,8 +1,8 @@
 """
 Prompt assembly: what a model is shown, built only from what its role was granted.
 
-Doc 00 §2 draws "transcript / prompt assembly" as a projection of the log and says no
-more. This package is the shape note 07 settled for it:
+Prompt assembly is a projection of the log, like any other read model. This package
+gives it a shape:
 
 - a **grant** of :mod:`~anagrapheus.assembly.slices`, each reading at one position and
   remembering what it handed out, so a role can read nothing it was not granted and a
@@ -18,6 +18,8 @@ not change: the rendered messages go through
 :class:`~anagrapheus.provider.PinnedModel` as before, and its content-addressed key
 makes any assembly change a miss.
 """
+
+# Design: note 07; upstream agent-core doc 00 §2.
 
 from __future__ import annotations
 

@@ -1,9 +1,9 @@
 """
 The chronicle's two read surfaces, at two grades.
 
-R61 clause 4 forbids a **binding** read of generated prose — any read that *settles*
-something: canon, a gate, a validator's verdict, a mechanical outcome. Downstream
-generation may and must consume it; that is what the chronicle is for.
+Generated prose is never read as **binding**: no read of it may *settle* anything —
+canon, a gate, a validator's verdict, a mechanical outcome. Downstream generation may
+and must consume it; that is what the chronicle is for.
 
 A rule written down is a rule that gets forgotten, so the split is in the API rather
 than in a docstring:
@@ -16,6 +16,8 @@ than in a docstring:
 Neither can be obtained from the other, which is the whole point: a caller that needs a
 verdict takes ``Anchors`` and finds there is no prose to misuse.
 """
+
+# Design: note 05; upstream agent-core doc 00 §7; upstream NVM R61 (clause 4).
 
 from __future__ import annotations
 
@@ -88,13 +90,12 @@ class Retriever(Protocol):
     """
     Ranked lookup over the chronicle. A port, deliberately.
 
-    Doc 00 §7 calls the hybrid sparse/dense/fusion stack *"well-served commodity; it
-    belongs behind a port"* — so this is the seam, and :func:`substring_retriever` is a
-    placeholder that makes the layer usable and testable without one. Anything serious
-    replaces it.
+    The hybrid sparse/dense/fusion stack is *"well-served commodity; it belongs behind a
+    port"* — so this is the seam, and :func:`substring_retriever` is a placeholder that
+    makes the layer usable and testable without one. Anything serious replaces it.
 
-    Returns **sections**, never raw events: §7's fourth bullet asks retrieval to hand
-    back a distilled, ranked result rather than chunks, and the type says so.
+    Returns **sections**, never raw events: retrieval hands back a distilled, ranked
+    result rather than chunks, and the type says so.
     """
 
     def __call__(self, sections: Sequence[Section], query: str) -> Sequence[Section]:
@@ -113,13 +114,13 @@ class Brief:
     """
     The recency/depth split: verbatim tail plus consolidated past.
 
-    Doc 00 §7's third bullet, and the reason consolidation lag is *invisible* — the tail
+    Recency split from depth is the reason consolidation lag is *invisible* — the tail
     covers whatever the chronicle has not reached yet, so a chronicle running behind
     self-heals rather than showing a gap.
 
-    The tail is read **from the log, never from the chronicle**, which is one of
-    R61 clause 4's by-construction guarantees: near-term continuity never depends on
-    generated prose, whatever the chronicle does or does not contain.
+    The tail is read **from the log, never from the chronicle**, which is one of the
+    guarantees that generated prose is never binding: near-term continuity never depends
+    on generated prose, whatever the chronicle does or does not contain.
 
     ``admit`` sees each stored envelope before anything is upcast, and the tail keeps
     only the events it accepts. Leave it out and the tail is every event, the pin
@@ -162,7 +163,7 @@ def substring_retriever(sections: Sequence[Section], query: str) -> Sequence[Sec
     The naive default: case-insensitive substring, most recent first.
 
     Named for what it is. It is not ranked retrieval and does not pretend to be — a
-    default that looked competent would discourage replacing it, and §7's whole point
+    default that looked competent would discourage replacing it, and the whole point
     about the retrieval stack is that the real one belongs to the application.
     """
     needle = query.casefold()

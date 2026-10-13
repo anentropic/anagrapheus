@@ -587,6 +587,11 @@ bit, downstream ones re-draw only where their prompt changed, and the replay's
 `divergence` says where it stopped being a replay. A controlled comparison, rather than
 two runs that differ in everything at once.
 
+Since 2026-10-13 the replay draws into a `PinLedger` passed as `into=` (note 04 §7b), and
+`Negotiation.commit` commits it, so the swapped run reaches the log and replays strictly.
+Before that, `commit` claimed a replay "has nothing to commit", and in record mode the
+contender's draws were lost.
+
 **Two models with one id share pins**, which is the trap in that paragraph. A real
 provider's id is `provider:model`, and two models cannot collide. Every `FunctionModel`
 built from one function reports the same id, so a role swapped to a second copy of the

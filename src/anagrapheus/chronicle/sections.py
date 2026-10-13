@@ -1,8 +1,8 @@
 """
 A chronicle section: prose over a cited range of the log.
 
-The unit doc 00 §7 asks for — *"consolidate ranges of the log into prose sections that
-cite the event range they cover"* — with the citation as the load-bearing half.
+The chronicle's unit — *"consolidate ranges of the log into prose sections that cite the
+event range they cover"* — with the citation as the load-bearing half.
 
 **A section is a projection row, not an event.** It is derived from canon and is never
 authoritative, so it does not belong in the log it projects from; putting it there
@@ -18,6 +18,8 @@ equally valid, because neither is canon.
 - ``prose`` — **generated**. The same range consolidated twice gives different words.
   Nothing that settles anything may read it.
 """
+
+# Design: note 05; upstream agent-core doc 00 §7.
 
 from __future__ import annotations
 

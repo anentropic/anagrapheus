@@ -56,12 +56,12 @@ The top-level package adds one function of its own, [`anagrapheus.register_built
 
 **[`anagrapheus.identity`](anagrapheus/identity/decisions.md)**: Entity identity as decisions recorded in the log, the registry folded from them, and the re-key rows a merge produces.
 
-- [`decisions`](anagrapheus/identity/decisions.md): [`establish`](anagrapheus/identity/decisions.md#anagrapheus.identity.decisions.establish), [`alias`](anagrapheus/identity/decisions.md#anagrapheus.identity.decisions.alias), [`merge`](anagrapheus/identity/decisions.md#anagrapheus.identity.decisions.merge), [`split`](anagrapheus/identity/decisions.md#anagrapheus.identity.decisions.split) and [`mint_entity_id`](anagrapheus/identity/decisions.md#anagrapheus.identity.decisions.mint_entity_id).
+- [`decisions`](anagrapheus/identity/decisions.md): [`establish`](anagrapheus/identity/decisions.md#anagrapheus.identity.decisions.establish), [`alias`](anagrapheus/identity/decisions.md#anagrapheus.identity.decisions.alias), [`merge`](anagrapheus/identity/decisions.md#anagrapheus.identity.decisions.merge), [`split`](anagrapheus/identity/decisions.md#anagrapheus.identity.decisions.split), [`unmerge`](anagrapheus/identity/decisions.md#anagrapheus.identity.decisions.unmerge) and [`mint_entity_id`](anagrapheus/identity/decisions.md#anagrapheus.identity.decisions.mint_entity_id).
 - [`events`](anagrapheus/identity/events.md): the decision events.
 - [`fold`](anagrapheus/identity/fold.md): [`IdentityFold`](anagrapheus/identity/fold.md#anagrapheus.identity.fold.IdentityFold).
 - [`registry`](anagrapheus/identity/registry.md): [`IdentityRegistry`](anagrapheus/identity/registry.md#anagrapheus.identity.registry.IdentityRegistry), including [`rekeys_since`](anagrapheus/identity/registry.md#anagrapheus.identity.registry.IdentityRegistry.rekeys_since).
 - [`ladder`](anagrapheus/identity/ladder.md): [`Ladder`](anagrapheus/identity/ladder.md#anagrapheus.identity.ladder.Ladder), your ordered list of stance tokens for how firmly an alias is held, used to rank candidates.
-- [`vocabulary`](anagrapheus/identity/vocabulary.md): [`IdentityVocabulary`](anagrapheus/identity/vocabulary.md#anagrapheus.identity.vocabulary.IdentityVocabulary), which maps your own event types onto the four identity decisions.
+- [`vocabulary`](anagrapheus/identity/vocabulary.md): [`IdentityVocabulary`](anagrapheus/identity/vocabulary.md#anagrapheus.identity.vocabulary.IdentityVocabulary), which maps your own event types onto the identity decisions.
 - [`store`](anagrapheus/identity/store.md) and [`sqlite`](anagrapheus/identity/sqlite.md): the identity store protocol and [`SQLiteIdentityStore`](anagrapheus/identity/sqlite.md#anagrapheus.identity.sqlite.SQLiteIdentityStore).
 - [`migrations`](anagrapheus/identity/migrations.md) and [`errors`](anagrapheus/identity/errors.md): schema migrations, and [`IdentityError`](anagrapheus/identity/errors.md#anagrapheus.identity.errors.IdentityError) and its subclasses.
 

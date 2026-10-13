@@ -2,16 +2,16 @@
 Slices: the only way an assembler reads, and each one remembers what it handed out.
 
 A role is granted the slices it declares and nothing else, so what it cannot read it
-cannot put in a prompt. That is R24's firewall at runtime: NVM enforces the Narrator's
-"contract and continuity window, nothing else" with an import rule, and a slice is the
-same rule one level down, where a role's code may import the belief types for other
+cannot put in a prompt. That is the narrator firewall at runtime: NVM holds the Narrator
+to "contract and continuity window, nothing else" with an import rule, and a slice is
+the same rule one level down, where a role's code may import the belief types for other
 reasons.
 
 **Reading through a slice, not a store, is what makes provenance free.** Every slice
 records each thing it returns, so a context knows its sources without trusting the
 assembler to list them. The demo's worst prompt defect — a private remark rendered into
 the speaker's own prompt through shared prose — becomes an assertion on sources, which
-still holds when the wording changes (note 07 §3a).
+still holds when the wording changes.
 
 **Slices read at one position.** A log slice is bounded by ``upto_seq``. A belief slice
 reads the store live, so it is handed a way to ask how far the belief fold has got, and
@@ -20,6 +20,8 @@ fold that moved during assembly would otherwise tear the context, with half its 
 from before an event and half from after it. Events the fold ignores are not a tear, so
 a pin promoted into the log, or any other append no belief comes from, is not refused.
 """
+
+# Design: note 07 §3a, §6; note 06 §5b; upstream NVM R24 (firewall), R58 (class gate), R63.
 
 from __future__ import annotations
 
@@ -93,9 +95,8 @@ class LogSlice:
     Events up to ``upto_seq`` that ``admit`` accepts, decoded and upcast.
 
     ``admit`` sees the stored envelope only, so a refused event is never upcast or
-    decoded. It is where a
-    class gate goes — R58's "every projection declares which classes it folds" — and
-    where an application keeps a private event out of a shared prompt.
+    decoded. It is where a reader declares which kinds of event it may see, and where
+    an application keeps a private event out of a shared prompt.
     """
 
     def __init__(
@@ -257,8 +258,7 @@ class BeliefSlice:
         One belief by exact id, or ``None``. Only the state returned is recorded.
 
         By exact id, always: "the first belief in the scope" reads correctly while the
-        scope holds one thing and answers a different question once it holds two (note
-        06 §5b).
+        scope holds one thing and answers a different question once it holds two.
         """
         found = next((s for s in self._read(scope_id) if s.belief_id == belief_id), None)
         if found is not None:

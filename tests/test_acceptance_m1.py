@@ -145,7 +145,8 @@ def test_milestone_1_end_to_end(tmp_path: Path):
     assert scripted_unit(replay) == (11, "the door creaks open")
     assert replay.divergence is None
 
-    perturbed = ReplayPins.from_events(reader.read_raw(), types, on_miss="record")
+    branch = PinLedger(store, types)
+    perturbed = ReplayPins.from_events(reader.read_raw(), types, on_miss="record", into=branch)
 
     def changed_unit(resolver: PinResolver) -> str:
         return resolver.resolve(
@@ -158,6 +159,9 @@ def test_milestone_1_end_to_end(tmp_path: Path):
     assert changed_unit(perturbed) == "something new"  # continued, fresh
     assert perturbed.divergence is not None
     assert perturbed.divergence.kind == "model_call"
+    branch.commit()  # the new run, announced in the log with the pins it drew
+    announced = [e for e in store.read() if e.envelope.type == "ReplayDiverged"]
+    assert [e.payload["unit_id"] for e in announced] == [str(branch.unit_id)]
 
     # 9. Fold-replay closes the loop: rebuild over the fuller log equals incremental.
     projector.catch_up()  # fold the pin events too (StepCount ignores them)

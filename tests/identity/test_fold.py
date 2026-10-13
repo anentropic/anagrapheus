@@ -17,6 +17,7 @@ from anagrapheus.identity import (
     Merged,
     RoleBinding,
     Split,
+    Unmerged,
     alias,
     establish,
     merge,
@@ -122,6 +123,7 @@ def _script(ops: list[tuple[int, int, int]], types: EventTypeRegistry) -> list[P
     """Turn opcodes into a valid decision sequence over a growing entity set."""
     events: list[PendingEvent] = []
     entities: list[UUID] = []
+    merges: list[tuple[UUID, UUID]] = []
     counter = 0
     for kind, a, b in ops:
         counter += 1
@@ -139,6 +141,16 @@ def _script(ops: list[tuple[int, int, int]], types: EventTypeRegistry) -> list[P
             if keep == drop:
                 continue
             events.append(merge(types, kept=entities[keep], absorbed=entities[drop]))
+            merges.append((entities[keep], entities[drop]))
+        elif kind == 4:
+            # Built by hand, past the helper's check: an unmerge of an earlier merge,
+            # which may or may not still hold by the time it is folded, so the no-op
+            # path is exercised as well as the real one.
+            if merges:
+                kept, absorbed = merges[a % len(merges)]
+            else:
+                kept, absorbed = entities[0], entities[1]
+            events.append(types.pending(Unmerged(kept=kept, absorbed=absorbed)))
         else:
             original = entities[a % len(entities)]
             counter += 1
@@ -152,7 +164,7 @@ def _script(ops: list[tuple[int, int, int]], types: EventTypeRegistry) -> list[P
 @given(
     ops=st.lists(
         st.tuples(
-            st.integers(min_value=0, max_value=3),
+            st.integers(min_value=0, max_value=4),
             st.integers(min_value=0, max_value=9),
             st.integers(min_value=0, max_value=9),
         ),

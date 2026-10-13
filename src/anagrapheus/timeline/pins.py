@@ -203,6 +203,11 @@ class PinLedger:
     same key -> reuse; ``commit`` -> pins promote into the log as ordinary events;
     ``abandon`` -> the scratch drops, leaving one summary event recording attempts and
     discards. The log stays pure either way.
+
+    A record-mode :class:`~anagrapheus.timeline.replay.ReplayPins` records its new run
+    in one of these: its draws go through the ledger, the pins it replays are
+    :meth:`adopt`-ed, and the point where it diverged is promoted with them at
+    ``commit``.
     """
 
     def __init__(
@@ -220,6 +225,32 @@ class PinLedger:
         # Keys with a draw in flight right now, plain or streamed. One gate per key,
         # removed as soon as the draw ends, so this never grows with the corpus.
         self._inflight: dict[PinKey, Event] = {}
+        # A record-mode replay's first miss, promoted with the pins at `commit`.
+        self._diverged: ReplayDiverged | None = None
+
+    def adopt(self, key: PinKey, *, kind: str, result: Json) -> Json:
+        """
+        Pin a result that was drawn elsewhere, as though this unit had drawn it.
+
+        For a run that continues another: a record-mode replay adopts each pin it
+        replays, so this unit's log holds the whole new run and replays it strictly.
+        A key already in the scratch is reused, exactly as :meth:`resolve` reuses it,
+        and the scratch's result is returned; otherwise ``result`` is concretized and
+        pinned. Either way, what comes back is what this unit holds for ``key``.
+        """
+        found, pinned = self._reuse(key)
+        return pinned if found else self._record(key, kind, result)
+
+    def mark_diverged(self, *, missed_key: PinKey, kind: str) -> None:
+        """
+        Record that this unit is a replay that stopped being one at ``missed_key``.
+
+        Held until :meth:`commit`, which appends a :class:`ReplayDiverged` in the same
+        transaction as the pins, so the log never holds one without the other. Only the
+        first call counts: a divergence happens once. :meth:`abandon` drops it.
+        """
+        if self._diverged is None:
+            self._diverged = ReplayDiverged(unit_id=self.unit_id, missed_key=missed_key, kind=kind)
 
     def resolve[R: Json, O](
         self,
@@ -376,13 +407,19 @@ class PinLedger:
 
         Pins become ordinary events — :class:`PinPromoted` by default, or whatever the
         ``promote_as`` factory returns, so applications can promote into their own
-        vocabulary. Returns the new last ``seq`` (unchanged if nothing was pinned).
+        vocabulary. A divergence marked by :meth:`mark_diverged` goes first, as a
+        :class:`ReplayDiverged`. Returns the new last ``seq`` (unchanged if nothing was
+        pinned).
         """
         rows = self._store.scratch_list(self.unit_id)
         with self._store.transaction():
             batch = [self._promotion(row, correlation_id) for row in rows]
+            if self._diverged is not None:
+                diverged = self._registry.pending(self._diverged, correlation_id=correlation_id)
+                batch.insert(0, diverged)
             last_seq = self._store.append(batch) if batch else self._store.last_seq()
             self._store.scratch_clear(self.unit_id)
+        self._diverged = None
         _log.info("committed %d pin(s) from unit %s into the log", len(rows), self.unit_id)
         return last_seq
 
@@ -404,6 +441,7 @@ class PinLedger:
         with self._store.transaction():
             last_seq = self._store.append([self._registry.pending(summary)])
             self._store.scratch_clear(self.unit_id)
+        self._diverged = None
         _log.warning("abandoned unit %s, discarding %d pin(s): %s", self.unit_id, len(rows), reason)
         return last_seq
 

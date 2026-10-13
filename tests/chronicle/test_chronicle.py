@@ -10,11 +10,9 @@ from anagrapheus.chronicle import (
     Brief,
     Consolidation,
     Prose,
-    Section,
-    section_id,
+    reconsolidate,
     substring_retriever,
 )
-from anagrapheus.chronicle.sections import Anchor
 from anagrapheus.timeline import EventReader, PinLedger, UpcastRegistry, is_bookkeeping, pin_key
 
 if TYPE_CHECKING:
@@ -61,20 +59,10 @@ def test_an_old_section_is_superseded_never_edited(rig: Rig):
     rig.commit(rig.step("a"), rig.close("one"))
     original = rig.anchors.all()[0]
 
-    rig.chronicle.append(
-        Section(
-            anchor=Anchor(
-                section_id=section_id(1, original.to_seq, generation=2),
-                from_seq=1,
-                to_seq=original.to_seq,
-                unit=original.unit,
-                supersedes=original.section_id,
-            ),
-            prose="the later account",
-        )
-    )
+    later = reconsolidate(rig.chronicle, rig.reader, original.section_id, rig.summarizer)
 
     assert [a.section_id for a in rig.anchors.all()] == [f"1-{original.to_seq}#2"]
+    assert later.prose.startswith("[g2]")
     superseded = rig.prose.section(original.section_id)
     assert superseded is not None
     assert superseded.prose.startswith("[g1]"), "the old prose survives, unedited"

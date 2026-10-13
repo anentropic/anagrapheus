@@ -1,16 +1,18 @@
 """
 The chronicle's storage port.
 
-Append-only by contract, not merely by convention: there is no update and no delete.
-Doc 00 §7 wants supersession rather than correction — *"an old section is never wrong,
-only superseded by time"* — so a re-consolidation writes a new row pointing at the old
-one, and the old prose stays readable.
+Append-only by contract, not merely by convention: there is no update and no delete. The
+chronicle supersedes rather than corrects — *"an old section is never wrong, only
+superseded by time"* — so a re-consolidation writes a new row pointing at the old one,
+and the old prose stays readable.
 
 **Not disposable like the other projections.** The belief index and the identity
 registry can be emptied and re-folded for free. This one cannot: re-folding it re-runs
 every model call it ever made and returns the same anchors with different prose. Hence
 :meth:`export` and :meth:`load` — the carry path, which no other projection needs.
 """
+
+# Design: note 05 §8; upstream agent-core doc 00 §7.
 
 from __future__ import annotations
 
@@ -28,7 +30,31 @@ class ChronicleStore(Protocol):
     """The storage the chronicle reads, and its fold appends to."""
 
     def append(self, section: Section) -> None:
-        """Add a section. Never updates: a correction supersedes rather than edits."""
+        """
+        Add a section, keeping the existing row if its id is already stored.
+
+        Never updates: a correction supersedes rather than edits. The keep-on-collision
+        rule is the fold's: a replayed batch must find its section already written and
+        leave that prose alone.
+
+        Refuses a fork, whatever the id: raises
+        :class:`~anagrapheus.chronicle.errors.ChronicleFork` for a section that
+        supersedes one already superseded, that supersedes one over a different range,
+        or that overlaps a current section it does not supersede, and
+        :class:`~anagrapheus.chronicle.errors.UnknownSection` for one that supersedes a
+        section not in the store.
+        """
+        ...
+
+    def append_new(self, section: Section) -> None:
+        """
+        Add a section that must not already exist: the strict path for deliberate writes.
+
+        As :meth:`append`, except that an id already stored raises
+        :class:`~anagrapheus.chronicle.errors.SectionCollision` instead of keeping the
+        existing row. A hand-written section that collides is a mistake, and keeping
+        the old row would drop the new prose without a word.
+        """
         ...
 
     def anchors(self, *, upto_seq: int | None = None) -> Sequence[Anchor]:
@@ -78,7 +104,11 @@ class ChronicleStore(Protocol):
         That is fine for the case this exists for: carrying *a* chronicle across a
         backend swap. It is not a merge, and an earlier version of this docstring
         claimed it was. Merging divergent consolidations would need identity that
-        distinguishes them, which nothing here provides — see note 05 §8.
+        distinguishes them, which nothing here provides.
+
+        Sections land in supersession order whatever order they arrive in, and the
+        whole load is refused if any of them would fork the chronicle, as
+        :meth:`append` refuses one.
         """
         ...
 
