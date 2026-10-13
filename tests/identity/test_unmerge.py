@@ -234,14 +234,17 @@ def test_an_entity_merged_into_the_absorbed_one_comes_back_with_it(rig: Rig):
 
 
 def test_an_unmerge_breaks_a_merge_cycle(rig: Rig):
-    """A cycle appended without the check is no longer permanent."""
+    """
+    A cycle a projection already holds is no longer permanent.
+
+    The fold now ignores a reverse merge, so the cycle is planted directly, as a
+    projection folded before it did would hold it.
+    """
     a, ea = establish(rig.types, "a", provenance="x")
     b, eb = establish(rig.types, "b", provenance="x")
-    rig.commit(
-        ea,
-        eb,
-        merge(rig.types, kept=b, absorbed=a),
-        merge(rig.types, kept=a, absorbed=b),
+    rig.commit(ea, eb, merge(rig.types, kept=b, absorbed=a))
+    rig.store.connection.execute(
+        "UPDATE identity_entities SET merged_into = ? WHERE entity_id = ?", (str(a), str(b))
     )
     with pytest.raises(MergeCycle):
         rig.registry.resolve("a")
@@ -789,3 +792,138 @@ def test_a_later_form_of_the_same_name_on_the_survivor_does_not_hide_the_row(rig
     assert {r.surface_form for r in rig.registry.surface_forms(z)} == {"z", "a"}
     _assert_replay_is_idempotent(rig)
     assert _forms(rig, a)[a] == own
+
+
+# -- merges that name an entity nothing established ------------------------------------
+
+
+def _assert_ignored(
+    rig: Rig, at: int, before: dict[str, list[tuple[object, ...]]], *entities: UUID
+) -> None:
+    """The merge at ``at`` is in the history of every established entity, and did nothing."""
+    for entity_id in entities:
+        assert _kinds(rig, entity_id)[-1] == "merge_ignored"
+        assert rig.registry.history(entity_id)[-1].seq == at
+    assert rig.registry.rekeys_since(at - 1) == []
+    after = snapshot(rig.store.connection)
+    assert after["identity_entities"] == before["identity_entities"]
+    assert after["identity_aliases"] == before["identity_aliases"]
+    assert after["identity_rekeys"] == before["identity_rekeys"]
+
+
+def test_a_merge_of_an_entity_never_established_is_a_recorded_no_op(rig: Rig):
+    """
+    Nothing established the absorbed id, so there is nothing for it to yield.
+
+    Recording the merge as if it landed would emit a re-key the belief layer acts on,
+    while a later unmerge of the pair is ignored because the entity was never merged.
+    """
+    kept, e = establish(rig.types, "acme", provenance="crm")
+    ghost = uuid.uuid7()
+    rig.commit(e)
+    before = snapshot(rig.store.connection)
+
+    at = rig.commit(merge(rig.types, kept=kept, absorbed=ghost, identity=rig.registry))
+
+    _assert_ignored(rig, at, before, kept)
+    assert json.loads(rig.registry.history(kept)[-1].detail)["absorbed"] == str(ghost)
+    assert rig.registry.merged_into(ghost) is None
+    assert rig.registry.canonical(ghost) == ghost
+    _assert_replay_is_idempotent(rig)
+
+
+def test_a_merge_into_an_entity_never_established_is_a_recorded_no_op(rig: Rig):
+    """A survivor nothing established cannot hold what the absorbed entity names."""
+    absorbed, e = establish(rig.types, "acme-old", provenance="import")
+    ghost = uuid.uuid7()
+    rig.commit(e)
+    before = snapshot(rig.store.connection)
+
+    at = rig.commit(merge(rig.types, kept=ghost, absorbed=absorbed, identity=rig.registry))
+
+    _assert_ignored(rig, at, before, absorbed)
+    assert rig.registry.canonical(absorbed) == absorbed
+    assert rig.registry.resolve("acme-old").sole() == absorbed
+    _assert_replay_is_idempotent(rig)
+
+
+def test_an_entity_established_after_a_merge_named_it_is_canonical(rig: Rig):
+    """Ignored is decided at the merge's own position, before the entity existed."""
+    kept, e = establish(rig.types, "acme", provenance="crm")
+    later = uuid.uuid7()
+    rig.commit(e, merge(rig.types, kept=kept, absorbed=later))
+
+    rig.commit(establish(rig.types, "acme-old", provenance="import", entity_id=later)[1])
+
+    assert rig.registry.canonical(later) == later
+    assert rig.registry.resolve("acme-old").sole() == later
+    with pytest.raises(NotMerged):
+        unmerge(rig.types, rig.registry, kept=kept, absorbed=later)
+
+
+# -- merges into an entity that has itself yielded -------------------------------------
+
+
+def _absorbed_survivor(rig: Rig) -> tuple[UUID, UUID, UUID]:
+    """A merged into Z, and B standing alone with a form of its own."""
+    z, ez = establish(rig.types, "z", provenance="x")
+    a, ea = establish(rig.types, "a", provenance="x")
+    b, eb = establish(rig.types, "b", provenance="x")
+    rig.commit(ez, ea, eb, merge(rig.types, kept=z, absorbed=a))
+    return z, a, b
+
+
+def test_merge_with_the_registry_refuses_a_survivor_already_merged(rig: Rig):
+    """A yields to Z, so B has to be merged into Z, where A's forms now stand."""
+    z, a, b = _absorbed_survivor(rig)
+
+    with pytest.raises(AlreadyMerged, match=f"{a} is already merged into {z}; merge into"):
+        merge(rig.types, kept=a, absorbed=b, identity=rig.registry)
+
+
+def test_merge_with_the_registry_still_names_a_reverse_merge_a_cycle(rig: Rig):
+    """The survivor already yields, but to the absorbed entity: the cycle is the news."""
+    z, a, _b = _absorbed_survivor(rig)
+
+    with pytest.raises(MergeCycle, match="would close a cycle"):
+        merge(rig.types, kept=a, absorbed=z, identity=rig.registry)
+
+
+def test_a_merge_into_an_absorbed_survivor_is_a_recorded_no_op(rig: Rig):
+    """
+    Built by hand, past the helper's check: B stays canonical.
+
+    Landing it would leave B yielding to A, which names nothing, and a re-key of
+    beliefs on B onto A that identity resolves to Z.
+    """
+    z, a, b = _absorbed_survivor(rig)
+    before = snapshot(rig.store.connection)
+
+    at = rig.commit(rig.types.pending(Merged(kept=a, absorbed=b)))
+
+    _assert_ignored(rig, at, before, a, b)
+    assert json.loads(rig.registry.history(b)[-1].detail)["kept_merged_into"] == str(z)
+    assert rig.registry.canonical(b) == b
+    assert rig.registry.resolve("b").sole() == b
+    _assert_replay_is_idempotent(rig)
+
+
+def test_a_reverse_merge_that_reaches_the_log_is_ignored_not_a_cycle(rig: Rig):
+    """A into Z, then Z into A: A has yielded, so it cannot take Z, and Z stays canonical."""
+    z, a, _b = _absorbed_survivor(rig)
+
+    rig.commit(rig.types.pending(Merged(kept=a, absorbed=z)))
+
+    assert _kinds(rig, z)[-1] == "merge_ignored"
+    assert rig.registry.canonical(a) == z
+    assert rig.registry.canonical(z) == z
+
+
+def test_a_merge_into_a_survivor_given_back_first_lands(rig: Rig):
+    z, a, b = _absorbed_survivor(rig)
+    rig.commit(unmerge(rig.types, rig.registry, kept=z, absorbed=a))
+
+    rig.commit(merge(rig.types, kept=a, absorbed=b, identity=rig.registry))
+
+    assert rig.registry.canonical(b) == a
+    assert rig.registry.resolve("b").sole() == a

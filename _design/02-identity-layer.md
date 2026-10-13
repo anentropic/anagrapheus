@@ -305,6 +305,25 @@ merges final.
   still records `moved` and `shared`, for the audit trail only. The v2 migration
   backfills each shown row as its holder's own claim, so an unmerge of a merge folded
   before it gives nothing back until the projection is rebuilt.
+- **Only an established, unmerged entity survives a merge (added 2026-10-13).** Two
+  gaps let the planner and the store disagree. A merge naming an entity no
+  `Established` had introduced still wrote `absorbed`/`merged` rows and a re-key row,
+  but no `merged_into` (the update matched no row), so beliefs on that id were planned
+  onto the survivor while it stayed canonical, and a later unmerge of the pair was
+  ignored. And a merge into a survivor that had itself been absorbed (A into Z, then B
+  into A) landed, so B resolved to Z while the planner, which sees one batch at a
+  time, put beliefs on B onto A. Now the fold records both as `merge_ignored`, with
+  `unestablished` or `kept_merged_into` in the detail, and emits no re-key row, so
+  the planner never sees them; the second is the one-survivor rule read from the
+  survivor's side. `merge(..., identity=registry)` raises `AlreadyMerged` when `kept`
+  is merged, after the cycle check so a reverse merge still reports `MergeCycle`. It
+  does not check establishment: an entity established earlier in the same unappended
+  batch is not in the registry yet, and refusing it would refuse a valid batch.
+  `_landed` drops a merge into an entity the batch already absorbed, for rows from a
+  projection folded before this. This amends §7: a cycle can no longer be folded,
+  because the merge that would close one names a survivor that already yields, so
+  `canonical()` meets one only in a projection folded before this change, until it is
+  rebuilt. Such a projection also keeps any merge of these two kinds as it was folded.
 - **API breaks, before 0.1.0.** `IdentityRole` has a fifth member, and
   `IdentityStore` has a new `unmerged()`, which third-party stores must implement.
   Additive: `IdentityRegistry.merged_into()`, `NotMerged`, `AlreadyMerged`,

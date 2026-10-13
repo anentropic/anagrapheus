@@ -164,7 +164,7 @@ except MergeCycle as error:
 # MergeCycle
 ```
 
-With the registry, `merge` also raises [`AlreadyMerged`][already-merged] for an entity that is already merged, into the same survivor or another: unmerge it first. The checks read the registry, so catch the projector up before you make them.
+With the registry, `merge` also raises [`AlreadyMerged`][already-merged] for an absorbed entity that is already merged, into the same survivor or another: unmerge it first. It raises `AlreadyMerged` too when `kept` is itself merged into another entity: merge into `registry.canonical(kept)` instead. The checks read the registry, so catch the projector up before you make them. A merge that gets past them is recorded as ignored and moves nothing, and so is a merge that names an entity never established.
 
 ## 4. Plan the re-keys
 
@@ -399,7 +399,11 @@ One of the two candidates is the belief's own id: choosing it means the belief s
 
 ### `MergeCycle: merge chain from … cycles at …`
 
-Two merges point at each other, directly or through a chain, so the log contradicts itself and no entity is canonical. Repair it by [unmerging](#undo-a-merge) one of the merges. To prevent it, pass the registry when you merge, `merge(types, kept=a, absorbed=b, identity=registry)`, which raises `MergeCycle` before the event exists.
+Two merges point at each other, directly or through a chain, so no entity is canonical. The fold no longer lands a merge that closes a cycle, so this comes from a projection folded by an earlier version of the library. Repair it by [unmerging](#undo-a-merge) one of the merges, or by rebuilding the projection. When you merge, pass the registry, `merge(types, kept=a, absorbed=b, identity=registry)`, and it raises `MergeCycle` before the event exists.
+
+### `AlreadyMerged: cannot merge … into …`
+
+`merge` was given the registry and one of the pair has already yielded. If the message says the absorbed entity is already merged, [unmerge](#undo-a-merge) it first, then merge it where it belongs. If it says `kept` is already merged, merge into the entity it names instead, which is where `kept`'s names now stand.
 
 ### `NotMerged: cannot unmerge … from …`
 

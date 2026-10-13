@@ -7,6 +7,7 @@ import uuid
 
 import pytest
 from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from anagrapheus.beliefs import (
     BeliefError,
@@ -29,7 +30,7 @@ from anagrapheus.identity.store import RekeyRow
 from anagrapheus.timeline import EventReader, Projector, UpcastRegistry
 
 from ..identity.test_fold import opcodes
-from ..identity.test_unmerge_model import KINDS, history
+from ..identity.test_unmerge_model import GHOST, KINDS, history
 from .conftest import Rig, build_predicates, build_rig
 
 
@@ -243,18 +244,17 @@ def test_a_merge_cycle_in_a_batch_does_not_hang(rig: Rig):
     """
     A cycle is a contradiction in the log, and identity detects it at read.
 
-    The planner must not loop following one, and must not silently produce a target
-    either: it says it cannot re-key rather than picking an arbitrary point in a ring.
+    A merge into an entity that has yielded is dropped, so a ring of two or more merges
+    never lands; an entity merged into itself is the ring rows can still carry. The
+    planner must not loop following one, and must not silently produce a target either:
+    it says it cannot re-key rather than picking an arbitrary point in a ring.
     """
-    a, b = uuid.uuid7(), uuid.uuid7()
+    a = uuid.uuid7()
     rig.commit(rig.asserted("location", a))
 
     with pytest.raises(BeliefError):
         plan_rekeys(
-            [
-                RekeyRow(seq=9, kind="merge", from_entity=a, to_entity=b),
-                RekeyRow(seq=10, kind="merge", from_entity=b, to_entity=a),
-            ],
+            [RekeyRow(seq=9, kind="merge", from_entity=a, to_entity=a)],
             rig.index,
             rig.predicates,
         )
@@ -515,6 +515,113 @@ def test_the_planner_and_the_identity_layer_agree_on_a_double_merge(rig: Rig):
     ]
 
 
+def _wired(rig: Rig) -> tuple[IdentityRegistry, Projector]:
+    """An identity registry folded from the same log as the beliefs."""
+    identity_store = SQLiteIdentityStore(rig.store.connection)
+    projector = Projector(
+        rig.store,
+        EventReader(rig.store, UpcastRegistry(), rig.types),
+        [IdentityFold(identity_store, rig.types), rig.fold],
+    )
+    return IdentityRegistry(identity_store), projector
+
+
+def test_a_merge_into_an_entity_the_batch_already_absorbed_plans_nothing(rig: Rig):
+    """
+    A into Z, then B into A: A has yielded, so B cannot yield to it.
+
+    The identity layer ignores the second merge, so planning it would move beliefs on
+    B onto A, which identity resolves to Z, while B itself stays canonical.
+    """
+    a, b, z = uuid.uuid7(), uuid.uuid7(), uuid.uuid7()
+    rig.commit(rig.asserted("location", a), rig.asserted("location", b))
+
+    plans = plan_rekeys(
+        [
+            RekeyRow(seq=9, kind="merge", from_entity=a, to_entity=z),
+            RekeyRow(seq=10, kind="merge", from_entity=b, to_entity=a),
+        ],
+        rig.index,
+        rig.predicates,
+    )
+
+    assert [(p.seq, p.from_entity, p.sole()) for p in plans] == [
+        (9, a, rig.predicates.belief_id("location", z))
+    ]
+
+
+def test_a_reverse_merge_in_a_batch_plans_nothing(rig: Rig):
+    """A into B, then B into A: A has yielded, so the second merge closes no ring."""
+    a, b = uuid.uuid7(), uuid.uuid7()
+    rig.commit(rig.asserted("location", a), rig.asserted("location", b))
+
+    plans = plan_rekeys(
+        [
+            RekeyRow(seq=9, kind="merge", from_entity=a, to_entity=b),
+            RekeyRow(seq=10, kind="merge", from_entity=b, to_entity=a),
+        ],
+        rig.index,
+        rig.predicates,
+    )
+
+    assert [(p.from_entity, p.sole()) for p in plans] == [
+        (a, rig.predicates.belief_id("location", b))
+    ]
+
+
+def test_the_planner_and_the_identity_layer_agree_across_two_batches(rig: Rig):
+    """
+    A into Z in one batch, B into A in the next, planned one batch at a time.
+
+    The planner only sees the second batch, where A looks free to take B. Identity
+    has to agree with it, and both have to agree on where beliefs on B belong.
+    """
+    identity, projector = _wired(rig)
+    z, ez = establish(rig.types, "z", provenance="x")
+    a, ea = establish(rig.types, "a", provenance="x")
+    b, eb = establish(rig.types, "b", provenance="x")
+    rig.store.append([ez, ea, eb, *(rig.asserted("location", e) for e in (a, b))])
+    projector.catch_up()
+    first = rig.store.last_seq()
+    rig.store.append([merge(rig.types, kept=z, absorbed=a)])
+    projector.catch_up()
+    second = rig.store.last_seq()
+
+    # Built without the registry, so nothing refuses it.
+    rig.store.append([merge(rig.types, kept=a, absorbed=b)])
+    projector.catch_up()
+
+    for since, until in ((first, second), (second, rig.store.last_seq())):
+        rows = [row for row in identity.rekeys_since(since) if row.seq <= until]
+        for plan in plan_rekeys(rows, rig.index, rig.predicates):
+            assert plan.sole() == rig.predicates.belief_id(
+                "location", identity.canonical(plan.from_entity)
+            )
+    assert identity.canonical(b) == b
+    assert identity.rekeys_since(second) == []
+
+
+def test_the_planner_and_the_identity_layer_agree_on_a_merge_of_an_unknown_entity(rig: Rig):
+    """
+    A belief can name an id nothing established; a merge of it re-keys nothing.
+
+    Identity leaves the id canonical, so a plan moving its beliefs onto the survivor
+    would disagree with it, and an unmerge of the pair would be ignored.
+    """
+    identity, projector = _wired(rig)
+    a, ea = establish(rig.types, "a", provenance="x")
+    ghost = uuid.uuid7()
+    rig.store.append([ea, rig.asserted("location", ghost)])
+    projector.catch_up()
+    before = rig.store.last_seq()
+
+    rig.store.append([merge(rig.types, kept=a, absorbed=ghost)])
+    projector.catch_up()
+
+    assert plan_rekeys(identity.rekeys_since(before), rig.index, rig.predicates) == []
+    assert identity.canonical(ghost) == ghost
+
+
 @pytest.mark.parametrize("steps", [2, 3])
 @pytest.mark.parametrize(
     "order", list(itertools.permutations(("b from a", "c from a", "a from z"))), ids=" / ".join
@@ -576,17 +683,22 @@ def test_the_planner_and_the_identity_layer_agree_on_unmerges_of_a_chain(
 
 
 @settings(max_examples=200, deadline=None)
-@given(ops=opcodes(min_size=10, max_size=30, kinds=KINDS))
+@given(ops=opcodes(min_size=10, max_size=30, kinds=KINDS), cut=st.integers(0, 30))
 def test_the_planner_and_the_identity_layer_agree_over_generated_histories(
-    tmp_path_factory: pytest.TempPathFactory, ops: list[tuple[int, int, int]]
+    tmp_path_factory: pytest.TempPathFactory, ops: list[tuple[int, int, int]], cut: int
 ):
     """
-    Generated merges and unmerges over entities that each hold a belief, in one batch.
+    Generated merges and unmerges over entities that each hold a belief, in two batches.
 
-    The same agreement as for the chain above: a belief keyed on an entity the batch
-    merged is planned onto the entity identity resolves it to, an unmerge offers only
-    entities that are canonical again, and the entities planned are exactly those the
-    batch left merged.
+    The same agreement as for the chain above, batch by batch, each planned on its own
+    rows: a belief keyed on an entity a batch merged is planned onto the entity
+    identity resolves it to after that batch, and an unmerge offers only entities that
+    are canonical again then. Every entity planned was left merged by its batch, and
+    every entity left merged at the end was planned by some batch.
+
+    The merges may name an id nothing established, which holds a belief all the same,
+    and may give an entity to a survivor that has itself been merged, in this batch or
+    the one before.
     """
     rig = build_rig(tmp_path_factory.mktemp("rekey-model") / "beliefs.db")
     try:
@@ -598,45 +710,54 @@ def test_the_planner_and_the_identity_layer_agree_over_generated_histories(
             [IdentityFold(identity_store, rig.types), rig.fold],
         )
         decisions = history(ops)
-        # Every entity is established and holds a belief before the batch, the split
-        # products included: the splits themselves are not part of it.
-        entities = sorted({d.subject for d in decisions} | {d.other for d in decisions if d.other})
+        # Every entity but the ghost is established and holds a belief before the
+        # batches, the split products included: the splits themselves are not part of
+        # them. The ghost holds a belief too.
+        named = {d.subject for d in decisions} | {d.other for d in decisions if d.other}
+        entities = sorted(named | {GHOST})
         rig.store.append(
             [
                 *(
                     establish(rig.types, "e", provenance="x", entity_id=entity)[1]
                     for entity in entities
+                    if entity != GHOST
                 ),
                 *(rig.asserted("location", entity) for entity in entities),
             ]
         )
         projector.catch_up()
-        before = rig.store.last_seq()
-        batch = [
+        decided = [
             rig.types.pending(
                 (Merged if d.kind == "merge" else Unmerged)(kept=d.other, absorbed=d.subject)
             )
             for d in decisions
             if d.kind in {"merge", "unmerge"} and d.other is not None
         ]
-        if not batch:
+        if not decided:
             return
-        rig.store.append(batch)
-        projector.catch_up()
+        at = cut % (len(decided) + 1)
+        planned: set[uuid.UUID] = set()
+        for batch in (decided[:at], decided[at:]):
+            if not batch:
+                continue
+            before = rig.store.last_seq()
+            rig.store.append(batch)
+            projector.catch_up()
 
-        plans = plan_rekeys(identity.rekeys_since(before), rig.index, rig.predicates)
-        for plan in plans:
-            if plan.kind == "merge":
-                assert plan.sole() == rig.predicates.belief_id(
-                    "location", identity.canonical(plan.from_entity)
-                )
-            else:
-                assert set(plan.candidates) <= {
-                    rig.predicates.belief_id("location", e)
-                    for e in entities
-                    if identity.canonical(e) == e
-                }
-        planned = {plan.from_entity for plan in plans if plan.kind == "merge"}
-        assert planned == {e for e in entities if identity.canonical(e) != e}
+            plans = plan_rekeys(identity.rekeys_since(before), rig.index, rig.predicates)
+            canonical = {e for e in entities if identity.canonical(e) == e}
+            for plan in plans:
+                if plan.kind == "merge":
+                    assert plan.sole() == rig.predicates.belief_id(
+                        "location", identity.canonical(plan.from_entity)
+                    )
+                else:
+                    assert set(plan.candidates) <= {
+                        rig.predicates.belief_id("location", e) for e in canonical
+                    }
+            merged = {plan.from_entity for plan in plans if plan.kind == "merge"}
+            assert merged.isdisjoint(canonical)
+            planned |= merged
+        assert planned >= {e for e in entities if identity.canonical(e) != e}
     finally:
         rig.store.close()

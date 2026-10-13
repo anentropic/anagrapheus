@@ -92,14 +92,27 @@ class SQLiteIdentityStore:
             return
         detail = {"kept": str(event.kept), "absorbed": str(event.absorbed)}
         absorbed = self.entity(event.absorbed)
-        if absorbed is not None and absorbed.merged_into is not None:
+        kept = self.entity(event.kept)
+        if absorbed is None or kept is None:
+            # Nothing established one of the pair at this position, so there is nothing
+            # to yield or nothing to yield to. Landing it anyway would emit a re-key
+            # for a merge that no unmerge could ever withdraw.
+            pair = ((event.absorbed, absorbed), (event.kept, kept))
+            unknown = [str(entity) for entity, row in pair if row is None]
+            self._ignore_merge(seq, event, {**detail, "unestablished": unknown})
+            return
+        if absorbed.merged_into is not None:
             # An entity yields to one survivor at a time. Re-pointing an absorbed
             # entity would leave what its standing merge moved on the first survivor,
             # out of reach of any unmerge, so a merge of one already merged changes
             # nothing.
-            ignored = {**detail, "merged_into": str(absorbed.merged_into)}
-            self._decision(seq, event.absorbed, "merge_ignored", ignored)
-            self._decision(seq, event.kept, "merge_ignored", ignored)
+            self._ignore_merge(seq, event, {**detail, "merged_into": str(absorbed.merged_into)})
+            return
+        if kept.merged_into is not None:
+            # The survivor has itself yielded: it names nothing, and what it held now
+            # stands on the entity it yielded to. Only that entity can survive a merge,
+            # so one into an absorbed entity changes nothing either.
+            self._ignore_merge(seq, event, {**detail, "kept_merged_into": str(kept.merged_into)})
             return
         self._conn.execute(
             "UPDATE identity_entities SET merged_into = ?, merged_seq = ? WHERE entity_id = ?",
@@ -119,6 +132,11 @@ class SQLiteIdentityStore:
             seq, event.absorbed, "absorbed", {**detail, "moved": moved, "shared": shared}
         )
         self._decision(seq, event.kept, "merged", detail)
+
+    def _ignore_merge(self, seq: int, event: Merged, detail: dict[str, object]) -> None:
+        """Record a merge that changes nothing in the history of both entities it names."""
+        self._decision(seq, event.absorbed, "merge_ignored", detail)
+        self._decision(seq, event.kept, "merge_ignored", detail)
 
     def unmerged(self, event: Unmerged, seq: int) -> None:
         if self._applied(seq):

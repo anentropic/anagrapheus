@@ -166,16 +166,20 @@ def merge(
     else, this raises :class:`~anagrapheus.identity.errors.AlreadyMerged`: an entity
     yields to one survivor at a time, so withdraw the standing merge with
     :func:`unmerge` first. If ``kept`` already yields, directly or through a chain, to
-    ``absorbed``, it raises :class:`~anagrapheus.identity.errors.MergeCycle` instead of
-    returning an event that would leave both entities with no canonical id. The checks
-    are only as current as the registry, so catch it up first. Nor can they see a merge
-    built earlier in the same batch and not yet appended: a second merge of one entity
-    there is still folded as an ignored no-op, but a cycle closed there is folded as
-    written, and an unmerge repairs it.
+    ``absorbed``, it raises :class:`~anagrapheus.identity.errors.MergeCycle`. If
+    ``kept`` has itself been merged into another entity, it raises
+    :class:`~anagrapheus.identity.errors.AlreadyMerged` too: only an entity that has
+    not yielded can survive a merge, so merge into the entity ``kept`` resolves to, or
+    unmerge ``kept`` first. The checks are only as current as the registry, so catch
+    it up first. Nor can they see a merge built earlier in the same batch and not yet
+    appended. They do not ask whether both entities were established: one established
+    earlier in the same batch is not in the registry yet.
 
-    Without the checks, a merge of an entity that is already merged is folded as a
-    recorded no-op: the standing merge stays, and the history of both entities named
-    in the new one says it was ignored.
+    Whatever reaches the log is folded without raising. A merge that names an entity
+    nothing established, takes an entity already merged, or gives one to a survivor
+    that has itself been merged is a recorded no-op: nothing moves, no re-key is
+    emitted, and the history of each entity named that exists says it was ignored.
+    That covers a merge that would close a cycle, whose survivor already yields.
     """
     if identity is not None:
         current = identity.merged_into(absorbed)
@@ -185,6 +189,13 @@ def merge(
                 f"{current}; unmerge it first"
             )
         _refuse_cycle(identity, kept=kept, absorbed=absorbed)
+        survivor = identity.merged_into(kept)
+        if survivor is not None:
+            raise AlreadyMerged(
+                f"cannot merge {absorbed} into {kept}: {kept} is already merged into "
+                f"{survivor}; merge into {identity.canonical(kept)} instead, or unmerge "
+                f"{kept} first"
+            )
     event = Merged(kept=kept, absorbed=absorbed, source_event=source_event)
     return registry.pending(event, correlation_id=correlation_id)
 

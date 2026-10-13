@@ -93,9 +93,11 @@ def plan_rekeys(
 
     A merge that a later unmerge in the same batch withdrew plans nothing: the absorbed
     entity is canonical again, so beliefs keyed on it are already keyed correctly. The
-    unmerge's own rows cover the beliefs keyed on the survivor. Nor does a merge of an
-    entity the batch has already merged and not yet given back: an entity yields to
-    one survivor at a time, the identity layer ignores such a merge, and so does this.
+    unmerge's own rows cover the beliefs keyed on the survivor. Nor does a merge that
+    gives an entity, or gives one to an entity, the batch has already merged and not
+    yet given back: an entity yields to one survivor at a time, and only an entity that
+    has not yielded can survive a merge. The identity layer ignores such a merge, and
+    so does this.
 
     ``skip_unrenderable`` drops beliefs whose ids this process cannot re-mint — a
     scheme it does not know, or a predicate it does not declare — instead of raising.
@@ -141,11 +143,11 @@ def _landed(grouped: _Grouped) -> _Grouped:
     """
     Drop the decisions that change nothing, walking the batch in order.
 
-    A merge of an entity that an earlier merge in the batch absorbed, with no unmerge
-    giving it back in between, is ignored, as is an unmerge of a pair the batch has
-    left apart. An entity the batch has not touched yet is taken as the rows say: it
-    was free to merge, or merged into the unmerge's survivor, since identity wrote the
-    row.
+    A merge that names, on either side, an entity an earlier merge in the batch
+    absorbed, with no unmerge giving it back in between, is ignored, as is an unmerge
+    of a pair the batch has left apart. An entity the batch has not touched yet is
+    taken as the rows say: it was free to merge or to survive one, or merged into the
+    unmerge's survivor, since identity wrote the row.
     """
     merged_into: dict[UUID, UUID | None] = {}
     ignored: set[tuple[int, str, UUID]] = set()
@@ -153,10 +155,11 @@ def _landed(grouped: _Grouped) -> _Grouped:
         _seq, kind, from_entity = key
         targets = grouped[key]
         if kind == "merge":
-            if merged_into.get(from_entity) is not None:
+            survivor = targets[0]
+            if merged_into.get(from_entity) is not None or merged_into.get(survivor) is not None:
                 ignored.add(key)
             else:
-                merged_into[from_entity] = targets[0]
+                merged_into[from_entity] = survivor
         elif kind == "unmerge":
             for absorbed in (target for target in targets if target != from_entity):
                 if merged_into.get(absorbed, from_entity) != from_entity:

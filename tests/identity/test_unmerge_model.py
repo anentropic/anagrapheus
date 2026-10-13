@@ -16,7 +16,15 @@ from uuid import UUID
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from anagrapheus.identity import UNGRADED, alias, establish, merge, split, unmerge
+from anagrapheus.identity import (
+    UNGRADED,
+    IdentityError,
+    alias,
+    establish,
+    merge,
+    split,
+    unmerge,
+)
 
 from .conftest import build_rig
 from .test_fold import opcodes
@@ -35,6 +43,8 @@ if TYPE_CHECKING:
 FORMS = ("acme", "ACME", "acme-uk")
 STANCES = ("doubted", "believed", "certain")
 MAX_ENTITIES = 5
+# An id nothing ever establishes. Merges may name it, on either side.
+GHOST = UUID(int=0xDEAD)
 # Weighted towards merges and unmerges, so that unmerges after a chain of merges are
 # common rather than rare: 0 establish, 1 alias, 2 merge, 3 split, 4 unmerge.
 KINDS = st.sampled_from((0, 1, 1, 2, 2, 2, 2, 3, 4, 4, 4))
@@ -52,6 +62,7 @@ class Decision:
     ``subject`` is the entity established or aliased, the absorbed entity of a merge
     or an unmerge, or the original of a split. ``other`` is the survivor of a merge or
     an unmerge, or the new entity of a split. An unmerge names the merge it withdraws.
+    An ``ignored`` merge is one the projection records and does nothing with.
     """
 
     kind: str
@@ -60,26 +71,22 @@ class Decision:
     form: str = ""
     stance: str = UNGRADED
     withdraws: int | None = None
+    ignored: bool = False
 
 
 def history(ops: Sequence[tuple[int, int, int]]) -> list[Decision]:
     """
-    Turn opcodes into a valid history: every merge and unmerge would pass the checks.
+    Turn opcodes into a history of decisions that reach the log.
 
-    A merge never takes an entity already merged and never closes a cycle; an unmerge
-    always withdraws a merge that stands. Aliases may name any entity, merged or not.
+    A merge may name an entity nothing established, take an entity already merged, or
+    give it to a survivor that has itself been merged, and is then ignored: one that
+    closes a cycle is one of these, since its survivor already yields. Every other
+    merge lands. An unmerge always withdraws a merge that stands. Aliases may name any
+    established entity, merged or not.
     """
     entities: list[UUID] = []
     standing: dict[UUID, tuple[UUID, int]] = {}  # absorbed -> (kept, index of the merge)
     decisions: list[Decision] = []
-
-    def reaches(start: UUID, target: UUID) -> bool:
-        current = start
-        while current != target:
-            if current not in standing:
-                return False
-            current = standing[current][0]
-        return True
 
     for kind, a, b in ops:
         n = len(entities)
@@ -95,11 +102,14 @@ def history(ops: Sequence[tuple[int, int, int]]) -> list[Decision]:
                 Decision("alias", subject, form=FORMS[b % 3], stance=STANCES[(a + b) % 3])
             )
         elif kind == 2:
-            kept, absorbed = entities[a % n], entities[b % n]
-            if absorbed in standing or reaches(kept, absorbed):
+            pool = (*entities, GHOST)
+            kept, absorbed = pool[a % (n + 1)], pool[b % (n + 1)]
+            if kept == absorbed:
                 continue
-            standing[absorbed] = (kept, len(decisions))
-            decisions.append(Decision("merge", absorbed, kept))
+            ignored = GHOST in {kept, absorbed} or absorbed in standing or kept in standing
+            if not ignored:
+                standing[absorbed] = (kept, len(decisions))
+            decisions.append(Decision("merge", absorbed, kept, ignored=ignored))
         elif kind == 4:
             if not standing:
                 continue
@@ -157,7 +167,7 @@ def worlds(decisions: Sequence[Decision]) -> list[World]:
     The world after each prefix of ``decisions``: the model of what unmerge means.
 
     The world after a history is the history replayed with every withdrawn merge left
-    out, and every unmerge with it. In that replay:
+    out, and every unmerge with it, and every ignored merge. In that replay:
 
     - an establish or an alias puts a new recording first on its entity's claims to
       the form, so an entity shows its newest recording;
@@ -178,7 +188,7 @@ def worlds(decisions: Sequence[Decision]) -> list[World]:
             seq = index + 1
             if decision.kind in {"establish", "alias"}:
                 world.record(decision.subject, decision.form, decision.stance, seq)
-            elif decision.kind == "merge" and index not in withdrawn:
+            elif decision.kind == "merge" and not decision.ignored and index not in withdrawn:
                 assert decision.other is not None
                 world.merge(decision.subject, decision.other)
             elif decision.kind == "split":
@@ -214,9 +224,20 @@ def _pending(rig: Rig, decision: Decision) -> PendingEvent:
             return alias(rig.types, decision.subject, decision.form, decision.stance)
         case "merge":
             assert decision.other is not None
-            return merge(
-                rig.types, kept=decision.other, absorbed=decision.subject, identity=rig.registry
-            )
+            try:
+                checked = merge(
+                    rig.types,
+                    kept=decision.other,
+                    absorbed=decision.subject,
+                    identity=rig.registry,
+                )
+            except IdentityError:
+                # The check refuses every ignored merge it can see: all of them but
+                # those naming an entity nothing established, which it does not look for.
+                assert decision.ignored
+                return merge(rig.types, kept=decision.other, absorbed=decision.subject)
+            assert not decision.ignored or GHOST in {decision.subject, decision.other}
+            return checked
         case "unmerge":
             assert decision.other is not None
             return unmerge(rig.types, rig.registry, kept=decision.other, absorbed=decision.subject)
@@ -245,10 +266,11 @@ def test_unmerge_matches_the_model(
     After every decision of a generated history, the projection is the model's world.
 
     Checked at each step: each entity shows exactly the rows the model says, and yields
-    to the entity it says; no form is shown twice at one position; and an unmerge moves
-    only what its merge moved, taking nothing else off any entity and bringing nothing
-    else back. At the end, re-applying any suffix of the log and rebuilding it change
-    nothing.
+    to the entity it says; an ignored merge is in the history of each entity it names
+    that was established, and emits no re-key; no form is shown twice at one position;
+    and an unmerge moves only what its merge moved, taking nothing else off any entity
+    and bringing nothing else back. At the end, re-applying any suffix of the log and
+    rebuilding it change nothing.
     """
     decisions = history(ops)
     expected = worlds(decisions)
@@ -265,6 +287,11 @@ def test_unmerge_matches_the_model(
             assert after == {e: world.shown().get(e, set()) for e in entities}, (index, decision)
             for entity in entities:
                 assert rig.registry.merged_into(entity) == world.merged_into.get(entity)
+            if decision.ignored:
+                for entity in {decision.subject, decision.other} - {GHOST, None}:
+                    assert entity is not None
+                    assert rig.registry.history(entity)[-1].kind == "merge_ignored"
+                assert rig.registry.rekeys_since(index) == []
             rows = rig.store.connection.execute(
                 "SELECT surface_form, seq FROM identity_aliases"
             ).fetchall()

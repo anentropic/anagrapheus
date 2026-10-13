@@ -108,13 +108,16 @@ def test_canonical_of_an_unknown_entity_is_itself(rig: Rig):
 
 
 def test_a_merge_cycle_raises_rather_than_hanging(rig: Rig):
+    """
+    The fold ignores a reverse merge, so only a projection folded before it did holds a cycle.
+
+    Planted directly, as such a projection would hold it.
+    """
     a, ea = establish(rig.types, "a", provenance="x")
     b, eb = establish(rig.types, "b", provenance="x")
-    rig.commit(
-        ea,
-        eb,
-        merge(rig.types, kept=b, absorbed=a),
-        merge(rig.types, kept=a, absorbed=b),
+    rig.commit(ea, eb, merge(rig.types, kept=b, absorbed=a))
+    rig.store.connection.execute(
+        "UPDATE identity_entities SET merged_into = ? WHERE entity_id = ?", (str(a), str(b))
     )
 
     with pytest.raises(MergeCycle):
