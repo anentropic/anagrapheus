@@ -40,7 +40,8 @@ is a decision, not a typo.*
 
 *Amended 2026-08-30 (M6). `chronicle` was "later, behind a decision gate (§10 Q3)". The
 gate is open: it ships as a projection helper. Q3 itself stays listed open upstream —
-R61's consequences defer the doc sweep to ratification, and R61 is PROPOSED.*
+R61's consequences defer the doc sweep to ratification. R61 was PROPOSED when this was
+written and was RATIFIED 2026-10-12.*
 
 ## 3. Python floor: >=3.14
 

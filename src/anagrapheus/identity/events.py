@@ -15,6 +15,8 @@ registers its own types and binds them per role — see
 :mod:`anagrapheus.identity.vocabulary`.
 """
 
+# Design: note 02 (the shape of Split); upstream agent-core doc 00 §5c.
+
 from __future__ import annotations
 
 import unicodedata
@@ -121,9 +123,8 @@ class Split(DomainEvent, frozen=True):
     Each assignment mints a new entity and names the surface forms that move to it;
     forms not reassigned stay with ``original``, which survives the split.
 
-    The upstream design leaves this event's fields undefined — doc 00 §5c writes it as
-    ``Split(...)`` and stops. This shape is anagrapheus's, and the reasoning is
-    recorded in ``_design/02-identity-layer.md``.
+    The upstream design names this event and leaves its fields undefined. This shape is
+    anagrapheus's own.
     """
 
     original: UUID

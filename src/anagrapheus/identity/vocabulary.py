@@ -2,16 +2,17 @@
 Which event types mean what, so the fold never depends on the application's names.
 
 The stream's vocabulary belongs to whoever owns the domain, and identity is the first
-library layer that wants to emit domain-shaped events. The rule from doc 00 §8 —
-*the library ships the shape, the application owns the name* — is honoured here by
-binding each of the four identity **roles** to an event type rather than hard-coding
-a class: a consumer that already emits ``EntityEstablished`` binds that and never sees
-a library type.
+library layer that wants to emit domain-shaped events. The rule — *the library ships the
+shape, the application owns the name* — is honoured here by binding each of the four
+identity **roles** to an event type rather than hard-coding a class: a consumer that
+already emits ``EntityEstablished`` binds that and never sees a library type.
 
 The default binds this module's own models under the reserved ``"anagrapheus"``
 namespace, so an application with no opinion gets a working layer. Same relationship
 ``promote_as`` has with the pin ledger, one layer up.
 """
+
+# Design: note 02; upstream agent-core doc 00 §8.
 
 from __future__ import annotations
 

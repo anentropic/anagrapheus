@@ -6,18 +6,19 @@ A fold is ``(name, fold, apply(event, txn))`` — idempotent, or transactional a
 position, so a crash between batches costs a re-fold of at most one batch, never a
 double-count.
 
-**Fold-replay is an invariant only for deterministic folds.** M1 stated it flatly —
-same log, same projections — which held while every fold was arithmetic over the
-stream. It stops holding the moment a fold's ``apply`` makes a model call: the same
-log then yields *a* projection, not *the* projection. Rather than let the invariant
-quietly acquire an exception, each fold **declares its grade**, and the machinery
-treats the two differently where it matters — see :attr:`ProjectionFold.fold` and
-:meth:`Projector.rebuild`.
+**Fold-replay is an invariant only for deterministic folds.** Same log, same
+projections holds while every fold is arithmetic over the stream, and stops holding the
+moment a fold's ``apply`` makes a model call: the same log then yields *a* projection,
+not *the* projection. Rather than let the invariant quietly acquire an exception, each
+fold **declares its grade**, and the machinery treats the two differently where it
+matters — see :attr:`ProjectionFold.fold` and :meth:`Projector.rebuild`.
 
-Grounded in narrative-vm **R61 (PROPOSED 2026-08-30, awaiting sign-off)**, which rules
-the class rather than the instance: a prose summariser is the obvious generative fold,
-but so is a portrait regenerator or any other read model whose content a model writes.
+The grade is a property of the fold protocol, not of the chronicle: a prose summariser
+is the obvious generative fold, but so is a portrait regenerator or any other read
+model whose content a model writes.
 """
+
+# Design: note 05 §1-§2; upstream NVM R26, R61.
 
 from __future__ import annotations
 
