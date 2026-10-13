@@ -25,6 +25,9 @@ theme:
         name: Switch to light mode
   features:
     - navigation.instant
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.indexes
     - navigation.sections
     - navigation.top
     - navigation.tracking
@@ -88,6 +91,28 @@ markdown_extensions:
       permalink: true
 
 nav:
-  - Home: index.md
-  - API Reference: reference/
+  - Overview: index.md
+  - Tutorials:
+      - tutorials/index.md
+      - tutorials/getting-started.md
+      - tutorials/negotiation-example.md
+  - How-To Guides:
+      - how-to/index.md
+      - how-to/record-and-replay.md
+      - how-to/pin-model-and-tool-calls.md
+      - how-to/per-agent-beliefs.md
+      - how-to/identity-and-rekey.md
+      - how-to/chronicle-sections.md
+      - how-to/assemble-prompts.md
+      - how-to/evolve-event-schemas.md
+  - Explanation:
+      - explanation/index.md
+      - explanation/architecture.md
+      - explanation/event-log-and-projections.md
+      - explanation/pinning-and-replay.md
+      - explanation/beliefs.md
+      - explanation/identity.md
+      - explanation/chronicle.md
+      - explanation/prompt-assembly.md
+  - Reference: reference/
   - Changelog: changelog.md

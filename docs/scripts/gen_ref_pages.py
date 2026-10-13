@@ -31,6 +31,9 @@ def main():
         mkdocs_gen_files.set_edit_path(full_doc_path, path)
 
     with mkdocs_gen_files.open("reference/SUMMARY.md", "w") as nav_file:
+        # The hand-written landing page comes first, so it becomes the section's index.
+        if Path("docs/src/reference/index.md").exists():
+            nav_file.write("* [Reference](index.md)\n")
         nav_file.writelines(nav.build_literate_nav())
 
 
