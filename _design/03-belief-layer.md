@@ -250,7 +250,8 @@ coincide, which is the case that motivated wanting them to.
 
 ### Idempotence over a store outside the transaction
 
-`Projector` commits a fold's position inside the log's transaction. doxastica is not
+`Projector` commits a fold's position inside the log's transaction (or, for an owned
+position, just after it; see "Where the position lives" below). doxastica is not
 in it, so a crash between the two re-applies the last batch, and `revise` is not
 idempotent. So an operation whose scope already holds a state for this belief sourced
 from this event, found through `get_revision_chain`, reuses that state rather than
@@ -292,11 +293,31 @@ layer anything.
 doxastica has no "clear". `BeliefFold.reset(store)` takes the empty store to fold
 into and empties the index beside it, and `BeliefFold.store` is where readers find the
 current one. The caller owns that swap because only the caller knows what kind of
-store it is. One consequence is easy to miss: **an in-memory belief store with a
-persisted position is stale on reopen**. The position says the beliefs were folded;
-the process that held them is gone. The demo's `Table.open` rebuilds the fold when the
-position is non-zero, and the M3 acceptance test now ends by losing its beliefs to a
-fresh process and getting them back.
+store it is.
+
+### Where the position lives
+
+**An in-memory belief store with a persisted position is stale on reopen.** The
+position says the beliefs were folded; the process that held them is gone, and the
+SQLite entity index that survived it no longer agrees with the store either. The first
+answer was a rebuild in the demo's `Table.open`, which every other caller had to know
+to copy.
+
+The position belongs with the state it guards — note 02 §7's argument for the identity
+tables, in the case where the state is not in the transaction. So a fold may own its
+position: the optional `OwnsPosition` protocol (`read_position()`, `commit_position(seq)`),
+which `Projector`'s catch-up, batch commit, `rebuild` and `position(name)` honour. An
+owned position advances only after the batch's transaction commits, so it never runs
+ahead of a batch that rolled back; a fold that answers `None` is positioned in the
+store as before.
+
+`BeliefFold(..., durable: bool)` makes the choice, **required and never defaulted**, on
+note 05 §1's argument: a default of `True` would hand an in-memory store a guarantee
+it cannot keep, silently. `durable=False` keeps the position on the fold object, from
+zero in each process, so a reopen folds the whole log again over the surviving index,
+whose writes are upserts. `durable=True` keeps it in `projection_positions`. The demo's
+rebuild-on-open is gone, and the M3 acceptance test still loses its beliefs to a fresh
+process and gets them back, now by catching up alone.
 
 ### What this changed elsewhere
 

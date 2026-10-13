@@ -116,7 +116,7 @@ class PartyView:
             table.core,
             visible=lambda scope: _visible(scope, party),
             upto_seq=at,
-            folded_through=None if at is None else lambda: table.store.read_position(FOLD_NAME),
+            folded_through=None if at is None else lambda: table.settle.position(FOLD_NAME),
         )
         self.read = _guarded(self._beliefs.scope, party)
         # A live view reads to the end of the log; a settled one stops where it opened.
