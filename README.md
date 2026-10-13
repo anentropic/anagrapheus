@@ -5,7 +5,7 @@
 [![Python](https://img.shields.io/badge/python-3.14%2B-blue)](https://www.python.org/)
 [![License: BSD-3-Clause](https://img.shields.io/badge/license-BSD--3--Clause-blue)](https://github.com/anentropic/anagrapheus/blob/main/LICENSE)
 
-An event-sourced timeline, belief store and identity layer for long-running LLM agents. One append-only event log is the authoritative record of a run; per-agent beliefs, entity identity, a consolidated history and assembled prompts are all projections of it that can be dropped and rebuilt. Every model call and tool call is pinned to the log, so a recorded run replays offline, exactly, without reaching the model, and a run whose prompts have changed reports where it diverged instead of quietly drawing new answers.
+An event-sourced timeline, belief store and identity layer for long-running LLM agents. One append-only event log is the authoritative record of a run; per-agent beliefs, entity identity, a consolidated history and assembled prompts are all projections of it that can be dropped and rebuilt. Every model call made through `PinnedModel`, and every tool wrapped with `pinned_tool`, is pinned to the log, so a recorded run replays offline, exactly, without reaching the model, and a run whose prompts have changed reports where it diverged instead of quietly drawing new answers.
 
 It is for Python developers building agents and simulations that run for many turns and hold private beliefs about each other: negotiations, games, interactive fiction. It builds on [pydantic-ai](https://ai.pydantic.dev/) for the model call and works with any provider pydantic-ai supports.
 

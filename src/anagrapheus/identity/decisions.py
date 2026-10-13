@@ -18,19 +18,36 @@ import uuid
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from anagrapheus.identity.events import Aliased, Established, Merged, Split, SplitAssignment
+from anagrapheus.identity.errors import MergeCycle, NotMerged
+from anagrapheus.identity.events import (
+    Aliased,
+    Established,
+    Merged,
+    Split,
+    SplitAssignment,
+    Unmerged,
+)
 from anagrapheus.identity.ladder import UNGRADED
 from anagrapheus.timeline.pins import pin_key
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
+    from anagrapheus.identity.registry import IdentityRegistry
     from anagrapheus.timeline._canonical import Json
     from anagrapheus.timeline.envelope import PendingEvent
     from anagrapheus.timeline.pins import PinResolver
     from anagrapheus.timeline.registry import EventTypeRegistry
 
-__all__ = ["ENTITY_PIN_KIND", "alias", "establish", "merge", "mint_entity_id", "split"]
+__all__ = [
+    "ENTITY_PIN_KIND",
+    "alias",
+    "establish",
+    "merge",
+    "mint_entity_id",
+    "split",
+    "unmerge",
+]
 
 ENTITY_PIN_KIND = "entity"
 
@@ -131,17 +148,73 @@ def merge(
     absorbed: UUID,
     source_event: UUID | None = None,
     correlation_id: UUID | None = None,
+    identity: IdentityRegistry | None = None,
 ) -> PendingEvent:
     """
     Record that two ids name one referent.
 
     The correction appends: nothing is erased from the log, and undoing this is another
-    event rather than a deletion. In the *projection* the absorbed entity yields its
-    surface forms to the survivor — it names nothing once it has yielded — and
-    ``history()`` keeps the record of which entity originally recorded each of them.
+    event, :func:`unmerge`, rather than a deletion. In the *projection* the absorbed
+    entity yields its surface forms to the survivor — it names nothing once it has
+    yielded — and ``history()`` keeps the record of which entity originally recorded
+    each of them.
+
+    Pass ``identity``, the registry as it currently stands, to have the merge checked
+    before it exists: if ``kept`` already yields, directly or through a chain, to
+    ``absorbed``, this raises :class:`~anagrapheus.identity.errors.MergeCycle` instead
+    of returning an event that would leave both entities with no canonical id. The
+    check is only as current as the registry, so catch it up first.
     """
+    if identity is not None:
+        _refuse_cycle(identity, kept=kept, absorbed=absorbed)
     event = Merged(kept=kept, absorbed=absorbed, source_event=source_event)
     return registry.pending(event, correlation_id=correlation_id)
+
+
+def unmerge(
+    registry: EventTypeRegistry,
+    identity: IdentityRegistry,
+    *,
+    kept: UUID,
+    absorbed: UUID,
+    source_event: UUID | None = None,
+    correlation_id: UUID | None = None,
+) -> PendingEvent:
+    """
+    Withdraw the merge of ``absorbed`` into ``kept``.
+
+    ``absorbed`` becomes canonical again and takes back the surface forms the merge
+    moved onto ``kept``; the merge itself stays in the log and in ``history()``. The
+    belief layer hears about it through ``rekeys_since`` as a choice, not a move: a
+    belief keyed on ``kept`` may have been about either entity.
+
+    Checked before append against ``identity``, the registry as it currently stands:
+    if ``absorbed`` is not merged directly into ``kept``, this raises
+    :class:`~anagrapheus.identity.errors.NotMerged` rather than returning an event that
+    would do nothing. Catch the registry up first; an event that slips past the check
+    anyway is folded as a recorded no-op.
+    """
+    current = identity.merged_into(absorbed)
+    if current != kept:
+        where = "is not merged" if current is None else f"is merged into {current}"
+        raise NotMerged(f"cannot unmerge {absorbed} from {kept}: it {where}")
+    event = Unmerged(kept=kept, absorbed=absorbed, source_event=source_event)
+    return registry.pending(event, correlation_id=correlation_id)
+
+
+def _refuse_cycle(identity: IdentityRegistry, *, kept: UUID, absorbed: UUID) -> None:
+    """Raise if ``absorbed`` already lies on ``kept``'s merge chain."""
+    seen = {kept}
+    current: UUID | None = kept
+    while (current := identity.merged_into(current)) is not None:
+        if current == absorbed:
+            raise MergeCycle(
+                f"merging {absorbed} into {kept} would close a cycle: {kept} already "
+                f"yields to {absorbed}"
+            )
+        if current in seen:
+            raise MergeCycle(f"merge chain from {kept} already cycles at {current}")
+        seen.add(current)
 
 
 def split(

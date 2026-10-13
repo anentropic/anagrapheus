@@ -13,7 +13,7 @@ This guide shows how to record that two entities are the same one, and then carr
 - The vocabulary used below:
     - identity **decisions** are events: the identity registry is a fold over them, so a decision is auditable and the registry can be rebuilt;
     - to **establish** is to declare a new entity and mint its id; to **resolve** is to find which entity a name already refers to;
-    - a **merge** records that two entity ids name one referent, with one **kept** and one **absorbed**; a **split** records that one id named several;
+    - a **merge** records that two entity ids name one referent, with one **kept** and one **absorbed**; an **unmerge** withdraws a merge; a **split** records that one id named several;
     - to **re-key** is to move a belief whose id names the absorbed entity onto the id that names the survivor.
 
     [Identity](../explanation/identity.md) explains each of these.
@@ -26,6 +26,7 @@ This guide shows how to record that two entities are the same one, and then carr
 | Which entity survives a merge | Following merge chains to the surviving id |
 | Which scopes to re-key, and how (revise, contract, keep the old) | Listing every belief id that names the absorbed entity |
 | Which product a belief belongs to after a split | Computing each belief's successor id or ids |
+| Whether a merge was a mistake | Withdrawing it, and listing the beliefs that must be decided again |
 
 The library computes the re-key plan and stops there. Applying it changes beliefs, and what should happen to them is a judgment about belief that only the application can make.
 
@@ -82,7 +83,7 @@ store = SQLiteEventStore(":memory:")
 reader = EventReader(store, UpcastRegistry(), types)
 identity_store = SQLiteIdentityStore(store.connection)
 index_store = SQLiteBeliefIndexStore(store.connection)
-beliefs = BeliefFold(MemoryCore(InMemoryBackend()), predicates, index_store, types)
+beliefs = BeliefFold(MemoryCore(InMemoryBackend()), predicates, index_store, types, durable=False)
 projector = Projector(store, reader, [IdentityFold(identity_store, types), beliefs])
 registry = IdentityRegistry(identity_store)
 events = BeliefEvents(types, predicates)
@@ -150,6 +151,20 @@ After the merge:
 - the absorbed entity's names now belong to the survivor, and [`registry.history(id)`][history] keeps the record of every decision.
 
 Matching in `resolve` is exact on the Unicode-normalised name. The library never guesses that two different names are one entity.
+
+Pass the registry as `identity=` and `merge` checks, before the event exists, that the merge would not close a cycle. Merging the UK delegation back into the British one now would leave neither with a canonical id, so it is refused:
+
+```python title="identity.py (continued)"
+from anagrapheus.identity import MergeCycle
+
+try:
+    merge(types, kept=britain, absorbed=uk, identity=registry)
+except MergeCycle as error:
+    print(type(error).__name__)
+# MergeCycle
+```
+
+The check reads the registry, so catch the projector up before you make it.
 
 ## 4. Plan the re-keys
 
@@ -302,6 +317,76 @@ True
 
 The chooser here, matching a word in the belief's value, stands in for whatever judgment your application can make. When it cannot decide, the loop leaves the belief keyed on the original, which still exists, and reports it. That is a safer default than guessing.
 
+## Undo a merge
+
+A merge that turns out to be wrong is withdrawn with [`unmerge`][unmerge], which appends a new decision rather than editing the old one. The absorbed entity becomes canonical again and takes back the names the merge moved onto the survivor. A name the survivor recorded for itself, or that another of its merges also brought, stays on the survivor too, and a name a later split moved elsewhere stays where it went.
+
+`unmerge` takes the registry and checks it before building the event: it raises [`NotMerged`][not-merged] unless `absorbed` is merged directly into `kept`.
+
+Beliefs need a decision too. While the two entities were merged, a belief about either was keyed on the survivor, so after the unmerge each such belief has two candidates: stay on the survivor, or move to the entity it gave back. That is the same question a split asks, and `plan.sole()` raises for the same reason. The example below merges the Faroese delegation into the Danish one, forms a belief on the merged entity, then withdraws the merge and chooses each belief's entity by what its value mentions:
+
+```python title="identity.py (continued)"
+from anagrapheus.identity import unmerge
+
+denmark, denmark_event = establish(types, "Danish delegation", provenance="transcript:day-1")
+faroe, faroe_event = establish(types, "Faroese delegation", provenance="transcript:day-2")
+store.append([denmark_event, faroe_event])
+projector.catch_up()
+store.append([merge(types, kept=denmark, absorbed=faroe, identity=registry)])
+store.append(
+    [events.revise("party:uk:held", "position", (denmark, mackerel), "Faroe wants its own share")]
+)
+projector.catch_up()
+before_unmerge = store.last_seq()
+
+# The application learns that the Faroe Islands negotiate on their own.
+store.append([unmerge(types, registry, kept=denmark, absorbed=faroe)])
+projector.catch_up()
+print(registry.resolve("Faroese delegation").sole() == faroe)
+
+plans = plan_rekeys(registry.rekeys_since(before_unmerge), BeliefIndex(index_store), predicates)
+names = {denmark: "Denmark", faroe: "Faroe"}  # the application's own map
+for plan in plans:
+    print(plan.kind, len(plan.candidates))
+    old = predicates.parse(plan.belief_id)
+    for state in beliefs.store.query_scope("party:uk:held", BeliefFilter()):
+        if state.belief_id != plan.belief_id:
+            continue
+        # The application's judgment: which entity was this belief about?
+        chosen = [
+            candidate
+            for candidate in plan.candidates
+            if names[predicates.parse(candidate).entity_ids[0]] in state.value
+        ]
+        if len(chosen) != 1 or chosen[0] == plan.belief_id:
+            continue  # it stays on the survivor
+        new = predicates.parse(chosen[0])
+        store.append(
+            [
+                events.revise(
+                    "party:uk:held", new.name, new.entity_ids, state.value, stance=state.stance
+                ),
+                events.contract("party:uk:held", old.name, old.entity_ids),
+            ]
+        )
+projector.catch_up()
+
+for state in beliefs.store.query_scope("party:uk:held", BeliefFilter()):
+    holder = predicates.parse(state.belief_id).entity_ids[0]
+    if holder in names:
+        print(names[holder], state.value)
+print([row.kind for row in registry.history(faroe)])
+```
+
+```text
+True
+unmerge 2
+Faroe Faroe wants its own share
+['established', 'absorbed', 'unmerged']
+```
+
+One of the two candidates is the belief's own id: choosing it means the belief stays where it is, so there is nothing to append. A belief keyed on the absorbed entity before the merge, and never re-keyed, needs no decision at all; the absorbed id names an entity again.
+
 ## Troubleshooting
 
 ### `AmbiguousSurfaceForm: 'the Commission' matched 2 entities`
@@ -314,7 +399,11 @@ The chooser here, matching a word in the belief's value, stands in for whatever 
 
 ### `MergeCycle: merge chain from … cycles at …`
 
-Two merges point at each other, directly or through a chain, so the log contradicts itself and no entity is canonical. This version has no event that withdraws a merge, so prevent the cycle instead: before appending `merge(kept=a, absorbed=b)`, check that `registry.canonical(a) != registry.canonical(b)`.
+Two merges point at each other, directly or through a chain, so the log contradicts itself and no entity is canonical. Repair it by [unmerging](#undo-a-merge) one of the merges. To prevent it, pass the registry when you merge, `merge(types, kept=a, absorbed=b, identity=registry)`, which raises `MergeCycle` before the event exists.
+
+### `NotMerged: cannot unmerge … from …`
+
+`unmerge` was asked to withdraw a merge the registry does not hold: `absorbed` is not merged into `kept`, or is merged into a different entity, or `kept` and `absorbed` are the wrong way round. An unmerge withdraws one direct merge, so name the pair exactly as it was merged. If the merge is recent, run `projector.catch_up()` first.
 
 ### `UnrenderableBelief` from `plan_rekeys`
 
@@ -335,6 +424,8 @@ A belief id in the index cannot be re-minted by this registry: its predicate is 
 [establish]: ../reference/anagrapheus/identity/decisions.md#anagrapheus.identity.decisions.establish
 [merge]: ../reference/anagrapheus/identity/decisions.md#anagrapheus.identity.decisions.merge
 [split]: ../reference/anagrapheus/identity/decisions.md#anagrapheus.identity.decisions.split
+[unmerge]: ../reference/anagrapheus/identity/decisions.md#anagrapheus.identity.decisions.unmerge
+[not-merged]: ../reference/anagrapheus/identity/errors.md#anagrapheus.identity.errors.NotMerged
 [mint-entity-id]: ../reference/anagrapheus/identity/decisions.md#anagrapheus.identity.decisions.mint_entity_id
 [plan-rekeys]: ../reference/anagrapheus/beliefs/rekey.md#anagrapheus.beliefs.rekey.plan_rekeys
 [resolution-sole]: ../reference/anagrapheus/identity/registry.md#anagrapheus.identity.registry.Resolution.sole

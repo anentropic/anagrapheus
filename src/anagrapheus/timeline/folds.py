@@ -22,7 +22,7 @@ but so is a portrait regenerator or any other read model whose content a model w
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Literal, Protocol, cast
+from typing import TYPE_CHECKING, Literal, Protocol, cast, runtime_checkable
 
 from anagrapheus.timeline.errors import TimelineError
 from anagrapheus.timeline.store import TransactionalStore
@@ -38,6 +38,7 @@ __all__ = [
     "FoldDeterminism",
     "GenerativeFold",
     "GenerativeRebuild",
+    "OwnsPosition",
     "ProjectionFold",
     "Projector",
 ]
@@ -92,6 +93,52 @@ class ProjectionFold(Protocol):
         ...
 
 
+@runtime_checkable
+class OwnsPosition(Protocol):
+    """
+    A fold that may keep its own position rather than leave it in the event store.
+
+    The projector stores a fold's position in the event store, which is right when the
+    fold's state survives exactly as long as that store does. It is wrong when the state
+    lives somewhere that does not: a fold into process memory, over a log kept in a
+    file, would reopen with a stored position above state that went with the old
+    process, and catch-up would replay nothing. The position belongs with the state it
+    guards, so such a fold keeps it.
+
+    Optional. :class:`Projector` checks for it on every read and commit, and a fold
+    that answers ``None`` from :meth:`read_position` is positioned in the store as
+    usual, which lets one class serve both cases.
+
+    Such a fold's state and position sit outside the store's transactions, so neither
+    can follow an outer transaction's rollback: a catch-up inside one would leave both
+    advanced over events the rollback removed, and the next events appended would reuse
+    those ``seq`` values and be skipped. :meth:`Projector.catch_up` and
+    :meth:`Projector.rebuild` therefore refuse to run such a fold while a transaction is
+    open on the store.
+    """
+
+    def read_position(self) -> int | None:
+        """The last ``seq`` folded, or ``None`` to leave the position to the store."""
+        ...
+
+    def commit_position(self, seq: int) -> None:
+        """
+        Record that everything through ``seq`` is folded.
+
+        Called only for a fold whose :meth:`read_position` is not ``None``, and after
+        the batch's transaction has committed, never inside it: the position must not
+        run ahead of a batch that rolled back.
+        """
+        ...
+
+
+def _owner(fold: ProjectionFold) -> OwnsPosition | None:
+    """``fold``, if it keeps its own position; ``None`` if the store keeps it."""
+    if isinstance(fold, OwnsPosition) and fold.read_position() is not None:
+        return fold
+    return None
+
+
 class GenerativeRebuild(TimelineError):
     """A generative fold was asked to rebuild without acknowledging what that discards."""
 
@@ -121,6 +168,18 @@ class GenerativeFold(Protocol):
         that has nothing to do for an event should return without drawing.
         """
         ...
+
+
+def _refuse_inside_transaction(store: EventStore, folds: Sequence[ProjectionFold]) -> None:
+    """Raise if any of ``folds`` keeps its own position and ``store`` has a transaction open."""
+    if not isinstance(store, TransactionalStore) or not store.in_transaction:
+        return
+    owners = [fold.name for fold in folds if _owner(fold) is not None]
+    if owners:
+        raise TimelineError(
+            f"fold(s) {owners} keep their own position, which an outer transaction's "
+            f"rollback cannot undo; run the projector outside any open transaction"
+        )
 
 
 def _validate_batch_size(batch_size: int) -> None:
@@ -157,9 +216,28 @@ class Projector:
         independent position, so the two never interfere. That split is the caller's
         to make, and a fold that declared its own schedule could not be dispatched by
         anything anyway.
+
+        Call it outside any transaction open on the store when a fold keeps its own
+        position (:class:`OwnsPosition`): that position, and the state it guards, cannot
+        roll back with the transaction, so the call raises :class:`TimelineError` before
+        folding anything.
         """
         _validate_batch_size(batch_size)
+        _refuse_inside_transaction(self._store, self._folds)
         return {fold.name: self._run(fold, batch_size=batch_size) for fold in self._folds}
+
+    def position(self, name: str) -> int:
+        """
+        The named fold's position, wherever it is kept.
+
+        Read a fold's position through this rather than the store's ``read_position``:
+        a fold that implements :class:`OwnsPosition` keeps it on itself, and the store's
+        row for it, if any, says nothing.
+        """
+        fold = next((f for f in self._folds if f.name == name), None)
+        if fold is None:
+            raise KeyError(f"no fold named {name!r}")
+        return self._read_position(fold)
 
     def rebuild(
         self,
@@ -195,6 +273,10 @@ class Projector:
         service) a crash between the two leaves a replay over stale state, which
         the fold contract already requires ``apply`` to tolerate — never a cleared
         projection under a high position that catch-up would skip past.
+
+        A fold that keeps its own position (:class:`OwnsPosition`) has it set to zero on
+        the fold, in the same order, and is refused while a transaction is open on the
+        store, as :meth:`catch_up` explains.
         """
         fold = next((f for f in self._folds if f.name == name), None)
         if fold is None:
@@ -206,6 +288,7 @@ class Projector:
                 f"across instead, or pass discard_generated=True to accept both."
             )
         _validate_batch_size(batch_size)
+        _refuse_inside_transaction(self._store, [fold])
         if reset_in_transaction:
             if not isinstance(self._store, TransactionalStore):
                 raise TypeError(
@@ -213,15 +296,29 @@ class Projector:
                     f"{type(self._store).__name__} is not one"
                 )
             with self._store.transaction():
-                self._store.commit_position(name, 0)
+                self._commit_position(fold, 0)
                 reset()
         else:
-            self._store.commit_position(name, 0)
+            self._commit_position(fold, 0)
             reset()
         return self._run(fold, batch_size=batch_size)
 
+    def _read_position(self, fold: ProjectionFold) -> int:
+        if isinstance(fold, OwnsPosition):
+            owned = fold.read_position()
+            if owned is not None:
+                return owned
+        return self._store.read_position(fold.name)
+
+    def _commit_position(self, fold: ProjectionFold, seq: int) -> None:
+        owner = _owner(fold)
+        if owner is not None:
+            owner.commit_position(seq)
+        else:
+            self._store.commit_position(fold.name, seq)
+
     def _run(self, fold: ProjectionFold, *, batch_size: int) -> int:
-        position = self._store.read_position(fold.name)
+        position = self._read_position(fold)
         while True:
             batch = list(self._reader.read_raw(since_seq=position, limit=batch_size))
             if not batch:
@@ -237,19 +334,25 @@ class Projector:
             generative = cast("GenerativeFold", fold)
             for event in batch:
                 generative.prepare(event)
+        owner = _owner(fold)
         if isinstance(self._store, TransactionalStore):
             with self._store.transaction() as txn:
                 for event in batch:
                     fold.apply(event, txn)
-                self._store.commit_position(fold.name, new_position)
+                if owner is None:
+                    self._store.commit_position(fold.name, new_position)
         else:
             for event in batch:
                 fold.apply(event, None)
-            self._store.commit_position(fold.name, new_position)
+            if owner is None:
+                self._store.commit_position(fold.name, new_position)
+        if owner is not None:
+            # After the transaction, so a batch that rolled back never advances it.
+            owner.commit_position(new_position)
         _log.debug("fold %s: %d -> %d (%d event(s))", fold.name, position, new_position, len(batch))
         return new_position
 
     def positions(self) -> Iterator[tuple[str, int]]:
         """Yield each fold's name and current position."""
         for fold in self._folds:
-            yield fold.name, self._store.read_position(fold.name)
+            yield fold.name, self._read_position(fold)
