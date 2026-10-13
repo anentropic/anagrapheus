@@ -20,6 +20,13 @@ def main():
 
         parts = tuple(module_path.parts)
 
+        # The top-level package gets a page of its own: it defines
+        # register_builtin_events, which no submodule page would show.
+        if parts == ("anagrapheus", "__init__"):
+            parts = ("anagrapheus",)
+            doc_path = Path("anagrapheus", "index.md")
+            full_doc_path = Path("reference", doc_path)
+
         # Skip __init__, __main__, conftest, and private modules
         if parts[-1] in ("__init__", "__main__", "conftest"):
             continue

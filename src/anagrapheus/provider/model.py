@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 
     from pydantic_ai import RunContext
     from pydantic_ai.messages import ModelMessage
-    from pydantic_ai.models import Model, ModelRequestParameters, StreamedResponse
+    from pydantic_ai.models import KnownModelName, Model, ModelRequestParameters, StreamedResponse
     from pydantic_ai.settings import ModelSettings
 
     from anagrapheus.provider.policy import CallPolicy
@@ -75,7 +75,7 @@ class PinnedModel(WrapperModel):
 
     def __init__(
         self,
-        wrapped: Model,
+        wrapped: Model | KnownModelName,
         resolver: PinResolver,
         *,
         policy: CallPolicy | None = None,

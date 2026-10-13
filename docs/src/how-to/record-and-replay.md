@@ -23,7 +23,7 @@ This guide shows how to record the model calls of an agent run into a recording 
 
 ## 1. Register every event type
 
-An [`EventTypeRegistry`][registry] maps each event type to its pydantic model. The log holds the library's own events (pins, identity decisions, beliefs) next to yours, so register both: `anagrapheus.register_builtin_events` covers every library event in one call.
+An [`EventTypeRegistry`][registry] maps each event type to its pydantic model. The log holds the library's own events (pins, identity decisions, beliefs) next to yours, so register both: [`anagrapheus.register_builtin_events`](../reference/anagrapheus/index.md#anagrapheus.register_builtin_events) covers every library event in one call.
 
 ```python title="record_replay.py"
 from pathlib import Path

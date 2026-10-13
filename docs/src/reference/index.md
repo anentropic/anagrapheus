@@ -9,7 +9,7 @@ This section is the API reference, generated from the source code's docstrings. 
 
 Most applications import from a subpackage, for example `from anagrapheus.timeline import ReplayPins`. Each subpackage re-exports its public names, but each name is documented on the page of the module that defines it. So [`ReplayPins`][replay-pins] is documented under `anagrapheus.timeline.replay`, not under `anagrapheus.timeline`. The groups below say which module holds what.
 
-The top-level package adds one function of its own, `anagrapheus.register_builtin_events(registry)`. It registers every event type the library emits, across all subpackages, into an [`EventTypeRegistry`][registry]. Call it once when you build your registry. Registering only some subpackages' events leads to an [`UnknownEventType`][unknown-event-type] error later, when a reader reaches an event type that was not registered.
+The top-level package adds one function of its own, [`anagrapheus.register_builtin_events(registry)`](anagrapheus/index.md#anagrapheus.register_builtin_events). It registers every event type the library emits, across all subpackages, into an [`EventTypeRegistry`][registry]. Call it once when you build your registry. Registering only some subpackages' events leads to an [`UnknownEventType`][unknown-event-type] error later, when a reader reaches an event type that was not registered.
 
 ## Timeline
 
