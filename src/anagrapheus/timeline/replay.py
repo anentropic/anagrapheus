@@ -26,7 +26,7 @@ from pydantic import BaseModel
 
 from anagrapheus.timeline._canonical import Json, concrete_json
 from anagrapheus.timeline.envelope import DomainEvent, StoredEvent
-from anagrapheus.timeline.errors import TimelineError
+from anagrapheus.timeline.errors import TimelineError, UpcastGap
 from anagrapheus.timeline.pins import PinKey, PinPromoted
 from anagrapheus.timeline.registry import RESERVED_NAMESPACE, EventKey
 
@@ -134,7 +134,9 @@ class ReplayPins:
         loads (later pins win on key collision). Pass ``upcasts`` when the events did
         not already go through an :class:`EventReader` — raw fixtures, for example —
         so pin event payloads get the same upcast-on-read as everything else.
-        ``on_miss`` and ``into`` are as for the class.
+        Without ``upcasts``, an event stored under an older schema version than the
+        registry's latest raises :class:`~anagrapheus.timeline.errors.UpcastGap` rather
+        than decode as the old shape. ``on_miss`` and ``into`` are as for the class.
         """
         if extract is not None and unit_id is not None:
             raise ValueError("unit_id cannot narrow custom-promoted events; filter inside extract")
@@ -148,10 +150,17 @@ class ReplayPins:
             ):
                 continue
             payload = stored.payload
+            target = registry.latest_version(env.namespace, env.type)
             if upcasts is not None:
-                target = registry.latest_version(env.namespace, env.type)
                 version, payload = upcasts.apply(key, payload, target_version=target)
                 key = EventKey(env.namespace, env.type, version)
+            elif env.schema_version < target:
+                raise UpcastGap(
+                    f"({env.namespace!r}, {env.type!r}) is stored as "
+                    f"v{env.schema_version} but the latest registered schema is "
+                    f"v{target}; pass upcasts= to ReplayPins.from_events so it is "
+                    "upcast on the way in"
+                )
             decoded = registry.decode(key, payload)
             if extract is not None:
                 pair = extract(stored, decoded)

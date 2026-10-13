@@ -218,7 +218,7 @@ The file is not a recording, or its header line was removed. [`read_recording`][
 
 ### An old recording no longer decodes
 
-`read_recording` returns events exactly as stored. If an event type in the recording has since gained a schema version, pass your upcasters: `ReplayPins.from_events(recording.events, types, upcasts=upcasts)`. See [How to Evolve Event Schemas with Upcasters](evolve-event-schemas.md).
+`read_recording` returns events exactly as stored. If an event type in the recording has since gained a schema version, pass your upcasters: `ReplayPins.from_events(recording.events, types, upcasts=upcasts)`. Pass `upcasts=` whenever you replay a recording made before a schema change: without it, `from_events` raises `UpcastGap: … pass upcasts= to ReplayPins.from_events …` at the first event stored under an older version, rather than read it as the old shape. See [How to Evolve Event Schemas with Upcasters](evolve-event-schemas.md).
 
 !!! info "Logging"
     The library logs every model call (drawn or reused from a pin) under the `anagrapheus` logger and never configures logging itself. Turn it up with `logging.getLogger("anagrapheus").setLevel(logging.INFO)` and a handler of your choice.
