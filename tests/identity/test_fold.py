@@ -42,7 +42,14 @@ if TYPE_CHECKING:
 
     from anagrapheus.timeline import PendingEvent
 
-_TABLES = ("identity_entities", "identity_aliases", "identity_decisions", "identity_rekeys")
+_TABLES = (
+    "identity_entities",
+    "identity_aliases",
+    "identity_claims",
+    "identity_claim_paths",
+    "identity_decisions",
+    "identity_rekeys",
+)
 
 
 class Unrelated(DomainEvent, frozen=True):
