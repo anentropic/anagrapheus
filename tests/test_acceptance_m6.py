@@ -129,7 +129,7 @@ def test_milestone_6_acceptance(tmp_path: Path):
     # Not the warm scratch -- that would only show reuse-under-retry. This replays from
     # the log, which is the claim that matters: a consolidation pinned months ago can
     # be reproduced exactly, without reaching a model.
-    replay = ReplayPins.from_events(events, types, on_miss="record", into=PinLedger(store, types))
+    replay = ReplayPins.from_events(events, types, on_miss="strict")
     replayed_model = PinnedModel(FunctionModel(write), replay, on_key=keys.append)
 
     def summarize_replayed(events: Sequence[StoredEvent]) -> Consolidation:

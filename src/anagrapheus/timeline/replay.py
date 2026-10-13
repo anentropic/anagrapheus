@@ -27,7 +27,7 @@ from pydantic import BaseModel
 from anagrapheus.timeline._canonical import Json, concrete_json
 from anagrapheus.timeline.envelope import DomainEvent, StoredEvent
 from anagrapheus.timeline.errors import TimelineError
-from anagrapheus.timeline.pins import PinKey, PinPromoted, ReplayDiverged
+from anagrapheus.timeline.pins import PinKey, PinPromoted
 from anagrapheus.timeline.registry import RESERVED_NAMESPACE, EventKey
 
 if TYPE_CHECKING:
@@ -37,7 +37,6 @@ if TYPE_CHECKING:
 
     from anagrapheus.timeline.pins import PinLedger
     from anagrapheus.timeline.registry import EventTypeRegistry
-    from anagrapheus.timeline.store import EventStore
     from anagrapheus.timeline.upcast import UpcastRegistry
 
 
@@ -82,7 +81,8 @@ class ReplayPins:
     run and not only the part that differed. ``into.commit()`` then promotes those pins
     and a :class:`~anagrapheus.timeline.pins.ReplayDiverged` for the first miss, in one
     transaction. Without ``into`` a record-mode run's draws would reach no log, so it
-    is refused.
+    is refused. That commit is the only place the divergence is written, so a run
+    announces it once; until then, :attr:`divergence` says where it happened.
     """
 
     def __init__(
@@ -90,7 +90,6 @@ class ReplayPins:
         pins: dict[str, Json],
         *,
         on_miss: Literal["strict", "record"] = "strict",
-        announce: Callable[[Divergence], None] | None = None,
         into: PinLedger | None = None,
     ) -> None:
         if on_miss not in ("strict", "record"):
@@ -106,33 +105,12 @@ class ReplayPins:
             raise ValueError("into= records a new run; it applies only to on_miss='record'")
         self._pins = pins
         self._on_miss: Literal["strict", "record"] = on_miss
-        self._announce = announce
         self._into = into
         self._hits = 0
-        # One lock per key, so concurrent draws for one key coalesce; see `_lock_for`.
-        # Keys with a draw in flight right now, plain or streamed.
+        # Keys with a draw in flight right now, plain or streamed, so concurrent draws
+        # for one key coalesce; see `_await_inflight`.
         self._inflight: dict[PinKey, Event] = {}
         self._divergence: Divergence | None = None
-
-    @staticmethod
-    def announce_to(
-        store: EventStore, registry: EventTypeRegistry, *, unit_id: UUID
-    ) -> Callable[[Divergence], None]:
-        """
-        An ``announce`` callback that appends a :class:`ReplayDiverged` event at once.
-
-        Not needed for record mode, whose ``into`` ledger already promotes the
-        divergence with the pins at ``commit``; wiring both writes it twice. Use it when
-        the divergence must reach the log even if the new run is never committed.
-        """
-
-        def announce(divergence: Divergence) -> None:
-            event = ReplayDiverged(
-                unit_id=unit_id, missed_key=divergence.missed_key, kind=divergence.kind
-            )
-            store.append([registry.pending(event)])
-
-        return announce
 
     @classmethod
     def from_events(
@@ -144,7 +122,6 @@ class ReplayPins:
         extract: ExtractFn | None = None,
         upcasts: UpcastRegistry | None = None,
         on_miss: Literal["strict", "record"] = "strict",
-        announce: Callable[[Divergence], None] | None = None,
         into: PinLedger | None = None,
     ) -> Self:
         """
@@ -157,7 +134,7 @@ class ReplayPins:
         loads (later pins win on key collision). Pass ``upcasts`` when the events did
         not already go through an :class:`EventReader` — raw fixtures, for example —
         so pin event payloads get the same upcast-on-read as everything else.
-        ``on_miss``, ``announce`` and ``into`` are as for the class.
+        ``on_miss`` and ``into`` are as for the class.
         """
         if extract is not None and unit_id is not None:
             raise ValueError("unit_id cannot narrow custom-promoted events; filter inside extract")
@@ -185,7 +162,7 @@ class ReplayPins:
             if unit_id is not None and decoded.unit_id != unit_id:
                 continue
             pins[decoded.key] = cast("Json", decoded.result)
-        return cls(pins, on_miss=on_miss, announce=announce, into=into)
+        return cls(pins, on_miss=on_miss, into=into)
 
     @property
     def divergence(self) -> Divergence | None:
@@ -342,8 +319,6 @@ class ReplayPins:
         if self._divergence is None:
             self._divergence = miss
             self._into.mark_diverged(missed_key=key, kind=kind)
-            if self._announce is not None:
-                self._announce(miss)
         return self._into
 
     def _remember[R: Json](self, key: PinKey, raw: R) -> R:

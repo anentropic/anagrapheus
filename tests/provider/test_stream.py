@@ -81,6 +81,33 @@ def test_a_changed_prompt_diverges_rather_than_pretending(rig: Rig):
     assert replay.divergence.kind == PIN_KIND
 
 
+def test_a_stream_recorded_in_record_mode_replays_strictly(rig: Rig):
+    """
+    Record mode's streamed path, carried through to the log and back.
+
+    The stream drawn on a miss lands in the ``into`` ledger, reaches the log at commit
+    with the divergence, and the new log then replays it strictly without the stream
+    being opened again.
+    """
+    counted = CountedStream(["Lisbon ", "is the ", "capital."])
+    record = ReplayPins.from_events([], rig.types, on_miss="record", into=rig.ledger)
+    recorder = Agent(model=PinnedModel(counted.model(), record))
+
+    assert asyncio.run(_streamed(recorder, "where?")) == "Lisbon is the capital."
+    assert counted.opens == 1
+    assert list(rig.store.read()) == [], "nothing is canon before commit"
+    rig.ledger.commit()
+    types = [e.envelope.type for e in rig.store.read()]
+    assert types == ["ReplayDiverged", "PinPromoted"]
+
+    replay = ReplayPins.from_events(list(rig.store.read()), rig.types, on_miss="strict")
+    replayed = Agent(model=PinnedModel(counted.model(), replay))
+
+    assert asyncio.run(_streamed(replayed, "where?")) == "Lisbon is the capital."
+    assert counted.opens == 1, "the promoted stream replays without reaching the provider"
+    assert replay.divergence is None
+
+
 def test_a_streamed_pin_replays_through_the_plain_path(rig: Rig):
     """
     Cross-transport: streaming is *how you receive*, not what you ask.
