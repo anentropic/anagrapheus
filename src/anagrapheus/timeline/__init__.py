@@ -19,6 +19,7 @@ from anagrapheus.timeline.folds import (
     FoldDeterminism,
     GenerativeFold,
     GenerativeRebuild,
+    OwnsPosition,
     ProjectionFold,
     Projector,
 )
@@ -76,6 +77,7 @@ __all__ = [
     "FoldDeterminism",
     "GenerativeFold",
     "GenerativeRebuild",
+    "OwnsPosition",
     "ProjectionFold",
     "Projector",
     "Recording",

@@ -50,7 +50,7 @@ def _beliefs(rig: Rig, *, visible: frozenset[str]) -> BeliefSlice:
         rig.core,
         visible=visible.__contains__,
         upto_seq=rig.store.last_seq(),
-        folded_through=lambda: rig.store.read_position(FOLD_NAME),
+        folded_through=lambda: rig.projector.position(FOLD_NAME),
     )
 
 
