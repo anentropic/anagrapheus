@@ -276,7 +276,12 @@ class ChronicleFold:
             self._prepared.pop(event.seq, None)
             return None
         events = list(self._reader.read_raw(since_seq=start - 1, limit=event.seq - start + 1))
-        return (start, events) if events else None
+        if not events:
+            # Nothing to draw from, so nothing for `apply` to write either: drop any
+            # draw a failed batch left here, as for a unit already covered.
+            self._prepared.pop(event.seq, None)
+            return None
+        return start, events
 
     def _keep(self, start: int, event: StoredEvent, drawn: Consolidation) -> None:
         """Hold a drawn consolidation for ``apply`` to write."""
