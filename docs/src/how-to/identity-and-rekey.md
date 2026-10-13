@@ -164,7 +164,7 @@ except MergeCycle as error:
 # MergeCycle
 ```
 
-The check reads the registry, so catch the projector up before you make it.
+With the registry, `merge` also raises [`AlreadyMerged`][already-merged] for an entity that is already merged, into the same survivor or another: unmerge it first. The checks read the registry, so catch the projector up before you make them.
 
 ## 4. Plan the re-keys
 
@@ -430,3 +430,4 @@ A belief id in the index cannot be re-minted by this registry: its predicate is 
 [plan-rekeys]: ../reference/anagrapheus/beliefs/rekey.md#anagrapheus.beliefs.rekey.plan_rekeys
 [resolution-sole]: ../reference/anagrapheus/identity/registry.md#anagrapheus.identity.registry.Resolution.sole
 [ladder]: ../reference/anagrapheus/identity/ladder.md#anagrapheus.identity.ladder.Ladder
+[already-merged]: ../reference/anagrapheus/identity/errors.md#anagrapheus.identity.errors.AlreadyMerged

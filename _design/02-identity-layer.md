@@ -265,6 +265,24 @@ merges final.
   same batch merges the pair again, the unmerge's two targets both settle on the
   survivor, which is one successor rather than a ring; targets that settle on the
   same id are reported once.
+- **One survivor at a time (added 2026-10-13).** A merge of
+  an entity that is already merged used to re-point `merged_into` and move nothing,
+  because the first merge had already taken the forms. Those forms stayed on the
+  first survivor, and unmerging the second merge gave none of them back. Now
+  `merge(..., identity=registry)` raises `AlreadyMerged` for an absorbed entity that
+  is merged anywhere, the same survivor included, and says to unmerge first. One that
+  reaches the log anyway is folded as a no-op: the standing merge stays, both
+  entities' history records `merge_ignored`, and no re-key row is emitted. The first
+  application's decision row decides on a re-applied batch, as for an unmerge. The
+  alternative, letting the later merge win, would have had to carry the first
+  survivor's moved forms on to the new one and undo that on unmerge, which is a
+  second unmerge hidden inside a merge. Refusing keeps one merge per withdrawal.
+- **The planner follows the store.** `plan_rekeys` walks the batch in order and drops
+  what identity ignores: a merge of an entity the batch already merged and has not
+  given back, and an unmerge of a pair the batch left apart. Before this, `_onward`
+  followed the first of two merges while the store kept the second; now both keep
+  the first.
 - **API breaks, before 0.1.0.** `IdentityRole` has a fifth member, and
   `IdentityStore` has a new `unmerged()`, which third-party stores must implement.
-  Additive: `IdentityRegistry.merged_into()`, `NotMerged`, `OPTIONAL_ROLES`.
+  Additive: `IdentityRegistry.merged_into()`, `NotMerged`, `AlreadyMerged`,
+  `OPTIONAL_ROLES`.

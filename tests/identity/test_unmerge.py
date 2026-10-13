@@ -9,7 +9,9 @@ from typing import TYPE_CHECKING
 import pytest
 
 from anagrapheus.identity import (
+    AlreadyMerged,
     MergeCycle,
+    Merged,
     NotMerged,
     Unmerged,
     alias,
@@ -80,6 +82,23 @@ def test_merge_with_the_registry_allows_a_merge_that_closes_nothing(rig: Rig):
     rig.commit(merge(rig.types, kept=c, absorbed=b, identity=rig.registry))
 
     assert rig.registry.canonical(a) == c
+
+
+def test_merge_with_the_registry_refuses_an_entity_already_merged(rig: Rig):
+    """B is in A; merging B into C as well has to withdraw the first merge first."""
+    kept, absorbed = _pair(rig)
+    other, e = establish(rig.types, "other", provenance="x")
+    rig.commit(e)
+
+    with pytest.raises(AlreadyMerged, match=f"already merged into {kept}; unmerge it first"):
+        merge(rig.types, kept=other, absorbed=absorbed, identity=rig.registry)
+
+
+def test_merge_with_the_registry_refuses_the_same_merge_twice(rig: Rig):
+    kept, absorbed = _pair(rig)
+
+    with pytest.raises(AlreadyMerged, match="unmerge it first"):
+        merge(rig.types, kept=kept, absorbed=absorbed, identity=rig.registry)
 
 
 # -- the check on unmerge --------------------------------------------------------------
@@ -414,3 +433,79 @@ def test_unmerging_one_entity_keeps_a_form_another_merge_also_brought(rig: Rig):
     rig.commit(unmerge(rig.types, rig.registry, kept=kept, absorbed=c))
     assert {r.entity_id for r in rig.registry.resolve("ACME").candidates} == {b, c}
     _assert_replay_is_idempotent(rig)
+
+
+# -- a merge of an entity already merged -----------------------------------------------
+
+
+def test_a_second_merge_of_an_absorbed_entity_is_a_recorded_no_op(rig: Rig):
+    """
+    Built by hand, past the helper's check: the first merge stands.
+
+    Re-pointing would leave the forms the first merge moved on the first survivor,
+    where no unmerge of the second merge could reach them.
+    """
+    kept, absorbed = _pair(rig)
+    other, e = establish(rig.types, "other", provenance="x")
+    rig.commit(e)
+    before = snapshot(rig.store.connection)
+    seq_before = rig.store.last_seq()
+
+    at = rig.commit(rig.types.pending(Merged(kept=other, absorbed=absorbed)))
+
+    assert rig.registry.canonical(absorbed) == kept
+    assert rig.registry.resolve("acme-uk").sole() == kept
+    assert _kinds(rig, absorbed)[-1] == "merge_ignored"
+    assert _kinds(rig, other)[-1] == "merge_ignored"
+    assert json.loads(rig.registry.history(absorbed)[-1].detail)["merged_into"] == str(kept)
+    assert rig.registry.history(absorbed)[-1].seq == at
+    assert rig.registry.rekeys_since(seq_before) == []
+    after = snapshot(rig.store.connection)
+    assert after["identity_entities"] == before["identity_entities"]
+    assert after["identity_aliases"] == before["identity_aliases"]
+    assert after["identity_rekeys"] == before["identity_rekeys"]
+
+
+def test_unmerging_after_an_ignored_second_merge_restores_the_names(rig: Rig):
+    kept, absorbed = _pair(rig)
+    other, e = establish(rig.types, "other", provenance="x")
+    rig.commit(e, rig.types.pending(Merged(kept=other, absorbed=absorbed)))
+
+    rig.commit(unmerge(rig.types, rig.registry, kept=kept, absorbed=absorbed))
+
+    assert rig.registry.canonical(absorbed) == absorbed
+    assert rig.registry.resolve("acme-uk").sole() == absorbed
+    assert rig.registry.resolve("acme-old").sole() == absorbed
+    assert {r.surface_form for r in rig.registry.surface_forms(kept)} == {"acme"}
+    _assert_replay_is_idempotent(rig)
+    assert rig.registry.resolve("acme-uk").sole() == absorbed
+
+
+def test_the_same_merge_twice_then_unmerged_restores_the_names(rig: Rig):
+    kept, absorbed = _pair(rig)
+    rig.commit(rig.types.pending(Merged(kept=kept, absorbed=absorbed)))
+    assert _kinds(rig, absorbed)[-1] == "merge_ignored"
+
+    rig.commit(unmerge(rig.types, rig.registry, kept=kept, absorbed=absorbed))
+
+    assert rig.registry.resolve("acme-uk").sole() == absorbed
+    _assert_replay_is_idempotent(rig)
+    assert rig.registry.resolve("acme-uk").sole() == absorbed
+
+
+def test_a_merge_after_the_first_is_withdrawn_lands(rig: Rig):
+    """Ignored is decided at the merge's own position: B into A, out, then into C."""
+    kept, absorbed = _pair(rig)
+    other, e = establish(rig.types, "other", provenance="x")
+    rig.commit(
+        e,
+        rig.types.pending(Merged(kept=other, absorbed=absorbed)),
+        unmerge(rig.types, rig.registry, kept=kept, absorbed=absorbed),
+    )
+
+    rig.commit(merge(rig.types, kept=other, absorbed=absorbed, identity=rig.registry))
+
+    assert rig.registry.canonical(absorbed) == other
+    assert rig.registry.resolve("acme-uk").sole() == other
+    _assert_replay_is_idempotent(rig)
+    assert rig.registry.resolve("acme-uk").sole() == other

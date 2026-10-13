@@ -34,6 +34,7 @@ from anagrapheus.identity.decisions import (
     unmerge,
 )
 from anagrapheus.identity.errors import (
+    AlreadyMerged,
     AmbiguousSurfaceForm,
     IdentityError,
     MergeCycle,
@@ -62,6 +63,7 @@ from anagrapheus.identity.vocabulary import (
 )
 
 __all__ = [
+    "AlreadyMerged",
     "ENTITY_PIN_KIND",
     "FOLD_NAME",
     "UNGRADED",

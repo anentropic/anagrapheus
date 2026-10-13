@@ -33,6 +33,8 @@ The five identity decisions are events with library-supplied shapes in `anagraph
 | split | [`Split`][split-event] | One id was covering several things; the names it assigns move to new entities |
 | unmerge | [`Unmerged`][unmerged] | A merge was wrong; `absorbed` stops yielding to `kept` and takes its names back |
 
+The history row for an establish records only the first name, not its stance; the stance is on the name itself, which [`surface_forms`][surface-forms] returns.
+
 The helpers [`establish`][establish], [`alias`][alias], [`merge`][merge], [`split`][split] and [`unmerge`][unmerge] each return a [`PendingEvent`][pending-event] rather than appending one. An identity decision almost always accompanies the domain event that prompted it, so the decision goes into your batch and your transaction. [`IdentityFold`][identity-fold] folds the decisions into an identity store, and [`IdentityRegistry`][identity-registry] answers questions from it.
 
 If your application already has its own event for one of these decisions (say an `EntityEstablished` in your own namespace), an [`IdentityVocabulary`][identity-vocabulary] binds each role to your event type and an adapter, so the fold reads your events and you never emit the library's. The default vocabulary binds the library's own events. The unmerge role is optional: a vocabulary that does not bind it still works, and simply cannot withdraw a merge.
@@ -72,6 +74,8 @@ Establishing an entity mints a fresh UUID, which consumes randomness just as a m
 
 A **merge** says two ids name one referent. In the projection, the absorbed entity points at the survivor, and its names move to the survivor so that resolving or splitting the survivor can reach them. Where both entities held the same name, the survivor's own record wins. The log is untouched, and `history()` still shows which entity originally recorded each name.
 
+An entity yields to one survivor at a time. To move an absorbed entity to a different survivor, unmerge it first and then merge it again. Pass the registry to `merge(..., identity=registry)` and it raises [`AlreadyMerged`][already-merged] for an entity that is already merged, into `kept` or anywhere else. A merge of an already-merged entity that reaches the log anyway changes nothing: the standing merge stays, the merge is recorded in both entities' history as ignored, and it emits no re-key rows.
+
 A merge cycle (A into B, then B into A) is a contradiction in the log. The fold records it as written; reading the canonical id raises [`MergeCycle`][merge-cycle] rather than looping. Pass the registry to `merge(..., identity=registry)` and it raises `MergeCycle` before the event exists instead. A cycle that reached the log anyway is repaired by unmerging one of its merges.
 
 An **unmerge** withdraws one merge: the direct merge of `absorbed` into `kept`. In the projection, `absorbed` stops pointing at `kept` and takes back the names the merge moved off it, including the names of anything that was merged into `absorbed` before. Some names stay where they are: a name `kept` recorded for itself (before the merge or since) stays on `kept` as well, as does a name that another merge into `kept`, still standing, also brought; and a name a later split moved to a new entity stays on that entity. [`unmerge(types, registry, kept=..., absorbed=...)`][unmerge] checks the registry before it builds the event, and raises [`NotMerged`][not-merged] if `absorbed` is not merged directly into `kept`. An unmerge that matches no merge when it is folded (one built by hand, say) changes nothing and is recorded in both entities' history as ignored; the fold does not raise, because the event is already in the log.
@@ -103,6 +107,7 @@ The planner handles the edge cases that would otherwise produce wrong plans quie
 - **Chains inside one batch compose.** If A is absorbed into B and B into C in the same batch, beliefs on A are planned straight onto C, not onto B, which the same batch has already superseded. A ring (A into B into A) raises [`MergeCycleInBatch`][merge-cycle-in-batch], because a ring has no last element to re-key onto.
 - **A split's rows stay together.** They are gathered into one plan with several candidates rather than reported as several confident single-target plans. [`BeliefRekey.sole()`][belief-rekey-sole] raises on a split's plan for the same reason `Resolution.sole()` raises on an ambiguous name. An unmerge's rows are gathered the same way.
 - **A merge withdrawn in the same batch is not followed.** If B is merged into A and the merge is withdrawn later in the batch, beliefs on B are not planned onto A: B is canonical again, so they are already keyed correctly. A chain stops at a withdrawn merge too. If the same batch then merges B into A again, a belief on A has the one successor A, not two.
+- **A second merge of the same entity is not followed.** If B is merged into A and then into C with no unmerge between, beliefs on B are planned onto A, as the identity layer holds them. The merge into C plans nothing, because identity ignored it.
 - **A belief that cannot be re-minted is reported, not skipped.** An unknown minting scheme, an undeclared predicate or a malformed id raises [`UnrenderableBelief`][unrenderable-belief], with the underlying error as its cause. Pass `skip_unrenderable=True` only when you mean to drop such beliefs knowingly.
 
 ### Why the library stops at the plan
@@ -120,7 +125,7 @@ The negotiation example's `examples/negotiation/rekeying.py` is a complete versi
 | The library | Your application |
 |---|---|
 | Recording decisions as events, and folding them | Whether two names are one entity (or one name two), and whether a merge was a mistake |
-| Refusing, before append, a merge that closes a cycle or an unmerge with no merge, when given the registry | Passing the registry, current, to `merge` |
+| Refusing, before append, a merge of an entity already merged, a merge that closes a cycle, or an unmerge with no merge, when given the registry | Passing the registry, current, to `merge` |
 | Exact, NFC-normalised matching | Any looser normalisation of names |
 | Returning candidates; raising on an ambiguous `sole()` | Choosing among candidates |
 | Ordering by a ladder you declare | The stance vocabulary and its order; provenance strings |
@@ -140,6 +145,7 @@ For the procedure, see [How to Resolve Identity and Re-key Beliefs After a Merge
 [resolve]: ../reference/anagrapheus/identity/registry.md#anagrapheus.identity.registry.IdentityRegistry.resolve
 [canonical]: ../reference/anagrapheus/identity/registry.md#anagrapheus.identity.registry.IdentityRegistry.canonical
 [history]: ../reference/anagrapheus/identity/registry.md#anagrapheus.identity.registry.IdentityRegistry.history
+[surface-forms]: ../reference/anagrapheus/identity/registry.md#anagrapheus.identity.registry.IdentityRegistry.surface_forms
 [rekeys-since]: ../reference/anagrapheus/identity/registry.md#anagrapheus.identity.registry.IdentityRegistry.rekeys_since
 [identity-vocabulary]: ../reference/anagrapheus/identity/vocabulary.md#anagrapheus.identity.vocabulary.IdentityVocabulary
 [ladder]: ../reference/anagrapheus/identity/ladder.md#anagrapheus.identity.ladder.Ladder
@@ -157,5 +163,6 @@ For the procedure, see [How to Resolve Identity and Re-key Beliefs After a Merge
 [ambiguous-surface-form]: ../reference/anagrapheus/identity/errors.md#anagrapheus.identity.errors.AmbiguousSurfaceForm
 [merge-cycle]: ../reference/anagrapheus/identity/errors.md#anagrapheus.identity.errors.MergeCycle
 [not-merged]: ../reference/anagrapheus/identity/errors.md#anagrapheus.identity.errors.NotMerged
+[already-merged]: ../reference/anagrapheus/identity/errors.md#anagrapheus.identity.errors.AlreadyMerged
 [merge-cycle-in-batch]: ../reference/anagrapheus/beliefs/errors.md#anagrapheus.beliefs.errors.MergeCycleInBatch
 [unrenderable-belief]: ../reference/anagrapheus/beliefs/errors.md#anagrapheus.beliefs.errors.UnrenderableBelief

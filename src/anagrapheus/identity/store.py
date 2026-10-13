@@ -88,7 +88,13 @@ class IdentityStore(Protocol):
         ...
 
     def merged(self, event: Merged, seq: int) -> None:
-        """Point the absorbed entity at the kept one and record the re-key."""
+        """
+        Point the absorbed entity at the kept one and record the re-key.
+
+        When the absorbed entity is already merged, it changes nothing but both
+        entities' history, and must not raise: the standing merge stays, and the event
+        is already in the log.
+        """
         ...
 
     def split(self, event: Split, seq: int) -> None:

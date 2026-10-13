@@ -54,6 +54,8 @@ So the fold builds no key. The summariser does, by drawing through [`PinnedModel
 
 The projector normally applies a batch inside one database transaction, so a projection's state and its position commit together. A model call inside that transaction would hold SQLite's write lock for as long as the model takes to answer, blocking every append in the process. So the chronicle does its drawing in `prepare(event)`, which the projector calls for every event in a batch before it opens the transaction, and `apply` only writes what was prepared. Consolidation is background work; it must never stall the turn that is happening now.
 
+If `apply` fails part-way through a batch, the draws it has already used are lost with the batch, so the next `catch_up()` makes those model calls again: that costs money, but the anchors come out the same.
+
 That also means the chronicle should run on its own [`Projector`][projector], driven on its own schedule, separate from the projector that keeps beliefs and identity current before each turn.
 
 ## Two read surfaces at two grades

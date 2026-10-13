@@ -415,3 +415,95 @@ def test_merged_withdrawn_and_merged_again_leaves_the_survivor_one_successor(rig
     )
 
     assert [(p.seq, p.sole()) for p in plans] == [(10, rig.predicates.belief_id("location", kept))]
+
+
+def test_a_second_merge_of_an_absorbed_entity_plans_nothing(rig: Rig):
+    """
+    B into A, then B into C with no unmerge between: the first merge stands.
+
+    The identity layer ignores the second, so planning it would move beliefs on B onto
+    an entity B never yielded to.
+    """
+    a, b, c = uuid.uuid7(), uuid.uuid7(), uuid.uuid7()
+    rig.commit(rig.asserted("location", b))
+
+    plans = plan_rekeys(
+        [
+            RekeyRow(seq=9, kind="merge", from_entity=b, to_entity=a),
+            RekeyRow(seq=10, kind="merge", from_entity=b, to_entity=c),
+        ],
+        rig.index,
+        rig.predicates,
+    )
+
+    assert [(p.seq, p.sole()) for p in plans] == [(9, rig.predicates.belief_id("location", a))]
+
+
+def test_a_chain_through_an_entity_merged_twice_follows_the_first_merge(rig: Rig):
+    """X into B, B into A, B into C: beliefs on X settle on A."""
+    x, a, b, c = uuid.uuid7(), uuid.uuid7(), uuid.uuid7(), uuid.uuid7()
+    rig.commit(rig.asserted("location", x))
+
+    plans = plan_rekeys(
+        [
+            RekeyRow(seq=8, kind="merge", from_entity=x, to_entity=b),
+            RekeyRow(seq=9, kind="merge", from_entity=b, to_entity=a),
+            RekeyRow(seq=10, kind="merge", from_entity=b, to_entity=c),
+        ],
+        rig.index,
+        rig.predicates,
+    )
+
+    assert [p.sole() for p in plans] == [rig.predicates.belief_id("location", a)]
+
+
+def test_a_merge_after_an_ignored_one_and_an_unmerge_lands(rig: Rig):
+    """
+    B into A, B into C (ignored), B out of A, B into D: the last merge holds.
+
+    The ignored merge to C was never withdrawn, but it never stood either, so it does
+    not stop B yielding to D.
+    """
+    a, b, c, d = uuid.uuid7(), uuid.uuid7(), uuid.uuid7(), uuid.uuid7()
+    rig.commit(rig.asserted("location", b))
+
+    plans = plan_rekeys(
+        [
+            RekeyRow(seq=9, kind="merge", from_entity=b, to_entity=a),
+            RekeyRow(seq=10, kind="merge", from_entity=b, to_entity=c),
+            RekeyRow(seq=11, kind="unmerge", from_entity=a, to_entity=a),
+            RekeyRow(seq=11, kind="unmerge", from_entity=a, to_entity=b),
+            RekeyRow(seq=12, kind="merge", from_entity=b, to_entity=d),
+        ],
+        rig.index,
+        rig.predicates,
+    )
+
+    assert [(p.seq, p.sole()) for p in plans] == [(12, rig.predicates.belief_id("location", d))]
+
+
+def test_the_planner_and_the_identity_layer_agree_on_a_double_merge(rig: Rig):
+    """The rows identity emits for B into A then B into C, end to end, in one batch."""
+    identity_store = SQLiteIdentityStore(rig.store.connection)
+    identity = IdentityRegistry(identity_store)
+    projector = Projector(
+        rig.store,
+        EventReader(rig.store, UpcastRegistry(), rig.types),
+        [IdentityFold(identity_store, rig.types), rig.fold],
+    )
+    a, ea = establish(rig.types, "a", provenance="x")
+    b, eb = establish(rig.types, "b", provenance="x")
+    c, ec = establish(rig.types, "c", provenance="x")
+    rig.store.append([ea, eb, ec, rig.asserted("location", b)])
+    projector.catch_up()
+    before = rig.store.last_seq()
+
+    # The second merge is built without the registry, so nothing refuses it.
+    rig.store.append([merge(rig.types, kept=a, absorbed=b), merge(rig.types, kept=c, absorbed=b)])
+    projector.catch_up()
+
+    plans = plan_rekeys(identity.rekeys_since(before), rig.index, rig.predicates)
+    assert identity.canonical(b) == a
+    assert [p.sole() for p in plans] == [
+        rig.predicates.belief_id("location", identity.canonical(b))
+    ]

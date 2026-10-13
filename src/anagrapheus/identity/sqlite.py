@@ -58,6 +58,24 @@ class SQLiteIdentityStore:
         )
 
     def merged(self, event: Merged, seq: int) -> None:
+        if self._decision_detail(seq, event.absorbed, "merge_ignored") is not None:
+            return
+        # An entity yields to one survivor at a time. Re-pointing an absorbed entity
+        # would leave what its standing merge moved on the first survivor, out of reach
+        # of any unmerge, so a merge of one that is already merged changes nothing. The
+        # first application decides: on a re-applied batch the entity may be merged
+        # now only because this merge landed then.
+        if self._decision_detail(seq, event.absorbed, "absorbed") is None:
+            absorbed = self.entity(event.absorbed)
+            if absorbed is not None and absorbed.merged_into is not None:
+                ignored = {
+                    "kept": str(event.kept),
+                    "absorbed": str(event.absorbed),
+                    "merged_into": str(absorbed.merged_into),
+                }
+                self._decision(seq, event.absorbed, "merge_ignored", ignored)
+                self._decision(seq, event.kept, "merge_ignored", ignored)
+                return
         self._conn.execute(
             "UPDATE identity_entities SET merged_into = ?, merged_seq = ? WHERE entity_id = ?",
             (str(event.kept), seq, str(event.absorbed)),

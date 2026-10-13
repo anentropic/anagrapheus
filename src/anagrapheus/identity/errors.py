@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 __all__ = [
+    "AlreadyMerged",
     "AmbiguousSurfaceForm",
     "IdentityError",
     "MergeCycle",
@@ -25,6 +26,17 @@ class MergeCycle(IdentityError):
 
     Also raised before append by :func:`~anagrapheus.identity.decisions.merge` when it
     is given the registry and the merge would close a cycle.
+    """
+
+
+class AlreadyMerged(IdentityError):
+    """
+    A merge named an absorbed entity that already yields to another.
+
+    Raised before append by :func:`~anagrapheus.identity.decisions.merge` when it is
+    given the registry and ``absorbed`` is already merged, into ``kept`` or anywhere
+    else. An entity yields to one survivor at a time: unmerge it first, then merge it
+    where it belongs.
     """
 
 

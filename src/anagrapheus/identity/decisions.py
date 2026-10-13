@@ -18,7 +18,7 @@ import uuid
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from anagrapheus.identity.errors import MergeCycle, NotMerged
+from anagrapheus.identity.errors import AlreadyMerged, MergeCycle, NotMerged
 from anagrapheus.identity.events import (
     Aliased,
     Established,
@@ -160,12 +160,25 @@ def merge(
     each of them.
 
     Pass ``identity``, the registry as it currently stands, to have the merge checked
-    before it exists: if ``kept`` already yields, directly or through a chain, to
-    ``absorbed``, this raises :class:`~anagrapheus.identity.errors.MergeCycle` instead
-    of returning an event that would leave both entities with no canonical id. The
-    check is only as current as the registry, so catch it up first.
+    before it exists. If ``absorbed`` is already merged, into ``kept`` or anywhere
+    else, this raises :class:`~anagrapheus.identity.errors.AlreadyMerged`: an entity
+    yields to one survivor at a time, so withdraw the standing merge with
+    :func:`unmerge` first. If ``kept`` already yields, directly or through a chain, to
+    ``absorbed``, it raises :class:`~anagrapheus.identity.errors.MergeCycle` instead of
+    returning an event that would leave both entities with no canonical id. The checks
+    are only as current as the registry, so catch it up first.
+
+    Without the checks, a merge of an entity that is already merged is folded as a
+    recorded no-op: the standing merge stays, and the history of both entities named
+    in the new one says it was ignored.
     """
     if identity is not None:
+        current = identity.merged_into(absorbed)
+        if current is not None:
+            raise AlreadyMerged(
+                f"cannot merge {absorbed} into {kept}: it is already merged into "
+                f"{current}; unmerge it first"
+            )
         _refuse_cycle(identity, kept=kept, absorbed=absorbed)
     event = Merged(kept=kept, absorbed=absorbed, source_event=source_event)
     return registry.pending(event, correlation_id=correlation_id)
