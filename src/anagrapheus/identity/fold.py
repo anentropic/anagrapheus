@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from anagrapheus.identity.events import Aliased, Established, Merged, Split
+from anagrapheus.identity.events import Aliased, Established, Merged, Split, Unmerged
 from anagrapheus.identity.vocabulary import IdentityRole, IdentityVocabulary
 from anagrapheus.timeline.registry import EventKey
 
@@ -72,6 +72,10 @@ class IdentityFold:
                 self._store.merged(decision, event.seq)
             case IdentityRole.SPLIT, Split():
                 self._store.split(decision, event.seq)
+            case IdentityRole.UNMERGED, Unmerged():
+                # The store records an unmerge that matches no current merge as a
+                # no-op rather than raising: it is canon, and replay would hit it again.
+                self._store.unmerged(decision, event.seq)
             case _:
                 raise TypeError(
                     f"vocabulary adapted {envelope.type!r} for role {role.value!r} "

@@ -4,9 +4,13 @@ Which event types mean what, so the fold never depends on the application's name
 The stream's vocabulary belongs to whoever owns the domain, and identity is the first
 library layer that wants to emit domain-shaped events. The rule from doc 00 §8 —
 *the library ships the shape, the application owns the name* — is honoured here by
-binding each of the four identity **roles** to an event type rather than hard-coding
-a class: a consumer that already emits ``EntityEstablished`` binds that and never sees
-a library type.
+binding each identity **role** to an event type rather than hard-coding a class: a
+consumer that already emits ``EntityEstablished`` binds that and never sees a library
+type.
+
+Four roles are required. The fifth, :attr:`IdentityRole.UNMERGED`, is optional: a
+vocabulary written before it existed keeps working, and simply has no way to withdraw
+a merge until it binds one.
 
 The default binds this module's own models under the reserved ``"anagrapheus"``
 namespace, so an application with no opinion gets a working layer. Same relationship
@@ -19,7 +23,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Final, Self
 
-from anagrapheus.identity.events import Aliased, Established, Merged, Split
+from anagrapheus.identity.events import Aliased, Established, Merged, Split, Unmerged
 from anagrapheus.timeline.registry import RESERVED_NAMESPACE, EventKey
 
 if TYPE_CHECKING:
@@ -28,18 +32,33 @@ if TYPE_CHECKING:
     from anagrapheus.timeline.envelope import DomainEvent
     from anagrapheus.timeline.registry import EventTypeRegistry
 
-__all__ = ["IdentityRole", "IdentityVocabulary", "RoleBinding", "register_builtin_events"]
+__all__ = [
+    "OPTIONAL_ROLES",
+    "IdentityRole",
+    "IdentityVocabulary",
+    "RoleBinding",
+    "register_builtin_events",
+]
 
-type IdentityDecision = Established | Aliased | Merged | Split
+type IdentityDecision = Established | Aliased | Merged | Split | Unmerged
 
 
 class IdentityRole(StrEnum):
-    """The four decisions an identity layer records."""
+    """
+    The decisions an identity layer records.
+
+    Every role but :attr:`UNMERGED` must be bound by a vocabulary; that one is optional.
+    """
 
     ESTABLISHED = "established"
     ALIASED = "aliased"
     MERGED = "merged"
     SPLIT = "split"
+    UNMERGED = "unmerged"
+
+
+#: Roles a vocabulary may leave unbound. Events for an unbound role are not folded.
+OPTIONAL_ROLES: Final[frozenset[IdentityRole]] = frozenset({IdentityRole.UNMERGED})
 
 
 @dataclass(frozen=True)
@@ -77,6 +96,7 @@ _DEFAULT_MODELS: Final[Mapping[IdentityRole, type[DomainEvent]]] = {
     IdentityRole.ALIASED: Aliased,
     IdentityRole.MERGED: Merged,
     IdentityRole.SPLIT: Split,
+    IdentityRole.UNMERGED: Unmerged,
 }
 
 
@@ -87,10 +107,15 @@ def register_builtin_events(registry: EventTypeRegistry) -> None:
 
 
 class IdentityVocabulary:
-    """Maps event types to identity roles, and their payloads to this library's shape."""
+    """
+    Maps event types to identity roles, and their payloads to this library's shape.
+
+    Every role must be bound except those in :data:`OPTIONAL_ROLES`, which today is
+    :attr:`IdentityRole.UNMERGED` alone.
+    """
 
     def __init__(self, bindings: Mapping[IdentityRole, RoleBinding]) -> None:
-        missing = set(IdentityRole) - set(bindings)
+        missing = set(IdentityRole) - OPTIONAL_ROLES - set(bindings)
         if missing:
             names = ", ".join(sorted(role.value for role in missing))
             raise ValueError(f"vocabulary is missing a binding for: {names}")

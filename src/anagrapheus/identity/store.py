@@ -1,8 +1,8 @@
 """
 The identity projection's storage port.
 
-Four write methods — one per role — and the reads the registry answers with. Keeping
-the writes role-shaped rather than table-shaped means the fold is a four-way dispatch
+One write method per role, and the reads the registry answers with. Keeping the
+writes role-shaped rather than table-shaped means the fold is a plain dispatch
 and every rule about *how* a decision lands (which aliases move, what a merge records
 for the belief layer) lives in one adapter instead of being spread across the fold.
 
@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, NamedTuple, Protocol
 if TYPE_CHECKING:
     from uuid import UUID
 
-    from anagrapheus.identity.events import Aliased, Established, Merged, Split
+    from anagrapheus.identity.events import Aliased, Established, Merged, Split, Unmerged
     from anagrapheus.identity.ladder import Ladder
 
 __all__ = ["AliasRow", "DecisionRow", "EntityRow", "IdentityStore", "RekeyRow"]
@@ -64,6 +64,10 @@ class RekeyRow(NamedTuple):
     belongs to depends on what the belief says, which this layer is forbidden to
     interpret. Several rows sharing a ``from_entity`` at one ``seq`` is how that
     ambiguity is stated.
+
+    An unmerge has the split's shape: two rows from the kept entity, one naming the
+    kept entity itself and one the entity it gave back. A belief keyed on the kept id
+    may have been about either of them all along, and only what it says can tell.
     """
 
     seq: int
@@ -89,6 +93,19 @@ class IdentityStore(Protocol):
 
     def split(self, event: Split, seq: int) -> None:
         """Carve new entities out of one, moving the named forms and recording re-keys."""
+        ...
+
+    def unmerged(self, event: Unmerged, seq: int) -> None:
+        """
+        Withdraw the merge of ``event.absorbed`` into ``event.kept``.
+
+        Clears the absorbed entity's ``merged_into``, gives it back the surface forms
+        the merge moved onto ``kept`` (a form ``kept`` has since recorded for itself,
+        or that another merge into ``kept`` still standing also brought, stays on
+        both) and records the re-key rows. When the absorbed entity is not
+        directly merged into ``kept``, it changes nothing but both entities' history,
+        and must not raise: the event is already in the log.
+        """
         ...
 
     def entity(self, entity_id: UUID) -> EntityRow | None:

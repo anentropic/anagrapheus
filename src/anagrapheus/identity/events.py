@@ -3,8 +3,8 @@ The identity decisions, as event payloads.
 
 Identity decisions are events rather than rows in a mutable side table, so the
 registry that answers "which entity is this?" is a fold: rebuildable, disposable,
-replayable and auditable. A bad merge is undone by superseding it, not by mutating a
-table.
+replayable and auditable. A bad merge is undone by appending an :class:`Unmerged`
+that withdraws it, not by mutating a table.
 
 Be clear about what this buys. It makes identity decisions durable, auditable and
 reversible. It does **not** make them automatic — something still has to judge that
@@ -31,6 +31,7 @@ __all__ = [
     "Merged",
     "Split",
     "SplitAssignment",
+    "Unmerged",
     "normalize_surface_form",
 ]
 
@@ -93,7 +94,8 @@ class Merged(DomainEvent, frozen=True):
 
     A correction that appends rather than edits. ``source_event`` names the event that
     justified the decision, when one exists — the envelope's ``causation_id`` is the
-    general mechanism, this is the specific evidence.
+    general mechanism, this is the specific evidence. A merge that should not have
+    happened is withdrawn by a later :class:`Unmerged`.
     """
 
     kept: UUID
@@ -104,6 +106,36 @@ class Merged(DomainEvent, frozen=True):
     def _distinct(self) -> Merged:
         if self.kept == self.absorbed:
             raise ValueError("an entity cannot be merged into itself")
+        return self
+
+
+class Unmerged(DomainEvent, frozen=True):
+    """
+    A merge was wrong after all; ``absorbed`` stops yielding to ``kept``.
+
+    The withdrawal of one :class:`Merged`, appended rather than edited in: the merge
+    stays in the log and in ``history()``, and this event says it no longer holds. In
+    the projection ``absorbed`` becomes canonical again and takes back the surface
+    forms the merge moved off it. A form ``kept`` has recorded for itself since stays
+    on ``kept`` as well, because both entities now claim it and choosing between them
+    is not this layer's call.
+
+    It withdraws the *direct* merge of ``absorbed`` into ``kept`` and nothing else.
+    When ``absorbed`` is not merged into ``kept`` at the point this event is folded,
+    the fold records it in both entities' history as having changed nothing, rather
+    than raising: the log is canon, and a fold that raised would be stuck on it for
+    good. :func:`~anagrapheus.identity.decisions.unmerge` checks before append, so
+    that case is reachable only by building the event by hand.
+    """
+
+    kept: UUID
+    absorbed: UUID
+    source_event: UUID | None = None
+
+    @model_validator(mode="after")
+    def _distinct(self) -> Unmerged:
+        if self.kept == self.absorbed:
+            raise ValueError("an entity cannot be unmerged from itself")
         return self
 
 

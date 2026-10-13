@@ -19,7 +19,7 @@ This guide shows how to record the model calls of an agent run into a recording 
 | Which events its domain has, and registering them | Registering its own events in one call |
 | What a unit of work is, and when to commit it | Keying every model call and recording the draw |
 | What goes in the recording header, and where the file lives | Writing and reading the recording format |
-| Whether a replay miss should stop the run or continue it | Detecting the miss and saying where it happened |
+| Whether a replay miss should stop the run or continue it, and which ledger a continued run is recorded in | Detecting the miss, saying where it happened, and recording the continued run |
 
 ## 1. Register every event type
 
@@ -143,7 +143,7 @@ print("model calls during replay:", model_calls - calls_before)
 
 ## Verify it worked
 
-Running the whole script prints:
+Running the script up to here prints:
 
 ```text
 recorded 1 pin(s) from 1 model call(s)
@@ -166,18 +166,33 @@ Record once against the provider, commit the recording file to your repository, 
 
 ## Continue past a miss instead of stopping
 
-Strict replay suits tests. When exploring ("what happens if the UK opens differently?"), use `on_miss="record"`: the first miss is recorded as a [`Divergence`][divergence], the call goes to the model, and the run continues as a new run. Pass `announce` to write that divergence into the log as a [`ReplayDiverged`][replay-diverged] event. Here `store` and `ledger` are the live log and ledger from step 3, before the store is closed:
+Strict replay suits tests. When exploring ("what happens if the UK opens differently?"), use `on_miss="record"` and give it a `PinLedger` to record the new run in, with `into=`. The first miss is recorded as a [`Divergence`][divergence], the call goes to the model, and the run continues as a new run. Every pin it uses lands in that ledger's scratch, both the ones it drew fresh and the ones it replayed:
 
-```python
-replay = ReplayPins.from_events(
-    store.read(),
-    types,
-    on_miss="record",
-    announce=ReplayPins.announce_to(store, types, unit_id=ledger.unit_id),
-)
+```python title="record_replay.py (continued)"
+branch = SQLiteEventStore(":memory:")
+branch_ledger = PinLedger(branch, types)
+explore = ReplayPins.from_events(recording.events, types, on_miss="record", into=branch_ledger)
+
+agent = Agent(PinnedModel(model, explore))
+agent.run_sync("UK delegation: make your opening offer on mackerel.")  # replayed
+agent.run_sync("UK delegation: now make your offer on herring.")  # a miss: drawn
+assert explore.divergence is not None
+print("diverged after", explore.divergence.after_hits, "hit(s)")
+
+branch_ledger.commit()
+print([event.envelope.type for event in branch.read()])
 ```
 
-Fresh draws made in record mode are held by the `ReplayPins` object for reuse within that run. They are not written to the log. To keep them, run the new branch through a `PinLedger` and commit it.
+It prints:
+
+```text
+diverged after 1 hit(s)
+['ReplayDiverged', 'PinPromoted', 'PinPromoted']
+```
+
+[`PinLedger.commit()`][pin-ledger-commit] promotes the new run's pins together with a [`ReplayDiverged`][replay-diverged] event that says where the replay ended, in one transaction. The branch's log therefore holds the whole new run, and a strict replay of `branch.read()` reproduces it without reaching the model. Until the commit, the pins sit in the scratch like any live run's, so a run that crashes part-way resumes from them instead of drawing again; [`PinLedger.abandon()`][pin-ledger-abandon] discards them.
+
+`on_miss="record"` without `into=` raises `ValueError`, because the fresh draws would otherwise never reach a log.
 
 ## Troubleshooting
 
@@ -216,6 +231,7 @@ The file is not a recording, or its header line was removed. [`read_recording`][
 
 [pin-ledger]: ../reference/anagrapheus/timeline/pins.md#anagrapheus.timeline.pins.PinLedger
 [pin-ledger-commit]: ../reference/anagrapheus/timeline/pins.md#anagrapheus.timeline.pins.PinLedger.commit
+[pin-ledger-abandon]: ../reference/anagrapheus/timeline/pins.md#anagrapheus.timeline.pins.PinLedger.abandon
 [replay-pins]: ../reference/anagrapheus/timeline/replay.md#anagrapheus.timeline.replay.ReplayPins
 [replay-from-events]: ../reference/anagrapheus/timeline/replay.md#anagrapheus.timeline.replay.ReplayPins.from_events
 [divergence]: ../reference/anagrapheus/timeline/replay.md#anagrapheus.timeline.replay.Divergence

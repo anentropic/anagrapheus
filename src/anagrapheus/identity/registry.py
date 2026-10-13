@@ -99,8 +99,8 @@ class IdentityRegistry:
         Follow an entity's merge chain to the id that survives.
 
         Raises :class:`~anagrapheus.identity.errors.MergeCycle` if the chain returns to
-        where it started — a contradiction in the log, correctable only by superseding
-        one of the merges.
+        where it started — a contradiction in the log, corrected by appending an
+        :class:`~anagrapheus.identity.events.Unmerged` that withdraws one of the merges.
         """
         seen = {entity_id}
         current = entity_id
@@ -113,6 +113,17 @@ class IdentityRegistry:
                 raise MergeCycle(f"merge chain from {entity_id} cycles at {current}")
             seen.add(current)
 
+    def merged_into(self, entity_id: UUID) -> UUID | None:
+        """
+        The entity this one was merged into directly, or ``None``.
+
+        One step of the chain :meth:`canonical` follows, and the merge an
+        :class:`~anagrapheus.identity.events.Unmerged` would withdraw. ``None`` for an
+        entity that is canonical, and for one nothing established.
+        """
+        row = self._store.entity(entity_id)
+        return None if row is None else row.merged_into
+
     def surface_forms(self, entity_id: UUID) -> list[AliasRow]:
         """Every surface form attached to an entity, as recorded."""
         return self._store.aliases(entity_id)
@@ -121,8 +132,8 @@ class IdentityRegistry:
         """
         The entity's audit trail, oldest first.
 
-        The reason the decisions are events: every establish, alias, merge and split
-        that touched this entity, in order, with the ``seq`` that anchors each to the
+        The reason the decisions are events: every establish, alias, merge, split and
+        unmerge that touched this entity, in order, with the ``seq`` that anchors each to the
         stream.
         """
         row = self._store.entity(entity_id)

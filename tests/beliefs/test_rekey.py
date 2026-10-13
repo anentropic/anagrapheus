@@ -13,7 +13,16 @@ from anagrapheus.beliefs import (
     UnrenderableBelief,
     plan_rekeys,
 )
+from anagrapheus.identity import (
+    IdentityFold,
+    IdentityRegistry,
+    SQLiteIdentityStore,
+    establish,
+    merge,
+    unmerge,
+)
 from anagrapheus.identity.store import RekeyRow
+from anagrapheus.timeline import EventReader, Projector, UpcastRegistry
 
 from .conftest import Rig, build_predicates
 
@@ -260,3 +269,149 @@ def test_an_unrenderable_belief_names_its_actual_cause(rig: Rig):
         plan_rekeys(rows, rig.index, _registry_without_location())
 
     assert isinstance(caught.value.__cause__, UnknownPredicate)
+
+
+def test_an_unmerge_yields_two_candidates_and_refuses_to_choose(rig: Rig):
+    """
+    An unmerge is a split's question again.
+
+    A belief keyed on the survivor may have been about the entity it gave back all
+    along, and only what the belief says can tell. So the plan names both, the
+    survivor's own id included, and ``sole()`` refuses.
+    """
+    kept, absorbed = uuid.uuid7(), uuid.uuid7()
+    rig.commit(rig.asserted("location", kept))
+
+    plans = plan_rekeys(
+        [
+            RekeyRow(seq=9, kind="unmerge", from_entity=kept, to_entity=kept),
+            RekeyRow(seq=9, kind="unmerge", from_entity=kept, to_entity=absorbed),
+        ],
+        rig.index,
+        rig.predicates,
+    )
+
+    assert len(plans) == 1
+    assert set(plans[0].candidates) == {
+        rig.predicates.belief_id("location", kept),
+        rig.predicates.belief_id("location", absorbed),
+    }
+    with pytest.raises(ValueError, match="2 candidate successors after an unmerge"):
+        plans[0].sole()
+
+
+def test_a_merge_withdrawn_later_in_the_batch_plans_nothing(rig: Rig):
+    """
+    B into A, then that merge withdrawn, in one batch: B is canonical again.
+
+    A belief keyed on B is already keyed correctly. Planning the merge alone would
+    move it confidently onto A, which the same batch has taken back.
+    """
+    kept, absorbed = uuid.uuid7(), uuid.uuid7()
+    rig.commit(rig.asserted("location", absorbed))
+
+    plans = plan_rekeys(
+        [
+            RekeyRow(seq=9, kind="merge", from_entity=absorbed, to_entity=kept),
+            RekeyRow(seq=10, kind="unmerge", from_entity=kept, to_entity=kept),
+            RekeyRow(seq=10, kind="unmerge", from_entity=kept, to_entity=absorbed),
+        ],
+        rig.index,
+        rig.predicates,
+    )
+
+    assert plans == []
+
+
+def test_a_chain_stops_at_a_merge_withdrawn_later_in_the_batch(rig: Rig):
+    """A into B, B into C, then B taken back from C: beliefs on A settle on B."""
+    a, b, c = uuid.uuid7(), uuid.uuid7(), uuid.uuid7()
+    rig.commit(rig.asserted("location", a), rig.asserted("location", c))
+
+    plans = plan_rekeys(
+        [
+            RekeyRow(seq=9, kind="merge", from_entity=a, to_entity=b),
+            RekeyRow(seq=10, kind="merge", from_entity=b, to_entity=c),
+            RekeyRow(seq=11, kind="unmerge", from_entity=c, to_entity=c),
+            RekeyRow(seq=11, kind="unmerge", from_entity=c, to_entity=b),
+        ],
+        rig.index,
+        rig.predicates,
+    )
+
+    by_belief = {p.belief_id: p for p in plans}
+    assert by_belief[rig.predicates.belief_id("location", a)].sole() == (
+        rig.predicates.belief_id("location", b)
+    )
+    assert len(by_belief[rig.predicates.belief_id("location", c)].candidates) == 2
+
+
+def test_a_merge_redone_after_an_unmerge_is_followed(rig: Rig):
+    """Merged, withdrawn, merged again: the second merge is the one that holds."""
+    kept, absorbed = uuid.uuid7(), uuid.uuid7()
+    rig.commit(rig.asserted("location", absorbed))
+
+    plans = plan_rekeys(
+        [
+            RekeyRow(seq=9, kind="merge", from_entity=absorbed, to_entity=kept),
+            RekeyRow(seq=10, kind="unmerge", from_entity=kept, to_entity=kept),
+            RekeyRow(seq=10, kind="unmerge", from_entity=kept, to_entity=absorbed),
+            RekeyRow(seq=11, kind="merge", from_entity=absorbed, to_entity=kept),
+        ],
+        rig.index,
+        rig.predicates,
+    )
+
+    assert [(p.seq, p.sole()) for p in plans] == [(11, rig.predicates.belief_id("location", kept))]
+
+
+def test_an_unmerge_from_the_identity_layer_plans_as_ambiguous(rig: Rig):
+    """The rows identity actually emits, end to end, not hand-built ones."""
+    identity_store = SQLiteIdentityStore(rig.store.connection)
+    identity = IdentityRegistry(identity_store)
+    projector = Projector(
+        rig.store,
+        EventReader(rig.store, UpcastRegistry(), rig.types),
+        [IdentityFold(identity_store, rig.types), rig.fold],
+    )
+    kept, e1 = establish(rig.types, "acme", provenance="crm")
+    absorbed, e2 = establish(rig.types, "acme-old", provenance="import")
+    rig.store.append([e1, e2, merge(rig.types, kept=kept, absorbed=absorbed)])
+    rig.store.append([rig.asserted("location", kept)])
+    projector.catch_up()
+    before = rig.store.last_seq()
+
+    rig.store.append([unmerge(rig.types, identity, kept=kept, absorbed=absorbed)])
+    projector.catch_up()
+
+    plans = plan_rekeys(identity.rekeys_since(before), rig.index, rig.predicates)
+    assert len(plans) == 1
+    assert plans[0].kind == "unmerge"
+    assert set(plans[0].candidates) == {
+        rig.predicates.belief_id("location", kept),
+        rig.predicates.belief_id("location", absorbed),
+    }
+
+
+def test_merged_withdrawn_and_merged_again_leaves_the_survivor_one_successor(rig: Rig):
+    """
+    A belief on the survivor through merge, unmerge, merge in one batch.
+
+    The id the unmerge gave back is absorbed again, so both of the unmerge's targets
+    end on the survivor: one successor, not a ring.
+    """
+    kept, absorbed = uuid.uuid7(), uuid.uuid7()
+    rig.commit(rig.asserted("location", kept))
+
+    plans = plan_rekeys(
+        [
+            RekeyRow(seq=9, kind="merge", from_entity=absorbed, to_entity=kept),
+            RekeyRow(seq=10, kind="unmerge", from_entity=kept, to_entity=kept),
+            RekeyRow(seq=10, kind="unmerge", from_entity=kept, to_entity=absorbed),
+            RekeyRow(seq=11, kind="merge", from_entity=absorbed, to_entity=kept),
+        ],
+        rig.index,
+        rig.predicates,
+    )
+
+    assert [(p.seq, p.sole()) for p in plans] == [(10, rig.predicates.belief_id("location", kept))]
