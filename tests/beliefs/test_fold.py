@@ -265,7 +265,7 @@ _OPS = st.sampled_from(["revise", "expand", "contract"])
 _STANCES = st.sampled_from(list(Stance))
 
 
-@settings(deadline=None, max_examples=40)
+@settings(deadline=None)
 @given(
     plan=st.lists(
         st.tuples(

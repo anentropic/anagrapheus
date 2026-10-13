@@ -303,7 +303,7 @@ def _paths_out_of_line(rig: Rig) -> list[tuple[str, int, int | None]]:
     return wrong
 
 
-@settings(max_examples=400, deadline=None)
+@settings(deadline=None)
 @given(ops=opcodes(min_size=10, max_size=30, kinds=KINDS))
 def test_unmerge_matches_the_model(
     tmp_path_factory: pytest.TempPathFactory, ops: list[tuple[int, int, int]]

@@ -144,7 +144,7 @@ def test_duplicate_fold_names_rejected(tmp_path: Path):
         Projector(store, reader, [MemoryLog(), MemoryLog()])
 
 
-@settings(max_examples=25, deadline=None)
+@settings(deadline=None)
 @given(
     values=st.lists(st.integers(min_value=0, max_value=100), min_size=0, max_size=40),
     batch_size=st.integers(min_value=1, max_value=7),
