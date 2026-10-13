@@ -100,9 +100,9 @@ The **call policy** reduces a model request to the material its key is hashed fr
     - the model id;
     - the conversation's content, part by part;
     - the request parameters: tool definitions (sorted by name), output schema and instructions;
-    - settings that change the draw, such as `temperature` or `max_tokens`.
+    - settings that change the draw, such as `temperature`, `max_tokens`, or reasoning settings sent in `extra_body`.
 
-    It drops what differs between two runs of the same call: timestamps, part and tool-call ids, provider names and details, metadata, and delivery settings (`timeout`, `extra_headers`, `service_tier`, prompt-cache options).
+    It drops what differs between two runs of the same call: timestamps, part and tool-call ids, provider names and details, metadata, delivery settings (`timeout`, `extra_headers`, `service_tier`, prompt-cache options), and session or user ids: `openai_user`, the `user_id` in `anthropic_metadata`, and inside `extra_body` the `session_id`, `user`, `safety_identifier` and `prompt_cache_key` keys and a `metadata` object's `user_id`. So you can send OpenRouter a per-game `session_id` without every new game missing its pins.
 
     ```python
     PinnedModel(FunctionModel(negotiator), ledger)  # SemanticCallPolicy()

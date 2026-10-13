@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import time
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
+import pytest
 from pydantic_ai import Agent
 from pydantic_ai.messages import (
     ModelRequest,
@@ -14,8 +16,14 @@ from pydantic_ai.messages import (
     ToolReturnPart,
     UserPromptPart,
 )
-from pydantic_ai.models import ModelRequestParameters
+from pydantic_ai.models import Model, ModelRequestParameters
+from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.function import FunctionModel
+from pydantic_ai.models.openai import OpenAIChatModel, OpenAIResponsesModel
+from pydantic_ai.models.openrouter import OpenRouterModel
+from pydantic_ai.providers.anthropic import AnthropicProvider
+from pydantic_ai.providers.openai import OpenAIProvider
+from pydantic_ai.providers.openrouter import OpenRouterProvider
 from pydantic_ai.tools import ToolDefinition
 
 from anagrapheus.provider import PinnedModel, SemanticCallPolicy
@@ -23,12 +31,13 @@ from anagrapheus.provider import PinnedModel, SemanticCallPolicy
 from .conftest import Counted, Rig, says
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Callable, Mapping, Sequence
 
     from pydantic_ai.messages import ModelMessage
     from pydantic_ai.settings import ModelSettings
 
     from anagrapheus.timeline._canonical import Json
+    from anagrapheus.timeline.pins import PinKey
 
 POLICY = SemanticCallPolicy()
 PARAMS = ModelRequestParameters()
@@ -309,3 +318,124 @@ def test_the_model_own_settings_are_keyed_with_the_run_ones(rig: Rig):
     on_run.run_sync("where?", model_settings={"temperature": 0.9})
 
     assert counted.count == 2
+
+
+@dataclass(frozen=True)
+class Route:
+    """
+    One provider route, and where a caller would put a session or user id on it.
+
+    ``settings`` builds the effective settings for a session id and an ``extra_body``
+    value that changes the draw; each route carries the id the way its provider takes it.
+    """
+
+    model: Callable[[], Model]
+    settings: Callable[[str, Json], ModelSettings]
+    low: Json
+    high: Json
+
+
+ROUTES = {
+    "anthropic": Route(
+        model=lambda: AnthropicModel("claude-sonnet-4-5", provider=AnthropicProvider(api_key="x")),
+        settings=lambda session, draw: cast(
+            "ModelSettings",
+            {
+                "anthropic_metadata": {"user_id": session},
+                "extra_body": {"metadata": {"user_id": session}, "thinking": draw},
+            },
+        ),
+        low={"type": "enabled", "budget_tokens": 1024},
+        high={"type": "enabled", "budget_tokens": 8192},
+    ),
+    "openai-chat": Route(
+        model=lambda: OpenAIChatModel("gpt-5", provider=OpenAIProvider(api_key="x")),
+        settings=lambda session, draw: cast(
+            "ModelSettings",
+            {
+                "openai_user": session,
+                "extra_body": {
+                    "safety_identifier": session,
+                    "prompt_cache_key": session,
+                    "reasoning_effort": draw,
+                },
+            },
+        ),
+        low="low",
+        high="high",
+    ),
+    "openai-responses": Route(
+        model=lambda: OpenAIResponsesModel("gpt-5", provider=OpenAIProvider(api_key="x")),
+        settings=lambda session, draw: cast(
+            "ModelSettings",
+            {
+                "openai_user": session,
+                "extra_body": {"user": session, "reasoning": {"effort": draw}},
+            },
+        ),
+        low="low",
+        high="high",
+    ),
+    "openrouter": Route(
+        model=lambda: OpenRouterModel(
+            "anthropic/claude-sonnet-4.5", provider=OpenRouterProvider(api_key="x")
+        ),
+        settings=lambda session, draw: cast(
+            "ModelSettings",
+            {
+                "openai_user": session,
+                "extra_body": {"session_id": session, "user": session, "reasoning": draw},
+            },
+        ),
+        low={"effort": "low"},
+        high={"effort": "high"},
+    ),
+}
+
+
+def route_key(rig: Rig, route: Route, settings: ModelSettings) -> PinKey:
+    """The pin key a real route's pinned model builds for one call with these settings."""
+    pinned = PinnedModel(route.model(), rig.ledger)
+    messages: list[ModelMessage] = [ModelRequest(parts=[UserPromptPart(content="hi")])]
+    return pinned._key(messages, settings, PARAMS)
+
+
+@pytest.mark.parametrize("name", ROUTES)
+def test_a_session_or_user_id_does_not_change_the_key(rig: Rig, name: str):
+    """
+    Two games sending different session ids ask the model the same thing.
+
+    The id is derived per game or per session; in the key it would make every new
+    session miss every pin, and nothing would say so.
+    """
+    route = ROUTES[name]
+
+    one = route_key(rig, route, route.settings("game-1", route.low))
+    two = route_key(rig, route, route.settings("game-2", route.low))
+
+    assert one == two
+
+
+@pytest.mark.parametrize("name", ROUTES)
+def test_a_draw_changing_extra_body_still_changes_the_key(rig: Rig, name: str):
+    """
+    Only the identity keys leave ``extra_body``; reasoning settings riding there stay.
+
+    Dropping ``extra_body`` whole would replay a low-effort answer for a high-effort call.
+    """
+    route = ROUTES[name]
+
+    low = route_key(rig, route, route.settings("game-1", route.low))
+    high = route_key(rig, route, route.settings("game-1", route.high))
+
+    assert low != high
+
+
+def test_an_extra_body_holding_only_a_session_id_keys_as_none():
+    """A call that only adds a session id keys as the same call sent without one."""
+    messages = [ModelRequest(parts=[UserPromptPart(content="hi")])]
+    with_session = cast("ModelSettings", {"extra_body": {"session_id": "game-1"}})
+    with_user = cast("ModelSettings", {"anthropic_metadata": {"user_id": "u"}})
+
+    assert material(messages, "m", PARAMS, with_session) == material(messages, "m", PARAMS)
+    assert material(messages, "m", PARAMS, with_user) == material(messages, "m", PARAMS)
