@@ -128,7 +128,9 @@ class Table:
         chronicle = SQLiteChronicleStore(store.connection)
         reader = EventReader(store, UpcastRegistry(), types)
         predicates = domain.predicates()
-        beliefs = BeliefFold(MemoryCore(InMemoryBackend()), predicates, index, types)
+        # Not durable: the beliefs are in memory, so the fold keeps its position with
+        # them and a reopened table folds the log again from the start.
+        beliefs = BeliefFold(MemoryCore(InMemoryBackend()), predicates, index, types, durable=False)
         # Both pure folds, always. A table without the belief fold is one with no
         # beliefs at all, and one without identity is one where `plan_rekeys` cannot
         # follow a merge. Leaving either to the caller meant every entry point
@@ -154,10 +156,9 @@ class Table:
             projector=Projector(store, reader, folds),
             settle=Projector(store, reader, pure),
         )
-        if store.read_position(FOLD_NAME):
-            # The position is in the file and the beliefs are in memory, so a reopened
-            # table would resume above beliefs it no longer holds. Fold them again.
-            table.rebuild_beliefs()
+        # Bring the pure folds current before anything reads them. On a reopened file
+        # this is where the in-memory beliefs come back.
+        table.settle.catch_up()
         for name in parties:
             table.seat(name)
         return table

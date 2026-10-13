@@ -22,6 +22,12 @@ and identical in everything else.
 - **Determinism.** The fold mints through the registry it holds and the interpreter is
   required to be pure. Edges name their target by :class:`~anagrapheus.beliefs.ops.StateRef`,
   which resolves to the same state on every fold; a ``state_id`` would not.
+- **Position.** The projector keeps a fold's position in the log's database, which is
+  only right if the beliefs outlive the process the way that database does. So the
+  fold is told, by a required ``durable`` flag, and a fold over a store that does not
+  outlive the process keeps its position on itself, from zero: reopen the log and
+  catch-up folds all of it again. Replaying over the surviving entity index is safe,
+  because the index upserts.
 - **Reset.** doxastica has no "clear". :meth:`BeliefFold.reset` takes the empty store to
   fold into — a fresh ``InMemoryBackend``, a new Ladybug database — and empties the
   index beside it. Whoever reads beliefs must then read the new store, which is why the
@@ -102,6 +108,18 @@ class BeliefFold:
     library's own :data:`~anagrapheus.beliefs.events.BUILTIN_INTERPRETERS`. Events no
     interpreter claims are skipped without being decoded — this fold shares the stream
     with the application's whole domain.
+
+    ``durable`` says whether ``store`` keeps its beliefs when the process ends, and is
+    **required, never defaulted**: a default of ``True`` would hand an in-memory store a
+    guarantee it cannot keep, silently, and the failure is a reopened log whose position
+    says the beliefs are folded over a store that is empty.
+
+    - ``durable=True`` (a ``LadybugBackend`` database, say): the position lives in the
+      log's database, as every other fold's does, so reopening resumes where it stopped.
+    - ``durable=False`` (``MemoryCore(InMemoryBackend())``): the position lives on this
+      object (:class:`~anagrapheus.timeline.folds.OwnsPosition`) and starts at zero, so
+      the first catch-up in each process folds the whole log again. The cost of a
+      reopen therefore grows with the log.
     """
 
     def __init__(
@@ -111,6 +129,7 @@ class BeliefFold:
         index: BeliefIndexStore,
         types: EventTypeRegistry,
         *,
+        durable: bool,
         interpret: Mapping[tuple[str, str], Interpreter] | None = None,
         name: str = FOLD_NAME,
     ) -> None:
@@ -120,6 +139,8 @@ class BeliefFold:
         self._types = types
         self._interpret = {**BUILTIN_INTERPRETERS, **(interpret or {})}
         self._name = name
+        self._durable = durable
+        self._position = 0
 
     @property
     def name(self) -> str:
@@ -129,6 +150,28 @@ class BeliefFold:
     #: Deterministic: minting is derivation and interpreters are pure, so the same log
     #: folds to the same beliefs.
     fold: FoldDeterminism = "deterministic"
+
+    @property
+    def durable(self) -> bool:
+        """Whether the store outlives the process, so the log's database holds the position."""
+        return self._durable
+
+    def read_position(self) -> int | None:
+        """
+        The position this fold keeps, or ``None`` if it is durable and the store keeps it.
+
+        Read it through :meth:`~anagrapheus.timeline.folds.Projector.position`, which
+        answers for either kind.
+        """
+        return None if self._durable else self._position
+
+    def commit_position(self, seq: int) -> None:
+        """Record the position of a non-durable fold. The projector calls it."""
+        if self._durable:
+            raise TypeError(
+                f"{self._name!r} is durable: its position is kept in the log's database"
+            )
+        self._position = seq
 
     @property
     def store(self) -> BeliefStore:

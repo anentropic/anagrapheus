@@ -11,6 +11,8 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from anagrapheus.beliefs import (
+    FOLD_NAME,
+    BeliefFold,
     Contract,
     Edge,
     Revise,
@@ -349,3 +351,83 @@ def _index(rig: Rig) -> dict[str, list[tuple[object, ...]]]:
         table: sorted(tuple(row) for row in rig.store.connection.execute(f"SELECT * FROM {table}"))  # noqa: S608
         for table in ("belief_ids", "belief_entities")
     }
+
+
+# -- where the position lives ----------------------------------------------------------
+
+
+def test_a_reopened_non_durable_fold_folds_the_whole_log_again(tmp_path: Path):
+    """
+    The beliefs went with the process, so the position must have gone with them.
+
+    Reopening hands the fold an empty in-memory store over a file whose entity index
+    survived. Catch-up replays everything over that index, which upserts, so the store
+    and the index both come back agreeing with the log, with no rebuild.
+    """
+    path = tmp_path / "reopen.db"
+    alice, bob = uuid.uuid7(), uuid.uuid7()
+    first = build_rig(path)
+    try:
+        first.commit(
+            first.events.revise("agent", "location", (alice,), "London"),
+            first.events.revise("agent", "knows", (alice, bob), True),
+            first.events.revise("rumour", "location", (alice,), "Paris"),
+        )
+        first.commit(first.events.contract("rumour", "location", (alice,)))
+        expected = (_index(first), beliefs_of(first.core, ("agent", "rumour")))
+    finally:
+        first.store.close()
+
+    second = build_rig(path)
+    try:
+        assert second.projector.position(FOLD_NAME) == 0
+        assert second.core.query_scope("agent", BeliefFilter()) == []
+
+        second.projector.catch_up()
+
+        assert second.projector.position(FOLD_NAME) == second.store.last_seq()
+        assert (_index(second), beliefs_of(second.core, ("agent", "rumour"))) == expected
+        # Never written to the file, so a later reopen cannot be misled by it either.
+        assert second.store.read_position(FOLD_NAME) == 0
+    finally:
+        second.store.close()
+
+
+def test_a_durable_fold_keeps_its_position_in_the_file(tmp_path: Path):
+    """
+    A store that outlives the process resumes where it stopped, and folds nothing twice.
+
+    One ``MemoryCore`` handed to both rigs stands in for a database that survived.
+    """
+    path = tmp_path / "durable.db"
+    core = MemoryCore(InMemoryBackend())
+    entity = uuid.uuid7()
+    first = build_rig(path, core=core, durable=True)
+    try:
+        last = first.commit(first.events.revise("agent", "location", (entity,), "London"))
+        assert first.store.read_position(FOLD_NAME) == last
+    finally:
+        first.store.close()
+
+    second = build_rig(path, core=core, durable=True)
+    try:
+        assert second.projector.position(FOLD_NAME) == last
+        before = beliefs_of(core, ("agent",))
+
+        second.projector.catch_up()
+        assert beliefs_of(core, ("agent",)) == before
+
+        later = second.commit(second.events.revise("agent", "location", (entity,), "Paris"))
+        assert second.store.read_position(FOLD_NAME) == later
+        belief_id = second.predicates.belief_id("location", entity)
+        assert [s.value for s in core.get_revision_chain(belief_id)] == ["London", "Paris"]
+    finally:
+        second.store.close()
+
+
+def test_a_durable_fold_refuses_to_hold_a_position(rig: Rig):
+    """Its position is the file's; one kept on the object as well could disagree with it."""
+    durable = BeliefFold(rig.core, rig.predicates, rig.index_store, rig.types, durable=True)
+    assert durable.read_position() is None
+    with pytest.raises(TypeError, match="durable"):
+        durable.commit_position(1)

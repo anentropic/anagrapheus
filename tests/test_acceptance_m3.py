@@ -65,7 +65,9 @@ def open_stack(path: Path, types: EventTypeRegistry, predicates: PredicateRegist
     identity_store = SQLiteIdentityStore(store.connection)
     index_store = SQLiteBeliefIndexStore(store.connection)
     reader = EventReader(store, UpcastRegistry(), types)
-    beliefs = BeliefFold(MemoryCore(InMemoryBackend()), predicates, index_store, types)
+    beliefs = BeliefFold(
+        MemoryCore(InMemoryBackend()), predicates, index_store, types, durable=False
+    )
     projector = Projector(store, reader, [IdentityFold(identity_store, types), beliefs])
     return (
         store,
@@ -171,30 +173,28 @@ def test_milestone_3_acceptance(tmp_path: Path):
 
     # -- crash: a fresh process, with nothing of the beliefs but the log -------------
     #
-    # This store is in memory, so it went with the process; the position did not, so
-    # catching up would resume above beliefs nobody holds. The fold is rebuilt instead,
-    # and everything comes back.
+    # This store is in memory, so it went with the process. The fold was told so
+    # (`durable=False`), and kept its position with the beliefs rather than in the
+    # file, so the fresh process starts from zero and catching up folds the whole log
+    # again. No rebuild: everything comes back.
     ledger.commit()
     store.close()
 
     fresh_types = EventTypeRegistry()
     register_builtin_events(fresh_types)
     store, beliefs, projector, identity, index = open_stack(path, fresh_types, predicates)
-    assert store.read_position(BELIEFS_FOLD) > 0
+    assert projector.position(BELIEFS_FOLD) == 0
     assert core().query_scope("agent", BeliefFilter()) == []
-    projector.rebuild(
-        BELIEFS_FOLD,
-        reset=lambda: beliefs.reset(MemoryCore(InMemoryBackend())),
-        reset_in_transaction=True,
-    )
+    projector.catch_up()
+    assert projector.position(BELIEFS_FOLD) == store.last_seq()
 
-    # -- rebuilt: same log, same index, same beliefs ---------------------------------
+    # -- refolded: same log, same index, same beliefs --------------------------------
     assert (_snapshot(store), _beliefs(core())) == before_crash
     assert [(d.held, d.reference) for d in divergence(core(), "agent", "rumour")] == [
         ("Paris", "Berlin")
     ]
 
-    # ...and the index still answers the merge question after being rebuilt from zero.
+    # ...and the index, replayed over itself, still answers the merge question.
     assert {r.belief_id for r in index.beliefs_for(carol)} == {
         predicates.belief_id("location", carol),
         predicates.belief_id("knows", contact_b, carol),

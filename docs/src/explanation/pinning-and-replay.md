@@ -140,7 +140,7 @@ Replay reads the other way. [`ReplayPins.from_events`][replay-from-events] colle
 [`ReplayPins`][replay-pins] has two postures for a key it has no pin for:
 
 - **`on_miss="strict"`**, the default, raises [`PinMiss`][pin-miss] on every miss. Its `divergence` names the missed key, the kind of call, and how many pins were hit before it.
-- **`on_miss="record"`** marks the first miss as the point of divergence and then lets the call through, drawing fresh. The run continues, announced as new rather than presented as a replay. Pass `announce=ReplayPins.announce_to(store, registry, unit_id=...)` and that announcement is appended to the log as a [`ReplayDiverged`][replay-diverged] event, so the authoritative record says where the replay ended.
+- **`on_miss="record"`** marks the first miss as the point of divergence and then lets the call through, drawing fresh. The run continues, announced as new rather than presented as a replay. It needs a [`PinLedger`][pin-ledger] passed as `into=`, and is refused without one: the new run is a unit of work like any other, so its fresh draws go through that ledger and the pins it replayed are adopted into the same scratch. When the ledger commits, its pins reach the log together with a [`ReplayDiverged`][replay-diverged] event, so the authoritative record says where the replay ended, and the new log replays the new run strictly.
 
 Record mode is useful for controlled comparisons. Because the model's id is part of every key, swapping one role's model and replaying in record mode makes exactly that role's calls miss and draw again, while every other call replays as it was.
 

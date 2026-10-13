@@ -88,6 +88,10 @@ In anagrapheus a fold is any object implementing the [`ProjectionFold`][projecti
 
 Each fold has a **position**: the `seq` of the last event it has folded, stored in the event store under the fold's name. [`Projector.catch_up()`][projector-catch-up] reads each fold's position, folds everything above it in batches, and commits the new position after each batch. Started fresh, it replays the whole log. Started on an existing database, it replays only what each fold has not yet seen.
 
+A fold whose state does not outlive the process, such as a belief fold over an in-memory store, should not have its position in the file: a reopened database would then claim the empty state was current. Such a fold implements [`OwnsPosition`][owns-position] and keeps its position on itself, starting at 0 in each process, so a reopen replays the whole log into it. [`Projector.position(name)`][projector-position] reads a fold's position wherever it is kept. The belief fold makes the choice explicit with its required `durable` flag; see [Beliefs](beliefs.md#where-the-position-lives).
+
+A position kept on the fold cannot roll back with the store, so the projector refuses to run such a fold while a transaction is open on the store: an outer rollback would remove the events but leave the fold's state and position past them, and the next append would reuse those `seq` values unseen. Call `catch_up()` and `rebuild()` outside any `store.transaction()` block.
+
 The position commit and the fold's writes need to move together. If a crash lands between them, either the projection is ahead of its position (and events would be folded twice) or behind it (and events would be skipped). anagrapheus closes that gap in two ways:
 
 - When the store supports transactions, as [`SQLiteEventStore`][sqlite-store] does, the projector applies each batch and commits the position inside one transaction. A projection whose tables live in the same database file therefore commits atomically with its position.
@@ -154,6 +158,8 @@ The reader is strict about gaps. If the chain stops short of the latest register
 [projector-catch-up]: ../reference/anagrapheus/timeline/folds.md#anagrapheus.timeline.folds.Projector.catch_up
 [sqlite-store]: ../reference/anagrapheus/timeline/sqlite.md#anagrapheus.timeline.sqlite.SQLiteEventStore
 [projector-rebuild]: ../reference/anagrapheus/timeline/folds.md#anagrapheus.timeline.folds.Projector.rebuild
+[projector-position]: ../reference/anagrapheus/timeline/folds.md#anagrapheus.timeline.folds.Projector.position
+[owns-position]: ../reference/anagrapheus/timeline/folds.md#anagrapheus.timeline.folds.OwnsPosition
 [generative-rebuild]: ../reference/anagrapheus/timeline/folds.md#anagrapheus.timeline.folds.GenerativeRebuild
 [upcast-gap]: ../reference/anagrapheus/timeline/errors.md#anagrapheus.timeline.errors.UpcastGap
 [schema-too-new]: ../reference/anagrapheus/timeline/migrations.md#anagrapheus.timeline.migrations.SchemaTooNew
