@@ -69,7 +69,7 @@ def _log(rig: Rig, admit: Callable[[Envelope], bool] | None = None) -> LogSlice:
 
 @dataclass(frozen=True)
 class Narrating:
-    """The Narrator's whole grant under R24: the contract, and nothing else."""
+    """The Narrator's whole grant: the contract, and nothing else."""
 
     contract: Given[str]
 
@@ -104,7 +104,7 @@ def test_a_grant_holding_a_store_is_refused(rig: Rig):
 
 
 def test_the_narrator_firewall_holds_by_what_the_grant_holds():
-    """R24: the contract and nothing else, and the context says so."""
+    """The Narrator gets the contract and nothing else, and the context says so."""
     grant = Narrating(Given("contract", "Describe the harbour at dusk."))
 
     context = assemble(
@@ -360,7 +360,7 @@ def _cite(sections: Sequence[Section], register: Register) -> list[Part]:
 
 
 def test_chronicle_prose_cited_as_canon_is_refused(rig: Rig):
-    """R61 clause 4: model-written prose is advisory, and a prompt must not say otherwise."""
+    """Model-written prose is advisory, and a prompt must not say otherwise."""
     chronicle = _chronicle(rig)
 
     def again() -> Recalling:

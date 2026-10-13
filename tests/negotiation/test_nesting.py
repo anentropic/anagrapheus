@@ -1,10 +1,10 @@
 """
-Higher-order belief, derived and never stored — R27–R30 asserted as behaviour.
+Higher-order belief, derived and never stored — the rules for it asserted as behaviour.
 
 The M7 demo stored ``party:{a}:model-of:{b}`` and called it higher-order belief. NVM
-**R28 (RATIFIED 2026-06-17)** rules that out — *"no `BeliefState` ever stores 'X
-believes Y believes …'"* — and doc 24 §1 names the shape *"the wrong frame"* before
-explaining exactly how it fails.
+rules that out — *"no `BeliefState` ever stores 'X believes Y believes …'"* — because a
+stored model is folded forward by the same world events that move first-order belief,
+and a false belief about someone else's belief stops being representable.
 
 The load-bearing test here is :func:`test_a_false_belief_survives_the_world_moving`,
 because it is the one the stored design **could not pass**. Everything else guards the
@@ -64,7 +64,7 @@ def _stated(table: Table, *, party: str, clause: UUID, position: str) -> UUID:
 
 def test_deriving_a_model_writes_nothing(table: Table):
     """
-    R28, made mechanical rather than trusted.
+    Nested belief is never stored, made mechanical rather than trusted.
 
     A reading of the code is not evidence that it does not write: the whole failure mode
     is a write that looks harmless. So the core's three mutating operations are wrapped
@@ -94,7 +94,7 @@ def test_deriving_a_model_writes_nothing(table: Table):
 
 def test_a_view_cannot_reach_another_partys_private_scope(table: Table):
     """
-    R29, enforced rather than conventional.
+    A party models another only from its own beliefs, enforced rather than conventional.
 
     *"If you peeked at B's actual scope you would get the true answer, not A's
     (possibly wrong) model, and false belief becomes unrepresentable."*
@@ -163,7 +163,7 @@ def test_a_view_sees_parties_and_clauses_seated_after_it_was_built(table: Table)
 
 def test_a_false_belief_survives_the_world_moving(table: Table):
     """
-    Doc 24 §1's guard-and-courier case, translated — **the assertion M7 could not make**.
+    The guard-and-courier case, translated — **the assertion M7 could not make**.
 
     The guard watches a courier stash a letter, watches the courier *leave*, then
     watches a thief move it. The guard's own belief updates on the move; the guard's
@@ -208,7 +208,7 @@ def test_a_false_belief_survives_the_world_moving(table: Table):
 
 def test_the_gate_is_belief_not_truth(table: Table):
     """
-    R27: access-beliefs are *"allowed to diverge from the true witness set"*.
+    Access-beliefs are *"allowed to diverge from the true witness set"*.
 
     The event records who really overheard it. Nothing consults that field to decide
     what a party may model — if it did, every party would be handed the truth and
@@ -230,7 +230,7 @@ def test_the_gate_is_belief_not_truth(table: Table):
 
 def test_ignorance_makes_an_empty_model_not_a_wrong_one(table: Table):
     """
-    Ignorance makes an empty model, not a wrong one — R29's corollary.
+    Ignorance makes an empty model, not a wrong one.
 
     *"Where A is ignorant, A's model of B is correspondingly empty/uncertain — which is
     correct."* A party that holds no access-belief about another models nothing about
@@ -252,7 +252,7 @@ def test_ignorance_makes_an_empty_model_not_a_wrong_one(table: Table):
 
 def test_second_order_is_not_reducible_to_first(table: Table):
     """
-    Doc 24 §5: a party can be right about the world and wrong about another's belief.
+    A party can be right about the world and wrong about another's belief.
 
     **The first version of this test proved the opposite of its name.** It used a side
     remark, which names who overheard it — so the modelled UK was handed an access-belief
@@ -299,7 +299,7 @@ def test_a_remark_carries_access_so_the_second_level_can_fill(table: Table):
     The complement, and why the level-2 blank above is a gate and not a dead end.
 
     A `SideRemarkOverheard` names who overheard it, so a witness forms an access-belief
-    about that third party (R27) — and *that* is what lets the next rung gate at all.
+    about that third party — and *that* is what lets the next rung gate at all.
     Same shape as the test above, one event type different, and the second level fills.
     """
     fisheries = table.table_clause("fisheries")
@@ -318,7 +318,7 @@ def test_a_remark_carries_access_so_the_second_level_can_fill(table: Table):
 
 def test_depth_bottoms_out_at_the_cap(table: Table):
     """
-    R30 — *"cap realised depth at 3, raisable per-query"* — as a limit on realisation.
+    Depth is capped at 3, raisable per query — as a limit on realisation.
 
     A tuning knob, not an architectural commitment — so the cap must be a *limit on
     realisation*, not on what can be asked. A truncated model says so rather than
@@ -346,7 +346,7 @@ def test_depth_bottoms_out_at_the_cap(table: Table):
 
 def test_no_cache_reintroduces_the_staleness_the_no_store_rule_dissolves(table: Table):
     """
-    U24 exists only to confirm this, so it is worth an assertion rather than a promise.
+    Nothing about a derived model is cached: worth an assertion rather than a promise.
 
     Because nested beliefs are never stored there is nothing to invalidate when access
     changes — *"the next derivation simply sees the reified access-belief."* A memo
@@ -374,7 +374,7 @@ def test_a_derived_model_is_not_a_belief_state(table: Table, chain: tuple[str, .
     """
     It cannot be handed back to ``doxastica`` even by accident.
 
-    R28's hazard is a stored nested record. The cheapest guard against storing one is a
+    The hazard is a stored nested record. The cheapest guard against storing one is a
     return type that no write on the core will accept, so the mistake fails at the call
     rather than succeeding quietly.
     """
@@ -390,7 +390,7 @@ def test_a_remark_supersedes_a_statement_in_the_fold(table: Table):
     The domain's asymmetry, and why it needs no rule of its own.
 
     A stated position and an overheard remark map to the *same* belief id, so the later
-    one wins. That is the only revision a derived view is allowed: doc 24 §4 keeps the
+    one wins. That is the only revision a derived view is allowed: the design keeps the
     core's formal operator out of a modelled mind, because resolving a contradiction
     properly would need A's model of B's *entrenchment* — a portrait-level prose hint,
     not the total preorder the operator requires — and *"a model of another mind is

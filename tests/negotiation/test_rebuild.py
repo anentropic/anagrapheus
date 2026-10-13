@@ -1,9 +1,9 @@
 """
 A whole negotiation's beliefs, dropped and folded back from the log.
 
-Note 03 §9's claim on the demo rather than on a rig: every belief every party holds —
-seeded, overheard, concluded by a model, re-keyed — comes back from the log alone, and
-so does every dependency between them.
+Beliefs are folded from the log, claimed on the demo rather than on a rig: every belief
+every party holds — seeded, overheard, concluded by a model, re-keyed — comes back from
+the log alone, and so does every dependency between them.
 """
 
 from __future__ import annotations

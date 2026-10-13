@@ -7,7 +7,7 @@ into the log, and then the whole run is replayed with the model **rigged to fail
 is reached at all**, and the tool's side effect not repeated.
 
 That last part is the milestone. Until now the pin ledger had never pinned a real
-effect: doc 00 §4's argument was asserted against synthetic callables. Here the whole
+effect: the replay argument was asserted against synthetic callables. Here the whole
 run comes back from the log.
 
 The model is not *swapped out* for the replay, which is the obvious way to write this
@@ -108,7 +108,7 @@ def test_milestone_4_acceptance(tmp_path: Path):
 
 def test_a_changed_question_is_announced_rather_than_replayed(tmp_path: Path):
     """
-    Doc 00 §4c's honest half, with a real agent.
+    The honest half of best-effort replay, with a real agent.
 
     Generation-replay is best-effort: change the prompt assembly and the keys miss. The
     point is that the miss is *detectable* — the run is marked divergent at the first

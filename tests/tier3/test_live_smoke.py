@@ -1,13 +1,13 @@
 """
 Tier 3: does this still work against an actual provider — on every route with a key.
 
-Note 00 §3 planned four tiers and this is the one that took six milestones to build. §8
-asked whether it gates a release and answered its own objection: *"a nightly that
+The test plan had four tiers and this is the one that took six milestones to build. It
+was asked whether it gates a release, and the objection answered itself: *"a nightly that
 nobody reads is not a smoke test."* **Decided: it gates a release.** It runs on demand
-and on a release tag, never on a pull request — §5 records that fork PRs cannot see
+and on a release tag, never on a pull request — fork PRs cannot see
 repository secrets, so a PR trigger would fail every outside contribution.
 
-**What it asserts is wiring, not quality.** §6 keeps tests and evals apart. The checks
+**What it asserts is wiring, not quality.** Tests and evals are kept apart. The checks
 themselves, and why there are these four, are in :mod:`tests.tier3.checks`.
 
 **Routes, not a provider.** A pin stores pydantic-ai's normalized response, but the

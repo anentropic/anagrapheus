@@ -242,7 +242,7 @@ def test_two_projectors_split_the_schedule(tmp_path: Path):
     """
     The sync/async split, without a field on the fold.
 
-    NVM's R6 puts belief facts on the turn's critical path and portrait regeneration
+    NVM puts belief facts on the turn's critical path and portrait regeneration
     off it. That is a property of who calls catch_up and when, not of the fold: two
     projectors over two fold lists, each fold keeping its own position, and neither
     interfering with the other.

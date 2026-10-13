@@ -1,9 +1,10 @@
 """
 Shared fixtures and the no-live-model guard.
 
-Per _design/00-testing-without-a-model.md: ALLOW_MODEL_REQUESTS is hard-off, so a
-stray call to a real provider fails the suite instead of silently billing anyone.
-Tiers 0-2 cannot spend money; they are not merely expected not to.
+ALLOW_MODEL_REQUESTS is switched off for the whole suite, so a stray call to a real
+provider fails the test instead of silently billing anyone. The ordinary tests cannot
+spend money; they are not merely expected not to. Only the tier-3 live smoke tests lift
+the guard, and only for themselves.
 """
 
 from pydantic_ai import models

@@ -6,8 +6,8 @@ file made earlier, by another process, and shares nothing with it but the bytes 
 is the form of the replay claim a consumer actually relies on.
 
 **It is also a regression test on what the model is asked.** Change a prompt and the
-pins for that prompt miss, so this fails. That is wanted: doc 00 §4c's "change the prompt
-assembly and the keys miss", made visible in review rather than discovered in a
+pins for that prompt miss, so this fails. That is wanted: change the prompt assembly and
+the keys miss, made visible in review rather than discovered in a
 deployed agent.
 """
 

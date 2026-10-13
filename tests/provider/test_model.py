@@ -94,7 +94,7 @@ def test_a_changed_prompt_diverges_rather_than_pretending(rig: Rig):
     """
     A replay that meets a key it has no answer for stops being a replay, and says so.
 
-    This is doc 00 §4c's honest half: you get a new run continuing the same history,
+    This is the honest half of best-effort replay: you get a new run continuing the same history,
     announced — not a different run wearing the word "replay".
     """
     counted = Counted(says("Lisbon"))
@@ -183,7 +183,7 @@ def test_a_tool_loop_pins_every_step(rig: Rig):
 
 def test_re_interpreting_a_pin_never_re_draws(rig: Rig):
     """
-    §4a's property, now with a real ``ModelResponse`` rather than a synthetic value.
+    The key excludes the interpretation, shown with a real ``ModelResponse``.
 
     Changing what you do with a result must not cost a fresh draw — that is the whole
     reason the key excludes the interpretation.

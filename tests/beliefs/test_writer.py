@@ -111,7 +111,7 @@ def test_revising_a_relational_belief_leaves_the_other_party_alone(
     believer: Believer, core: MemoryCore
 ):
     """
-    The failure §6a warns about, shown to be unrepresentable.
+    Keying a relation on one side only, shown to be unrepresentable.
 
     Keyed as ``knows(alice)``, revising bob to carol would leave one belief and retract
     the claim about bob. Keyed as ``knows(alice, bob)`` and ``knows(alice, carol)``,

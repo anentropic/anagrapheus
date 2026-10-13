@@ -6,12 +6,12 @@ row in a database. Three of the domain's four events were defined and never emit
 `pinned_tool` was used nowhere and the chronicle had no consumer at all. This is the
 version where all of that is load-bearing.
 
-**What no earlier milestone could assert.** NVM **R28 (RATIFIED 2026-06-17)** rules that
-*"no `BeliefState` ever stores 'X believes Y believes …'"*, and M8a made storing one
-impossible. That is a negative claim, and a negative claim proves nothing about whether
-the positive one works. This is the positive one: the negotiation turns on a party that
-is **right about the world and wrong about another mind**, and it is wrong at a level no
-first-order record anywhere can express.
+**What no earlier milestone could assert.** NVM rules that *"no `BeliefState` ever
+stores 'X believes Y believes …'"*, and M8a made storing one impossible. That is a
+negative claim, and a negative claim proves nothing about whether the positive one
+works. This is the positive one: the negotiation turns on a party that is **right about
+the world and wrong about another mind**, and it is wrong at a level no first-order
+record anywhere can express.
 
 The UK lets something slip in round one and believes it went unheard. It did not go
 unheard, and it goes on believing that for the rest of the negotiation. Round one is
@@ -21,10 +21,9 @@ when the UK states its position publicly and last-evidence-wins re-buries the le
 what persists is the false **access-belief**, not the measured mismatch, and the test
 below asserts exactly that pair rather than the stronger thing it is tempting to say.
 
-A *stored* nested record could not even open that gap for one round, which is what
-[doc 24 §1](https://github.com/anentropic/narrative-vm/blob/main/_design/v2/24-nvm-higher-order-beliefs.md)
-says a *stored* nested belief cannot do: it would be folded forward on the next world
-event and quietly converge on the truth, *"and deception/surprise silently break."*
+A *stored* nested record could not even open that gap for one round: it would be folded
+forward on the next world event and quietly converge on the truth, *"and
+deception/surprise silently break."*
 
 **And the whole thing replays with no model reached — on a fresh store.** Not the one it
 recorded into: a different database, built by running the same story again, with every

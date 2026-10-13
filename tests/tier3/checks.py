@@ -31,7 +31,7 @@ key. ``tests/provider/test_tier3_checks.py`` runs them against ``TestModel`` in 
 default suite, because tier 3 runs only at release: a check broken by an API change
 would otherwise be found on release day, by the release.
 
-What none of them inspects is what the model *said*. Note 00 §6: a test measures this
+What none of them inspects is what the model *said*. A test measures this
 library holding the model fixed; what the model says is an eval.
 """
 
