@@ -1,16 +1,18 @@
 """
 The chronicle's storage port.
 
-Append-only by contract, not merely by convention: there is no update and no delete.
-Doc 00 §7 wants supersession rather than correction — *"an old section is never wrong,
-only superseded by time"* — so a re-consolidation writes a new row pointing at the old
-one, and the old prose stays readable.
+Append-only by contract, not merely by convention: there is no update and no delete. The
+chronicle supersedes rather than corrects — *"an old section is never wrong, only
+superseded by time"* — so a re-consolidation writes a new row pointing at the old one,
+and the old prose stays readable.
 
 **Not disposable like the other projections.** The belief index and the identity
 registry can be emptied and re-folded for free. This one cannot: re-folding it re-runs
 every model call it ever made and returns the same anchors with different prose. Hence
 :meth:`export` and :meth:`load` — the carry path, which no other projection needs.
 """
+
+# Design: note 05 §8; upstream agent-core doc 00 §7.
 
 from __future__ import annotations
 
@@ -78,7 +80,7 @@ class ChronicleStore(Protocol):
         That is fine for the case this exists for: carrying *a* chronicle across a
         backend swap. It is not a merge, and an earlier version of this docstring
         claimed it was. Merging divergent consolidations would need identity that
-        distinguishes them, which nothing here provides — see note 05 §8.
+        distinguishes them, which nothing here provides.
         """
         ...
 

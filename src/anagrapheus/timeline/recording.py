@@ -1,12 +1,11 @@
 """
 A recorded run on disk, in the log's own serialization.
 
-Note 00 §8 asked where recorded pin ledgers live and in what format: *"They are
-fixtures, but they are also the log format. Same serialization, or a test-facing one?"*
-Until this module the question was open in practice as well as on paper. Every replay in
-the repository was built from a live store in the same test that recorded it, so the
-strongest form of the replay claim — a run recorded earlier, by another process, loaded
-from a file — had never been exercised.
+A recorded pin ledger is a fixture, but it is also the log format: does it use the
+same serialization, or a test-facing one? Until this module the question was open in
+practice as well as on paper. Every replay in the repository was built from a live store
+in the same test that recorded it, so the strongest form of the replay claim — a run
+recorded earlier, by another process, loaded from a file — had never been exercised.
 
 **Same serialization.** Every event line is a :class:`~anagrapheus.timeline.StoredEvent`
 exactly as the store holds it. The reason is not tidiness: an event in the log's own
@@ -25,6 +24,8 @@ the wrong one misses on every draw. The header is where a reader finds out which
 unchanged run changes only what genuinely differs — ids, timestamps, the responses — and
 a recording's diff is reviewable rather than reshuffled.
 """
+
+# Design: note 00 §8.
 
 from __future__ import annotations
 

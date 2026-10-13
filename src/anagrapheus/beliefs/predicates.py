@@ -2,19 +2,19 @@
 Declared predicates, and the only way to mint a belief id.
 
 doxastica keeps beliefs but deliberately does not decide what a belief *is about*:
-``belief_id`` is a caller-supplied string, and choosing it is the integration cost doc
-00 §6a names. The rule is short and unforgiving — **the id names the question, the
-value answers it.** If two states cannot both be true at once they share an id; if
-they can, they must not.
+``belief_id`` is a caller-supplied string, and choosing it is the integration cost of
+using it. The rule is short and unforgiving — **the id names the question, the value
+answers it.** If two states cannot both be true at once they share an id; if they can,
+they must not.
 
 Predicates are **schema**: a small set, changed only on deploy, required to be
-identical in every process that mints or reads. §6b puts them in code for that reason
-— in code a disagreement fails at import, in a database it fails at runtime, acquires
+identical in every process that mints or reads. They live in code for that reason —
+in code a disagreement fails at import, in a database it fails at runtime, acquires
 a migration story for what is a constant, and drifts from what the code assumes.
 
-Minting lives on the registry rather than beside it, because §6c's divergence query
-works only if two scopes minted through the same rule. A free function taking a
-predicate would leave a second way to mint; a method does not.
+Minting lives on the registry rather than beside it, because the divergence query works
+only if two scopes minted through the same rule. A free function taking a predicate
+would leave a second way to mint; a method does not.
 
 **Minting a belief id consumes no entropy.** It is a pure function of a predicate and
 some entity ids — derivation, not a draw — so unlike
@@ -22,6 +22,8 @@ some entity ids — derivation, not a draw — so unlike
 identically by construction. The two sit one layer apart and are worth not confusing:
 an *entity* id is drawn, a *belief* id is computed from ids already drawn.
 """
+
+# Design: note 03; upstream agent-core doc 00 §6a-§6c; upstream NVM R21 (stance).
 
 from __future__ import annotations
 
@@ -53,7 +55,7 @@ __all__ = [
 ]
 
 #: The minting rule this code writes. Bumped when the rule changes, never reused for a
-#: changed rule: §6a's "version the scheme", because a silent change orphans every id
+#: changed rule: the scheme is versioned, because a silent change orphans every id
 #: minted under the old one exactly as pin-key drift orphans a pin.
 CURRENT_SCHEME: Final = 1
 
@@ -71,9 +73,9 @@ class PredicateKind(StrEnum):
     """
     Whether a predicate holds one value at a time or relates its arguments.
 
-    The distinction is doc 00 §6a's trap, and it is a modelling decision the
-    application makes when it declares the predicate rather than one this library can
-    infer:
+    Getting the distinction wrong is the trap in choosing belief ids, and it is a
+    modelling decision the application makes when it declares the predicate rather than
+    one this library can infer:
 
     - ``FUNCTIONAL`` — ``location(alice)``. One value at a time; revision supersedes
       correctly, because the new place genuinely replaces the old one.
@@ -145,7 +147,7 @@ class Predicate:
           other way, a third party smuggled into the answer of ``knows(alice, bob)``,
           which revising would retract. A ``Stance`` is refused too: how firmly a belief
           is held is doxastica's own ``stance`` argument, one axis over, and taking it as
-          the value would merge ranking with epistemic state (R21). ``TypeError``.
+          the value would merge ranking with epistemic state. ``TypeError``.
         - **A declared vocabulary is closed.** :class:`OutsideVocabulary`. A predicate
           with no vocabulary accepts anything.
         """
@@ -183,11 +185,11 @@ class PredicateRegistry:
     """
     The declared predicates, and the only way to mint a belief id from them.
 
-    ``namespace`` is required rather than defaulted, because doc 00 §6a's warning has
-    no safe default. doxastica keys revision history on the belief id **alone**, and
-    that history is cross-scope: for a divergence query between two holders the
-    collision *is* the mechanism, and for two tenants it is a leak. Which one you are
-    building is not something this library can guess, so it makes you say.
+    ``namespace`` is required rather than defaulted, because an unnamespaced id collides
+    and there is no safe default. doxastica keys revision history on the belief id
+    **alone**, and that history is cross-scope: for a divergence query between two
+    holders the collision *is* the mechanism, and for two tenants it is a leak. Which
+    one you are building is not something this library can guess, so it makes you say.
     """
 
     def __init__(self, predicates: Iterable[Predicate], *, namespace: str) -> None:
@@ -226,8 +228,8 @@ class PredicateRegistry:
         """
         Mint the belief id for ``name`` applied to ``entity_ids``.
 
-        Exactly ``arity`` entities, or :class:`WrongArity`. That check is the whole of
-        §6a's functional/relational discipline made mechanical: a predicate declared
+        Exactly ``arity`` entities, or :class:`WrongArity`. That check is the whole
+        functional/relational discipline made mechanical: a predicate declared
         ``knows/2`` cannot be minted at arity 1, so the silent retraction that shape
         causes is not something a caller can reach by accident.
 
@@ -282,7 +284,7 @@ class PredicateRegistry:
         digests: re-keying a belief after an identity merge has to substitute one
         entity for another and re-mint, and a digest could only do that by consulting
         an index — which would make the index a correctness mechanism rather than the
-        disposable convenience doc 00 §6b says it is.
+        disposable convenience it is meant to be.
 
         The namespace is read from the id rather than assumed, so a registry can parse
         an id another namespace minted. Whether it should *act* on it is the caller's

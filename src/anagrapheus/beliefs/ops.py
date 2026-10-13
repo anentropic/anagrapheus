@@ -1,16 +1,16 @@
 """
 What one event says about belief: the operations a fold applies to the belief store.
 
-The log is the authority and doxastica is a fold over it (doc 00 §2). An event that
-changes what somebody believes is *interpreted* into a short sequence of these, and
+The log is the authority and doxastica is a fold over it. An event that changes what
+somebody believes is *interpreted* into a short sequence of these, and
 :class:`~anagrapheus.beliefs.fold.BeliefFold` applies them. The library's own belief
-events interpret to exactly one each; an application's events (an observation, a
-remark, an inference) interpret to as many as the event implies.
+events interpret to exactly one each; an application's events (an observation, a remark,
+an inference) interpret to as many as the event implies.
 
-**The operations name a belief by predicate and entities, never by id.** Doc 00 §6a's
-mint-from-structured-data rule, kept at the seam where it would be easiest to break: an
-id is derived by the predicate registry the fold holds, so an interpreter cannot mint
-around it.
+**The operations name a belief by predicate and entities, never by id.** Ids are minted
+from structured data, and the rule is kept at the seam where it would be easiest to
+break: an id is derived by the predicate registry the fold holds, so an interpreter
+cannot mint around it.
 
 **There is no source on an operation.** A belief's ``source_event_id`` is always the id
 of the event being folded. That is what makes the fold idempotent — a state carrying
@@ -18,6 +18,8 @@ this event's id in this scope means the operation already ran — and it makes
 doxastica's as-of order the log's order. *Why* the event happened is the envelope's
 ``causation_id``, which is where every other layer of this library already looks.
 """
+
+# Design: note 03; upstream agent-core doc 00 §2, §6a.
 
 from __future__ import annotations
 

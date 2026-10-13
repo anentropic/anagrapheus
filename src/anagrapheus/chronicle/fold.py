@@ -5,12 +5,12 @@ It watches for a **unit boundary** the application declares (a turn, a scene clo
 session end), and on each one consolidates everything since the last boundary into a
 section citing the range it covers.
 
-**Why the fold does not build the pin key.** R61 clause 5 pins generative folds, and
-notes that a key built from stable identifiers alone *cannot notice a rewritten
-prompt* — it would serve a stale pin to an edited consolidation. That failure is
-reachable from here: the fold can see the event range but not the prompt, so any key it
-built would be blind in exactly that way. So the key is built where the prompt is
-visible — inside the :class:`Summarizer`, which typically draws through
+**Why the fold does not build the pin key.** Generative folds pin their model calls, and
+a key built from stable identifiers alone *cannot notice a rewritten prompt* — it would
+serve a stale pin to an edited consolidation. That failure is reachable from here: the
+fold can see the event range but not the prompt, so any key it built would be blind in
+exactly that way. So the key is built where the prompt is visible — inside the
+:class:`Summarizer`, which typically draws through
 :class:`~anagrapheus.provider.model.PinnedModel` and gets the whole request keyed for
 free. The fold records the key it is handed and asserts nothing about it.
 
@@ -29,6 +29,8 @@ draws, and it cannot use a blocking model client that starts a loop of its own
 (``Agent.run_sync`` raises there): a summarizer that calls a model from async code
 should be an :class:`AsyncSummarizer`.
 """
+
+# Design: note 05; upstream NVM R61 (clauses 1 and 5).
 
 from __future__ import annotations
 
@@ -154,7 +156,7 @@ def _discard(drawn: object) -> None:
 
 class ChronicleFold:
     """
-    Consolidates each closed unit into a section. **Generative**, per R61 clause 1.
+    Consolidates each closed unit into a section. Declared **generative**.
 
     What replays exactly is the anchors: which ranges were consolidated, where their
     boundaries fall, and in what order — all of that is a pure function of the log. The

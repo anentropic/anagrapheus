@@ -81,6 +81,33 @@ def test_a_changed_prompt_diverges_rather_than_pretending(rig: Rig):
     assert replay.divergence.kind == PIN_KIND
 
 
+def test_a_stream_recorded_in_record_mode_replays_strictly(rig: Rig):
+    """
+    Record mode's streamed path, carried through to the log and back.
+
+    The stream drawn on a miss lands in the ``into`` ledger, reaches the log at commit
+    with the divergence, and the new log then replays it strictly without the stream
+    being opened again.
+    """
+    counted = CountedStream(["Lisbon ", "is the ", "capital."])
+    record = ReplayPins.from_events([], rig.types, on_miss="record", into=rig.ledger)
+    recorder = Agent(model=PinnedModel(counted.model(), record))
+
+    assert asyncio.run(_streamed(recorder, "where?")) == "Lisbon is the capital."
+    assert counted.opens == 1
+    assert list(rig.store.read()) == [], "nothing is canon before commit"
+    rig.ledger.commit()
+    types = [e.envelope.type for e in rig.store.read()]
+    assert types == ["ReplayDiverged", "PinPromoted"]
+
+    replay = ReplayPins.from_events(list(rig.store.read()), rig.types, on_miss="strict")
+    replayed = Agent(model=PinnedModel(counted.model(), replay))
+
+    assert asyncio.run(_streamed(replayed, "where?")) == "Lisbon is the capital."
+    assert counted.opens == 1, "the promoted stream replays without reaching the provider"
+    assert replay.divergence is None
+
+
 def test_a_streamed_pin_replays_through_the_plain_path(rig: Rig):
     """
     Cross-transport: streaming is *how you receive*, not what you ask.
@@ -361,11 +388,12 @@ def test_record_mode_coalesces_across_transports_too(rig: Rig):
     """
     The same race in record-mode replay, where it fails silently instead of loudly.
 
-    There is no primary key to raise here: both draws simply complete and the last one
-    written wins. A test is the only thing that would notice.
+    Record mode draws through a ledger, so a double draw would now hit the scratch's
+    primary key; before that, both draws completed and the last one written won. The
+    count is the assertion either way.
     """
     counter = Bimodal("Lisbon", delay=0.01)
-    replay = ReplayPins.from_events([], rig.types, on_miss="record")
+    replay = ReplayPins.from_events([], rig.types, on_miss="record", into=rig.ledger)
     model = PinnedModel(counter.model(), replay)
     messages = [_prompt("where?")]
 

@@ -1,7 +1,7 @@
 """
 Beliefs as a fold over the log: doxastica and the entity index, both rebuilt from it.
 
-Doc 00 §2: the log is the authority and the belief store is one of its projections.
+The log is the authority and the belief store is one of its projections.
 :class:`BeliefFold` is the projection. Every event an interpreter recognises is read as
 a few :mod:`~anagrapheus.beliefs.ops`, and each one is checked, minted, written into
 doxastica and recorded in the entity index, in that order. Drop both and replay the log,
@@ -40,6 +40,8 @@ replay. So the same checks run *before* append — :func:`check`, which
 an application should call for its own — and the fold raises rather than skipping, so a
 bad event is loud rather than a belief silently missing.
 """
+
+# Design: note 03; upstream agent-core doc 00 §2.
 
 from __future__ import annotations
 
