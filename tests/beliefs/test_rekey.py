@@ -245,7 +245,8 @@ def test_a_merge_cycle_in_a_batch_does_not_hang(rig: Rig):
     A cycle is a contradiction in the log, and identity detects it at read.
 
     A merge into an entity that has yielded is dropped, so a ring of two or more merges
-    never lands; an entity merged into itself is the ring rows can still carry. The
+    never lands, and ``Merged`` refuses an entity merged into itself. Rows built by hand
+    can still loop, and one naming the same entity on both sides is the shortest. The
     planner must not loop following one, and must not silently produce a target either:
     it says it cannot re-key rather than picking an arbitrary point in a ring.
     """
