@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any, cast
 from pydantic import TypeAdapter
 from pydantic_ai.messages import ModelResponse
 from pydantic_ai.models.wrapper import WrapperModel
+from pydantic_ai.settings import merge_model_settings
 from pydantic_core import to_jsonable_python
 
 from anagrapheus.provider.policy import SemanticCallPolicy
@@ -96,13 +97,13 @@ class PinnedModel(WrapperModel):
         """
         Reuse the pinned response for this call, or make it exactly once.
 
-        ``model_settings`` is deliberately **not** in the key material by default. The
-        policy owns that judgment — a temperature change arguably makes a different
-        call, and a timeout change plainly does not — and
-        :class:`~anagrapheus.provider.policy.SemanticCallPolicy` keeps to what the model
-        is *asked*. An application that disagrees supplies its own policy.
+        ``model_settings`` reach the key merged with the wrapped model's own, because
+        that merge is what the draw is made with: a temperature set on the model and one
+        passed to the run are the same temperature. Which settings count is the
+        policy's call; :class:`~anagrapheus.provider.policy.SemanticCallPolicy` keeps
+        those that change the draw and drops those about delivery.
         """
-        key = self._key(messages, model_request_parameters)
+        key = self._key(messages, model_settings, model_request_parameters)
         call = _Call(self, key, messages, model_request_parameters)
 
         async def draw() -> Json:
@@ -141,7 +142,7 @@ class PinnedModel(WrapperModel):
         is not part of what the model was asked. Keying on it would make every replay a
         miss.
         """
-        key = self._key(messages, model_request_parameters)
+        key = self._key(messages, model_settings, model_request_parameters)
         call = _Call(self, key, messages, model_request_parameters)
 
         def live() -> AbstractAsyncContextManager[StreamedResponse]:
@@ -173,9 +174,16 @@ class PinnedModel(WrapperModel):
             raise
         call.done(stream.get())
 
-    def _key(self, messages: list[ModelMessage], parameters: ModelRequestParameters) -> PinKey:
+    def _key(
+        self,
+        messages: list[ModelMessage],
+        settings: ModelSettings | None,
+        parameters: ModelRequestParameters,
+    ) -> PinKey:
         """Build this call's key, and report it to ``on_key`` if one was given."""
-        key = pin_key(self._kind, self._policy.material(messages, self.model_id, parameters))
+        effective = merge_model_settings(self.settings, settings)
+        material = self._policy.material(messages, self.model_id, parameters, effective)
+        key = pin_key(self._kind, material)
         if self._on_key is not None:
             self._on_key(key)
         return key

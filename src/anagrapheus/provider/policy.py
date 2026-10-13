@@ -24,6 +24,14 @@ Dropping `tool_call_id` is the one that deserves a note: it *does* carry informa
 which return answers which call — but that pairing is already implied by the order of
 the parts, and the id itself is assigned by the provider and differs between two runs
 of the same conversation.
+
+**Settings are in the key, less the ones about delivery.** A temperature, a token limit,
+a forced ``tool_choice`` or a thinking level each change what is drawn, and a consumer
+who pinned across such a change and got the old answer back would rightly call that a
+bug. A timeout, extra headers, a service tier and prompt-cache configuration change
+how the request travels and nothing about the draw, so they stay out. When nothing
+survives the reduction the material has no ``settings`` entry at all, so a call made
+with no draw-changing settings keys exactly as it did before settings were keyed.
 """
 
 from __future__ import annotations
@@ -37,6 +45,7 @@ if TYPE_CHECKING:
 
     from pydantic_ai.messages import ModelMessage
     from pydantic_ai.models import ModelRequestParameters
+    from pydantic_ai.settings import ModelSettings
 
     from anagrapheus.timeline._canonical import Json
 
@@ -49,8 +58,13 @@ _VOLATILE = frozenset(
 
 #: Request parameters about how the call is delivered, not what the model is asked.
 #: ``cache`` is prompt-caching configuration: the same prompt drawn with or without a
-#: cache hit is the same draw, the same reason ``model_settings`` stays out of the key.
+#: cache hit is the same draw.
 _DELIVERY = frozenset({"cache"})
+
+#: Settings about how the call is delivered, not what is drawn. Provider-prefixed
+#: prompt-cache settings (``anthropic_cache_messages`` and the like) are dropped by
+#: :func:`_delivers` as well, so a new one does not need adding here.
+_DELIVERY_SETTINGS = frozenset({"timeout", "extra_headers", "service_tier", "cache"})
 
 
 class CallPolicy(Protocol):
@@ -69,8 +83,14 @@ class CallPolicy(Protocol):
         messages: Sequence[ModelMessage],
         model_id: str,
         parameters: ModelRequestParameters,
+        settings: ModelSettings | None,
     ) -> Mapping[str, Json]:
-        """The key material for this call — structured data, never prose."""
+        """
+        The key material for this call — structured data, never prose.
+
+        ``settings`` are the effective ones, the wrapped model's own merged with the
+        run's, because those are what the draw is made with.
+        """
         ...
 
 
@@ -78,10 +98,11 @@ class SemanticCallPolicy:
     """
     The default: what the model is being asked, and nothing about the asking.
 
-    Keeps the conversation's semantic content, the model's identity, and the shape the
-    answer is required to take — because each of those changes what is drawn. Drops
-    everything in :data:`_VOLATILE`, which changes between two runs of an identical
-    call.
+    Keeps the conversation's semantic content, the model's identity, the shape the
+    answer is required to take, and the settings that change the draw — because each
+    of those changes what is drawn. Drops everything in :data:`_VOLATILE`, which
+    changes between two runs of an identical call, and the settings that only change
+    how it is delivered.
 
     The **output shape is included** deliberately, and it is the one inclusion that
     looks like it might violate §4a's "never how you intend to parse the response".
@@ -96,13 +117,17 @@ class SemanticCallPolicy:
         messages: Sequence[ModelMessage],
         model_id: str,
         parameters: ModelRequestParameters,
+        settings: ModelSettings | None,
     ) -> Mapping[str, Json]:
         """The key material for this call — structured data, never prose."""
-        return {
+        material: dict[str, Json] = {
             "model": model_id,
             "messages": [self._message(message) for message in messages],
             "parameters": self._parameters(parameters),
         }
+        if drawn := self._settings(settings):
+            material["settings"] = drawn
+        return material
 
     def _message(self, message: ModelMessage) -> Json:
         """One message reduced to its parts' semantic content."""
@@ -150,6 +175,23 @@ class SemanticCallPolicy:
         }
 
     @staticmethod
+    def _settings(settings: ModelSettings | None) -> dict[str, Json]:
+        """
+        The settings that change what is drawn.
+
+        Reduced by **exclusion** for the reason everything else here is: a setting
+        pydantic-ai adds later, or a provider-specific one, is kept unless it is known
+        to be about delivery. Keeping one too many costs a redraw; dropping one that
+        mattered replays an answer drawn under different terms, and says nothing.
+        """
+        if not settings:
+            return {}
+        dumped = cast("Json", to_jsonable_python(settings, fallback=repr))
+        if not isinstance(dumped, dict):
+            return {}
+        return {key: value for key, value in dumped.items() if not _delivers(key)}
+
+    @staticmethod
     def _ordered(field: str, value: Json) -> Json:
         """Sort a list of tool definitions by name; leave everything else alone."""
         if not field.endswith("tools") or not isinstance(value, list):
@@ -157,3 +199,8 @@ class SemanticCallPolicy:
         if not all(isinstance(item, dict) and "name" in item for item in value):
             return value
         return sorted(value, key=lambda item: str(cast("dict[str, Json]", item)["name"]))
+
+
+def _delivers(setting: str) -> bool:
+    """Whether a setting changes only how the call travels — including any cache one."""
+    return setting in _DELIVERY_SETTINGS or "cache" in setting.split("_")
