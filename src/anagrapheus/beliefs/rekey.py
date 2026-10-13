@@ -49,6 +49,9 @@ class BeliefRekey:
     - after a **split**, one per product — which product the belief belongs to depends
       on what the belief *says*, and neither this library nor identity may interpret
       that. Several candidates state exactly what is known.
+    - after an **unmerge**, two — the kept entity's own id and the id it gave back. A
+      belief keyed on the kept entity may have been about either all along, which is
+      the split's question again.
 
     ``sole()`` is for the merge case, and raises rather than picking so the assumption
     stays visible.
@@ -63,9 +66,11 @@ class BeliefRekey:
     def sole(self) -> str:
         """The single successor id, or raise if the decision left more than one."""
         if len(self.candidates) != 1:
+            article = "an" if self.kind[:1] in set("aeiou") else "a"
             raise ValueError(
                 f"belief {self.belief_id!r} has {len(self.candidates)} candidate successors "
-                f"after a {self.kind}; which one it belongs to is not this layer's judgment"
+                f"after {article} {self.kind}; which one it belongs to is not this layer's "
+                f"judgment"
             )
         return self.candidates[0]
 
@@ -81,9 +86,13 @@ def plan_rekeys(
     Turn identity's re-key rows into the beliefs they affect and what they become.
 
     Rows sharing a ``(seq, from_entity)`` are one decision with several targets — that
-    is exactly how identity reports a split — so they are gathered before anything is
-    planned. Planning each row alone would report a split as several independent
-    one-target re-keys and lose the ambiguity the shape exists to preserve.
+    is exactly how identity reports a split, and an unmerge — so they are gathered
+    before anything is planned. Planning each row alone would report a split as several
+    independent one-target re-keys and lose the ambiguity the shape exists to preserve.
+
+    A merge that a later unmerge in the same batch withdrew plans nothing: the absorbed
+    entity is canonical again, so beliefs keyed on it are already keyed correctly. The
+    unmerge's own rows cover the beliefs keyed on the survivor.
 
     ``skip_unrenderable`` drops beliefs whose ids this process cannot re-mint — a
     scheme it does not know, or a predicate it does not declare — instead of raising.
@@ -93,6 +102,8 @@ def plan_rekeys(
     grouped = _group(rekeys)
     plans: list[BeliefRekey] = []
     for (seq, kind, from_entity), targets in grouped.items():
+        if kind == "merge" and _withdrawn(seq, from_entity, targets[0], grouped):
+            continue
         for row in index.beliefs_for(from_entity):
             settled = _settle(from_entity, targets, grouped)
             candidates = _successors(row.belief_id, from_entity, settled, predicates)
@@ -159,12 +170,25 @@ def _onward(entity: UUID, grouped: _Grouped) -> UUID | None:
     Only a merge is followed. A split does not supersede its original — the original
     survives it — so an entity that is later split has not moved, and following one of
     its products would be this layer choosing among them, which is the judgment it may
-    not make.
+    not make. An unmerge is not followed for the same reason, and a merge that a later
+    unmerge in the batch withdrew is not followed either: by the end of the batch the
+    entity yields to nothing through it.
     """
-    for (_seq, kind, from_entity), targets in grouped.items():
-        if kind == "merge" and from_entity == entity:
-            return targets[0]
+    for (seq, kind, from_entity), targets in grouped.items():
+        if kind != "merge" or from_entity != entity:
+            continue
+        if _withdrawn(seq, entity, targets[0], grouped):
+            continue
+        return targets[0]
     return None
+
+
+def _withdrawn(seq: int, absorbed: UUID, kept: UUID, grouped: _Grouped) -> bool:
+    """Whether a later unmerge in the batch withdrew the merge of ``absorbed`` into ``kept``."""
+    return any(
+        kind == "unmerge" and from_entity == kept and later > seq and absorbed in targets
+        for (later, kind, from_entity), targets in grouped.items()
+    )
 
 
 def _why_unrenderable(belief_id: str, predicates: PredicateRegistry) -> BeliefError:

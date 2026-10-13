@@ -207,3 +207,53 @@ corrected by appending a superseding event, per §5c.
   should be established and only externally-referring ones resolved. That is a
   discipline the library records but cannot check — `provenance` is where an
   application would encode it.
+
+## 9. `Unmerged` — withdrawing a merge — [ours]
+
+**Added 2026-10-13.** §7 and the shipped docstrings said a bad merge "is corrected by
+appending a superseding event". No such event existed. A merge set `merged_into` and
+moved the absorbed entity's aliases, and nothing ever cleared or restored either. A
+reverse merge was accepted at write, after which `canonical()` raised `MergeCycle` and
+`resolve()` raised for every form of both entities, for good. `Split` was no fix: it
+mints new ids and leaves the merge standing. "Durable, auditable and reversible" was
+false for merges. The library author chose to add the event rather than declare
+merges final.
+
+**What changed**
+
+- **A fifth role, optionally bound.** `IdentityRole.UNMERGED`, carried by the library
+  event `anagrapheus/unmerged` v1, shape `Unmerged(kept, absorbed, source_event)`.
+  `IdentityVocabulary` requires the other four roles and not this one, so a
+  vocabulary written before it keeps working; it just cannot withdraw a merge.
+- **Checks before append, as everywhere else.** `unmerge(types, registry, kept=,
+  absorbed=)` raises `NotMerged` unless `absorbed` is merged *directly* into `kept`.
+  An unmerge withdraws one merge, not a chain. `merge(..., identity=registry)`
+  optionally raises `MergeCycle` when `absorbed` already lies on `kept`'s chain. The
+  parameter is `identity`, not `registry`, because every helper's first parameter is
+  already called `registry` (the event-type registry).
+- **The fold does not adjudicate.** An unmerge that matches no current merge is
+  recorded as `unmerge_ignored` in both entities' history and changes nothing else.
+  Raising would leave the projection stuck on an event that is already canon.
+- **What comes back.** The absorbed entity's `merged_into` is cleared, and it takes
+  back the forms the merge moved off it. Moved forms include those of anything merged
+  into it earlier, which the old "forms it recorded itself" reading of the decision
+  rows would have stranded on the survivor. A form the survivor recorded for itself,
+  before the merge or since, stays on both. A form a later split carried to a new
+  entity stays there, because the split was its own judgment about that form. To make
+  this exact, the merge now writes the forms it moved, and the ones it found already
+  on the survivor, into its `absorbed` decision row (`moved`, `shared`). No migration:
+  the detail column is JSON. A projection folded before this change has no such
+  record, and an unmerge over it restores nothing until the projection is rebuilt.
+- **Re-applied batches.** The first application's decision row decides. A re-applied
+  merge keeps its recorded forms (a recount would find none, because they have moved
+  already). A re-applied unmerge or no-op keeps what it did the first time, even
+  where state that already reflects later decisions now says otherwise.
+- **The seam has the split's shape.** An unmerge emits two rows, `kept→kept` and
+  `kept→absorbed`. A belief keyed on the survivor may have been about either entity,
+  and only what it says can tell. `plan_rekeys` therefore reports two candidates, and
+  `sole()` refuses. Within one batch, `_onward` no longer follows a merge that a later
+  unmerge withdrew, and the withdrawn merge's own group plans nothing: the absorbed
+  id is canonical again, so beliefs keyed on it are already keyed correctly.
+- **API breaks, before 0.1.0.** `IdentityRole` has a fifth member, and
+  `IdentityStore` has a new `unmerged()`, which third-party stores must implement.
+  Additive: `IdentityRegistry.merged_into()`, `NotMerged`, `OPTIONAL_ROLES`.

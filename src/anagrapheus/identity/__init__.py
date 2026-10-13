@@ -15,9 +15,9 @@ authority:
 
 For the second population the decisions themselves become events, and the registry is
 a fold over them — rebuildable, disposable, replayable, auditable. A bad merge is
-undone by superseding it, not by mutating a table. What that buys is governance, not
-inference: something still has to judge that two forms name one thing, and nothing
-here will do it for you.
+undone by appending an ``Unmerged`` that withdraws it (see :func:`unmerge`), not by
+mutating a table. What that buys is governance, not inference: something still has to
+judge that two forms name one thing, and nothing here will do it for you.
 
 Merge is the joint with the belief layer: it means every belief keyed on the absorbed
 entity is now suspect, and :meth:`IdentityRegistry.rekeys_since` is how that
@@ -31,11 +31,13 @@ from anagrapheus.identity.decisions import (
     merge,
     mint_entity_id,
     split,
+    unmerge,
 )
 from anagrapheus.identity.errors import (
     AmbiguousSurfaceForm,
     IdentityError,
     MergeCycle,
+    NotMerged,
     UnknownEntity,
 )
 from anagrapheus.identity.events import (
@@ -44,6 +46,7 @@ from anagrapheus.identity.events import (
     Merged,
     Split,
     SplitAssignment,
+    Unmerged,
     normalize_surface_form,
 )
 from anagrapheus.identity.fold import FOLD_NAME, IdentityFold
@@ -78,6 +81,7 @@ __all__ = [
     "Ladder",
     "MergeCycle",
     "Merged",
+    "NotMerged",
     "RekeyRow",
     "Resolution",
     "RoleBinding",
@@ -85,6 +89,7 @@ __all__ = [
     "Split",
     "SplitAssignment",
     "UnknownEntity",
+    "Unmerged",
     "alias",
     "establish",
     "merge",
@@ -92,4 +97,5 @@ __all__ = [
     "normalize_surface_form",
     "register_builtin_events",
     "split",
+    "unmerge",
 ]

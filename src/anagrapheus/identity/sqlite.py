@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from uuid import UUID
 
 from anagrapheus.identity.events import normalize_surface_form
@@ -20,7 +20,7 @@ from anagrapheus.identity.store import AliasRow, DecisionRow, EntityRow, RekeyRo
 from anagrapheus.timeline.migrations import migrate
 
 if TYPE_CHECKING:
-    from anagrapheus.identity.events import Aliased, Established, Merged, Split
+    from anagrapheus.identity.events import Aliased, Established, Merged, Split, Unmerged
     from anagrapheus.identity.ladder import Ladder
 
 __all__ = ["SQLiteIdentityStore"]
@@ -68,20 +68,97 @@ class SQLiteIdentityStore:
         # while `surface_forms` did not list them, and a later split of the survivor
         # could not reach them to disambiguate. `identity_decisions` keeps the record
         # of which entity originally recorded each form, so nothing is lost.
+        moved: list[list[object]] = []
+        shared: list[list[object]] = []
         for row in self.aliases(event.absorbed):
+            entry: list[object] = [row.surface_form, row.stance, row.seq]
             if self._alias_row_exists(event.kept, row.surface_form):
                 # The survivor's own recording of its own name wins over a duplicate
                 # arriving from the absorbed entity. Deterministic without ranking,
                 # which this layer cannot do — the ladder belongs to the caller.
+                shared.append(entry)
                 continue
+            moved.append(entry)
             self._put_alias(event.kept, row.surface_form, row.stance, row.seq)
         self._conn.execute(
             "DELETE FROM identity_aliases WHERE entity_id = ?", (str(event.absorbed),)
         )
         self._rekey(seq, "merge", event.absorbed, event.kept)
         detail = {"kept": str(event.kept), "absorbed": str(event.absorbed)}
-        self._decision(seq, event.absorbed, "absorbed", detail)
+        # What the merge took off the absorbed entity is what an unmerge gives back, so
+        # it is written down here. The first application's record wins: on a
+        # re-applied batch the forms have already moved and a recount would find none.
+        recorded = self._decision_detail(seq, event.absorbed, "absorbed")
+        if recorded is None:
+            recorded = {**detail, "moved": moved, "shared": shared}
+        self._decision(seq, event.absorbed, "absorbed", recorded)
         self._decision(seq, event.kept, "merged", detail)
+
+    def unmerged(self, event: Unmerged, seq: int) -> None:
+        detail: dict[str, object] = {"kept": str(event.kept), "absorbed": str(event.absorbed)}
+        # On a re-applied batch the state already reflects later decisions, so whether
+        # this unmerge matches *now* is not whether it matched the first time. What it
+        # did then is in its own decision row, and that row decides.
+        prior = self._decision_detail(seq, event.absorbed, "unmerged")
+        if self._decision_detail(seq, event.absorbed, "unmerge_ignored") is not None:
+            return
+        absorbed = self.entity(event.absorbed)
+        if absorbed is None or absorbed.merged_into != event.kept:
+            if prior is not None:
+                # It landed the first time; the merge it withdrew is why nothing
+                # matches now.
+                return
+            current = None if absorbed is None else absorbed.merged_into
+            detail["merged_into"] = None if current is None else str(current)
+            self._decision(seq, event.absorbed, "unmerge_ignored", detail)
+            self._decision(seq, event.kept, "unmerge_ignored", detail)
+            return
+
+        merge = (
+            None
+            if absorbed.merged_seq is None
+            else self._decision_detail(absorbed.merged_seq, event.absorbed, "absorbed")
+        )
+        self._conn.execute(
+            "UPDATE identity_entities SET merged_into = NULL, merged_seq = NULL "
+            "WHERE entity_id = ?",
+            (str(event.absorbed),),
+        )
+        restored: list[str] = []
+        moved = _entries(merge, "moved") if merge is not None else []
+        shared = _entries(merge, "shared") if merge is not None else []
+        for form, stance, form_seq in moved:
+            on_kept = self._alias_seq(event.kept, form)
+            if on_kept is None:
+                # A later decision, a split of the survivor, took the form elsewhere.
+                # That judgment stands; the unmerge does not reach past it.
+                continue
+            if on_kept == form_seq:
+                # Still the row the merge moved: the survivor never recorded the form
+                # for itself, so it goes back.
+                self._conn.execute(
+                    "DELETE FROM identity_aliases WHERE entity_id = ? AND surface_form = ?",
+                    (str(event.kept), form),
+                )
+            restored.append(form)
+            self._restore_alias(event.absorbed, form, stance, form_seq)
+        for form, stance, form_seq in shared:
+            # Both entities recorded it before the merge, so both hold it again.
+            restored.append(form)
+            self._restore_alias(event.absorbed, form, stance, form_seq)
+        # Split-shaped: a belief keyed on the survivor may have been about either
+        # entity, and only what the belief says can tell which.
+        self._rekey(seq, "unmerge", event.kept, event.kept)
+        self._rekey(seq, "unmerge", event.kept, event.absorbed)
+        detail["merged_seq"] = absorbed.merged_seq
+        if prior is None:
+            prior = {**detail, "restored": sorted(restored)}
+        else:
+            # Matching again on a re-applied batch means a later merge put the pair
+            # back together; that merge re-applies after this. The first record stands.
+            detail = {key: prior[key] for key in detail}
+        self._decision(seq, event.absorbed, "unmerged", prior)
+        self._decision(seq, event.kept, "unmerged", detail)
 
     def split(self, event: Split, seq: int) -> None:
         origin = self.entity(event.original)
@@ -211,6 +288,29 @@ class SQLiteIdentityStore:
         ).fetchone()
         return row is not None
 
+    def _alias_seq(self, entity_id: UUID, surface_form: str) -> int | None:
+        row = self._conn.execute(
+            "SELECT seq FROM identity_aliases WHERE entity_id = ? AND surface_form = ?",
+            (str(entity_id), surface_form),
+        ).fetchone()
+        return None if row is None else int(row["seq"])
+
+    def _restore_alias(self, entity_id: UUID, surface_form: str, stance: str, seq: int) -> None:
+        """Give a form back, unless the entity has recorded it again since."""
+        if not self._alias_row_exists(entity_id, surface_form):
+            self._put_alias(entity_id, surface_form, stance, seq)
+
+    def _decision_detail(self, seq: int, entity_id: UUID, kind: str) -> dict[str, object] | None:
+        """The detail of the decision recorded at ``seq`` for an entity, if it is ``kind``."""
+        row = self._conn.execute(
+            "SELECT kind, detail FROM identity_decisions WHERE seq = ? AND entity_id = ?",
+            (seq, str(entity_id)),
+        ).fetchone()
+        if row is None or row["kind"] != kind:
+            return None
+        detail: dict[str, object] = json.loads(row["detail"])
+        return detail
+
     def _alias_stance(self, entity_id: UUID, surface_form: str) -> str:
         """
         The stance already recorded for a form on an entity, else ungraded.
@@ -270,3 +370,20 @@ class SQLiteIdentityStore:
             """,
             (seq, str(entity_id), kind, json.dumps(detail, sort_keys=True)),
         )
+
+
+def _entries(detail: dict[str, object], key: str) -> list[tuple[str, str, int]]:
+    """
+    The ``[form, stance, seq]`` entries a merge recorded under ``key``.
+
+    A merge folded before merges recorded their forms has none, and an unmerge of it
+    restores nothing; rebuilding the projection records them.
+    """
+    raw = detail.get(key)
+    if not isinstance(raw, list):
+        return []
+    entries: list[tuple[str, str, int]] = []
+    for item in cast("list[object]", raw):
+        form, stance, seq = cast("list[object]", item)
+        entries.append((str(form), str(stance), int(cast("int", seq))))
+    return entries

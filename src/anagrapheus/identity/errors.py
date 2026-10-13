@@ -6,6 +6,7 @@ __all__ = [
     "AmbiguousSurfaceForm",
     "IdentityError",
     "MergeCycle",
+    "NotMerged",
     "UnknownEntity",
 ]
 
@@ -18,9 +19,22 @@ class MergeCycle(IdentityError):
     """
     Following an entity's merge chain returned to where it started.
 
-    A cycle is a contradiction in the log, not a state to recover from: the entities
-    involved have no canonical id until a corrective event supersedes one of the
+    A cycle is a contradiction in the log: the entities involved have no canonical id
+    until an :class:`~anagrapheus.identity.events.Unmerged` withdraws one of the
     merges. Raised rather than looping, because the alternative is a query that hangs.
+
+    Also raised before append by :func:`~anagrapheus.identity.decisions.merge` when it
+    is given the registry and the merge would close a cycle.
+    """
+
+
+class NotMerged(IdentityError):
+    """
+    An unmerge named a pair that is not merged.
+
+    Raised before append by :func:`~anagrapheus.identity.decisions.unmerge` when
+    ``absorbed`` is not currently merged directly into ``kept``. An unmerge withdraws
+    one merge, so there has to be that merge to withdraw.
     """
 
 

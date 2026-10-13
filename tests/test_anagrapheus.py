@@ -42,6 +42,7 @@ def test_top_level_registers_every_subpackages_events():
         "aliased",
         "merged",
         "split",
+        "unmerged",
     }
 
 
