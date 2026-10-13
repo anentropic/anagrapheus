@@ -37,6 +37,10 @@ class AlreadyMerged(IdentityError):
     given the registry and ``absorbed`` is already merged, into ``kept`` or anywhere
     else. An entity yields to one survivor at a time: unmerge it first, then merge it
     where it belongs.
+
+    The check reads the registry, so it cannot see a merge built earlier in the same
+    batch and not yet appended. Nothing is lost when it misses one: the fold ignores
+    the second merge of an entity and records it as ignored.
     """
 
 

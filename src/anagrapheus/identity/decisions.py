@@ -166,7 +166,10 @@ def merge(
     :func:`unmerge` first. If ``kept`` already yields, directly or through a chain, to
     ``absorbed``, it raises :class:`~anagrapheus.identity.errors.MergeCycle` instead of
     returning an event that would leave both entities with no canonical id. The checks
-    are only as current as the registry, so catch it up first.
+    are only as current as the registry, so catch it up first. Nor can they see a merge
+    built earlier in the same batch and not yet appended: a second merge of one entity
+    there is still folded as an ignored no-op, but a cycle closed there is folded as
+    written, and an unmerge repairs it.
 
     Without the checks, a merge of an entity that is already merged is folded as a
     recorded no-op: the standing merge stays, and the history of both entities named

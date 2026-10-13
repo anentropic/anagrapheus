@@ -250,6 +250,9 @@ class SQLiteIdentityStore:
 
         The survivor's row is the withdrawn merge's when its sequence is the one that
         merge recorded; a row of the survivor's own, or a later decision's, is left be.
+        The sequence is enough to tell them apart: no decision records one form on two
+        entities, a split included, and a merge or unmerge moves a row rather than
+        copying it, so no two entities ever hold a form at the same sequence.
         Another merge still standing may have brought the same form, recorded as held
         by both because this one got there first; the survivor keeps the form for that
         one, as it would have had the withdrawn merge never happened.
