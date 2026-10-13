@@ -287,12 +287,12 @@ class BeliefSlice:
         # the scan stops at the first event the fold reads.
         for event in self._reader.read_raw(low, upto_seq=high, where=self._claims):
             raise StaleRead(f"{stale}: event {event.seq} between them changes beliefs")
-        if folded < upto:
+        if folded < upto and self._reader.last_seq() < upto:
             # Positions the log has not reached yet hold nothing to find, and a belief
             # event appended there later would pass this check once the fold reached it.
-            reached = next(self._reader.read_raw(upto - 1, limit=1), None)
-            if reached is None:
-                raise StaleRead(f"{stale}: the log ends before {upto}")
+            # Asked of the store's high-water mark, so the event at ``upto`` is never
+            # upcast: one the fold ignores cannot fail this read.
+            raise StaleRead(f"{stale}: the log ends before {upto}")
 
     def handed_out(self) -> tuple[Source, ...]:
         """Every belief state returned so far."""

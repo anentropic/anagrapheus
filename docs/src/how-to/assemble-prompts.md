@@ -39,7 +39,7 @@ flowchart LR
 
 ## 1. Bring the projections to the position you will read at
 
-Every slice in a grant reads at one log position. A belief slice refuses to read if a belief event lies between that position and the belief fold's, so run the projector first and read at the log's last position:
+Every slice in a grant reads at one log position. A belief slice refuses to read if a belief event lies between that position and the belief fold's own position, so run the projector first and read at the log's last position:
 
 ```python title="assemble_prompts.py"
 import uuid

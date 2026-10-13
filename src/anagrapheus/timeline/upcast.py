@@ -85,6 +85,10 @@ class EventReader:
         self._upcasts = upcasts
         self._types = types
 
+    def last_seq(self) -> int:
+        """The highest ``seq`` in the log, or 0 if it is empty. No event is read or upcast."""
+        return self._store.last_seq()
+
     def read_raw(
         self,
         since_seq: int = 0,
