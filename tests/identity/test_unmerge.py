@@ -509,3 +509,161 @@ def test_a_merge_after_the_first_is_withdrawn_lands(rig: Rig):
     assert rig.registry.resolve("acme-uk").sole() == other
     _assert_replay_is_idempotent(rig)
     assert rig.registry.resolve("acme-uk").sole() == other
+
+
+# -- an unmerge after the survivor was itself merged on --------------------------------
+
+
+def test_an_unmerge_after_the_survivor_was_merged_on_restores_the_names(rig: Rig):
+    """
+    B into A, then A into Z, then B out of A: B's forms come back off Z.
+
+    A later merge of the survivor carried the forms on, which is not a later judgment
+    about them, so the unmerge follows them there. Withdrawing A from Z afterwards
+    gives A back only its own.
+    """
+    z, ez = establish(rig.types, "z", provenance="x")
+    a, ea = establish(rig.types, "a", provenance="x")
+    b, eb = establish(rig.types, "b", provenance="x")
+    rig.commit(
+        ez,
+        ea,
+        eb,
+        alias(rig.types, b, "bee", "believed"),
+        merge(rig.types, kept=a, absorbed=b),
+        merge(rig.types, kept=z, absorbed=a),
+    )
+    assert rig.registry.resolve("bee").sole() == z
+
+    rig.commit(unmerge(rig.types, rig.registry, kept=a, absorbed=b))
+
+    assert rig.registry.canonical(b) == b
+    assert rig.registry.canonical(a) == z
+    assert rig.registry.resolve("b").sole() == b
+    assert rig.registry.resolve("bee").sole() == b
+    assert rig.registry.resolve("bee").candidates[0].stance == "believed"
+    assert {r.surface_form for r in rig.registry.surface_forms(z)} == {"z", "a"}
+    assert {r.surface_form for r in rig.registry.surface_forms(b)} == {"b", "bee"}
+    _assert_replay_is_idempotent(rig)
+    assert {r.surface_form for r in rig.registry.surface_forms(b)} == {"b", "bee"}
+
+    rig.commit(unmerge(rig.types, rig.registry, kept=z, absorbed=a))
+
+    assert rig.registry.canonical(a) == a
+    assert {r.surface_form for r in rig.registry.surface_forms(z)} == {"z"}
+    assert {r.surface_form for r in rig.registry.surface_forms(a)} == {"a"}
+    assert {r.surface_form for r in rig.registry.surface_forms(b)} == {"b", "bee"}
+    _assert_replay_is_idempotent(rig)
+    assert {r.surface_form for r in rig.registry.surface_forms(a)} == {"a"}
+    assert {r.surface_form for r in rig.registry.surface_forms(b)} == {"b", "bee"}
+
+
+def test_an_unmerge_follows_the_forms_through_more_than_one_later_merge(rig: Rig):
+    """B into A, A into Z, Z into W: withdrawing B from A takes its forms back off W."""
+    w, ew = establish(rig.types, "w", provenance="x")
+    z, ez = establish(rig.types, "z", provenance="x")
+    a, ea = establish(rig.types, "a", provenance="x")
+    b, eb = establish(rig.types, "b", provenance="x")
+    rig.commit(
+        ew,
+        ez,
+        ea,
+        eb,
+        alias(rig.types, b, "bee", "believed"),
+        merge(rig.types, kept=a, absorbed=b),
+        merge(rig.types, kept=z, absorbed=a),
+        merge(rig.types, kept=w, absorbed=z),
+    )
+
+    rig.commit(unmerge(rig.types, rig.registry, kept=a, absorbed=b))
+
+    assert {r.surface_form for r in rig.registry.surface_forms(b)} == {"b", "bee"}
+    assert {r.surface_form for r in rig.registry.surface_forms(w)} == {"w", "z", "a"}
+    _assert_replay_is_idempotent(rig)
+    assert {r.surface_form for r in rig.registry.surface_forms(b)} == {"b", "bee"}
+
+
+def test_a_form_split_off_after_the_survivor_was_merged_on_stays_where_it_went(rig: Rig):
+    """B into A, A into Z, then Z split: the split's judgment stands against the unmerge."""
+    z, ez = establish(rig.types, "z", provenance="x")
+    a, ea = establish(rig.types, "a", provenance="x")
+    b, eb = establish(rig.types, "b", provenance="x")
+    carved = uuid.uuid7()
+    rig.commit(
+        ez,
+        ea,
+        eb,
+        alias(rig.types, b, "bee", "believed"),
+        merge(rig.types, kept=a, absorbed=b),
+        merge(rig.types, kept=z, absorbed=a),
+        split(rig.types, z, [(carved, ["bee"])]),
+    )
+
+    rig.commit(unmerge(rig.types, rig.registry, kept=a, absorbed=b))
+
+    assert rig.registry.resolve("bee").sole() == carved
+    assert rig.registry.resolve("b").sole() == b
+    _assert_replay_is_idempotent(rig)
+    assert rig.registry.resolve("bee").sole() == carved
+
+
+def test_a_form_the_later_survivor_held_itself_stays_on_it_and_comes_back(rig: Rig):
+    """Z recorded "bee" too, so A into Z kept Z's row; B still gets its own back."""
+    z, ez = establish(rig.types, "z", provenance="x")
+    a, ea = establish(rig.types, "a", provenance="x")
+    b, eb = establish(rig.types, "b", provenance="x")
+    rig.commit(
+        ez,
+        ea,
+        eb,
+        alias(rig.types, z, "bee", "certain"),
+        alias(rig.types, b, "bee", "believed"),
+        merge(rig.types, kept=a, absorbed=b),
+        merge(rig.types, kept=z, absorbed=a),
+    )
+
+    rig.commit(unmerge(rig.types, rig.registry, kept=a, absorbed=b))
+
+    candidates = rig.registry.resolve("bee").candidates
+    assert {(c.entity_id, c.stance) for c in candidates} == {(z, "certain"), (b, "believed")}
+    _assert_replay_is_idempotent(rig)
+
+    rig.commit(unmerge(rig.types, rig.registry, kept=z, absorbed=a))
+
+    candidates = rig.registry.resolve("bee").candidates
+    assert {(c.entity_id, c.stance) for c in candidates} == {(z, "certain"), (b, "believed")}
+    assert {r.surface_form for r in rig.registry.surface_forms(a)} == {"a"}
+    _assert_replay_is_idempotent(rig)
+    assert {r.surface_form for r in rig.registry.surface_forms(a)} == {"a"}
+
+
+def test_a_form_another_merge_also_brought_stays_with_the_later_survivor(rig: Rig):
+    """B and C both bring a form into A, A into Z: withdrawing B leaves C's claim on Z."""
+    z, ez = establish(rig.types, "z", provenance="x")
+    a, ea = establish(rig.types, "a", provenance="x")
+    b, eb = establish(rig.types, "ACME", provenance="import")
+    c, ec = establish(rig.types, "ACME", provenance="ledger")
+    rig.commit(
+        ez,
+        ea,
+        eb,
+        ec,
+        merge(rig.types, kept=a, absorbed=b),
+        merge(rig.types, kept=a, absorbed=c),
+        merge(rig.types, kept=z, absorbed=a),
+    )
+
+    rig.commit(unmerge(rig.types, rig.registry, kept=a, absorbed=b))
+
+    assert {r.entity_id for r in rig.registry.resolve("ACME").candidates} == {z, b}
+    _assert_replay_is_idempotent(rig)
+
+    # Withdrawing C too takes the form off Z, which held it only for C.
+    rig.commit(unmerge(rig.types, rig.registry, kept=a, absorbed=c))
+    assert {r.entity_id for r in rig.registry.resolve("ACME").candidates} == {b, c}
+    _assert_replay_is_idempotent(rig)
+
+    # And withdrawing A from Z gives A nothing of the form.
+    rig.commit(unmerge(rig.types, rig.registry, kept=z, absorbed=a))
+    assert {r.entity_id for r in rig.registry.resolve("ACME").candidates} == {b, c}
+    _assert_replay_is_idempotent(rig)

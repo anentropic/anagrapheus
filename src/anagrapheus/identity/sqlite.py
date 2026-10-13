@@ -132,20 +132,30 @@ class SQLiteIdentityStore:
         moved = _entries(merge, "moved") if merge is not None else []
         shared = _entries(merge, "shared") if merge is not None else []
         for form, stance, form_seq in moved:
-            if self._alias_seq(event.kept, form) is None:
-                # A later decision, a split of the survivor, took the form elsewhere.
-                # That judgment stands; the unmerge does not reach past it.
+            holder = self._holder(event.kept, form)
+            if holder is None:
+                # A later decision, a split, took the form elsewhere — off the survivor,
+                # or off whatever the survivor was later merged into. That judgment
+                # stands; the unmerge does not reach past it.
                 continue
-            # Still the row the merge moved means the survivor never recorded the form
-            # for itself, so it goes back.
-            self._release(event.kept, event.absorbed, form, form_seq)
+            # Still the row the merge moved — on the survivor, or carried on by a later
+            # merge of it — means nothing recorded the form for itself, so it goes back.
+            self._release(holder, event.kept, event.absorbed, form, form_seq)
             restored.append(form)
             self._restore_alias(event.absorbed, form, stance, form_seq)
         for form, stance, form_seq in shared:
             # Both held it before the merge, so both hold it again. The survivor's row
             # may be one it holds only for this merge, kept for it when another merge
-            # that had moved the form was withdrawn first.
-            self._release(event.kept, event.absorbed, form, form_seq)
+            # that had moved the form was withdrawn first, and a later merge of the
+            # survivor may have carried that row on.
+            holder = self._holder(event.kept, form)
+            if holder is not None:
+                self._release(holder, event.kept, event.absorbed, form, form_seq)
+            if self._seq_holder(form, form_seq) not in {None, event.absorbed}:
+                # Another entity holds the very row this merge saw. The absorbed entity
+                # held the form only through an entity merged into it, and an earlier
+                # unmerge already gave the row back there.
+                continue
             restored.append(form)
             self._restore_alias(event.absorbed, form, stance, form_seq)
         # Split-shaped: a belief keyed on the survivor may have been about either
@@ -244,26 +254,56 @@ class SQLiteIdentityStore:
             if self._alias_seq(event.absorbed, form) == form_seq:
                 self._delete_alias(event.absorbed, form)
 
-    def _release(self, kept: UUID, absorbed: UUID, form: str, form_seq: int) -> None:
+    def _holder(self, kept: UUID, form: str) -> UUID | None:
         """
-        Take a form an unmerge gives back off the survivor, unless it has another claim.
+        The entity standing where a withdrawn merge into ``kept`` left ``form``, if any.
 
-        The survivor's row is the withdrawn merge's when its sequence is the one that
-        merge recorded; a row of the survivor's own, or a later decision's, is left be.
+        That is the survivor itself while it holds the form at all. Once the survivor
+        has yielded to a later merge, that merge took the survivor's forms with it, and
+        its record says whether it took this one: then the form is looked for on that
+        merge's survivor, and on through any merge of that one in turn. A form that no
+        entity on the way still holds was taken by a later split, whose judgment
+        stands, so there is nothing to follow.
+        """
+        holder = kept
+        seen = {holder}
+        while self._alias_seq(holder, form) is None:
+            row = self.entity(holder)
+            if row is None or row.merged_into is None or row.merged_seq is None:
+                return None
+            merge = self._decision_detail(row.merged_seq, holder, "absorbed")
+            carried = (
+                [] if merge is None else [*_entries(merge, "moved"), *_entries(merge, "shared")]
+            )
+            if all(other != form for other, _stance, _seq in carried):
+                return None
+            holder = row.merged_into
+            if holder in seen:
+                return None
+            seen.add(holder)
+        return holder
+
+    def _release(self, holder: UUID, kept: UUID, absorbed: UUID, form: str, form_seq: int) -> None:
+        """
+        Take a form an unmerge gives back off its holder, unless it has another claim.
+
+        The holder is the survivor, or what a later merge of the survivor carried the
+        row on to. Its row is the withdrawn merge's when its sequence is the one that
+        merge recorded; a row of the holder's own, or a later decision's, is left be.
         The sequence is enough to tell them apart: no decision records one form on two
         entities, a split included, and a merge or unmerge moves a row rather than
         copying it, so no two entities ever hold a form at the same sequence.
-        Another merge still standing may have brought the same form, recorded as held
-        by both because this one got there first; the survivor keeps the form for that
-        one, as it would have had the withdrawn merge never happened.
+        Another merge into the survivor still standing may have brought the same form,
+        recorded as held by both because this one got there first; the holder keeps
+        the form for that one, as it would have had the withdrawn merge never happened.
         """
-        if self._alias_seq(kept, form) != form_seq:
+        if self._alias_seq(holder, form) != form_seq:
             return
         claim = self._standing_claim(kept, absorbed, form)
         if claim is None:
-            self._delete_alias(kept, form)
+            self._delete_alias(holder, form)
         else:
-            self._put_alias(kept, form, claim[0], claim[1])
+            self._put_alias(holder, form, claim[0], claim[1])
 
     def _standing_claim(self, kept: UUID, absorbed: UUID, form: str) -> tuple[str, int] | None:
         """``form``'s stance and sequence from the earliest other standing merge that held it."""
@@ -386,6 +426,14 @@ class SQLiteIdentityStore:
             (str(entity_id), surface_form),
         ).fetchone()
         return None if row is None else int(row["seq"])
+
+    def _seq_holder(self, surface_form: str, seq: int) -> UUID | None:
+        """The entity holding ``surface_form`` at exactly ``seq``, if one does."""
+        row = self._conn.execute(
+            "SELECT entity_id FROM identity_aliases WHERE surface_form = ? AND seq = ?",
+            (surface_form, seq),
+        ).fetchone()
+        return None if row is None else UUID(row["entity_id"])
 
     def _restore_alias(self, entity_id: UUID, surface_form: str, stance: str, seq: int) -> None:
         """Give a form back, unless the entity has recorded it again since."""
