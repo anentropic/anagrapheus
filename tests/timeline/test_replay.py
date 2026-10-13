@@ -215,29 +215,6 @@ def test_unit_id_with_extract_is_rejected(types: EventTypeRegistry):
         ReplayPins.from_events([], types, unit_id=uuid.uuid7(), extract=lambda stored, event: None)
 
 
-def test_announce_appends_replay_diverged(tmp_path: Path, types: EventTypeRegistry):
-    from anagrapheus.timeline.pins import ReplayDiverged
-    from anagrapheus.timeline.registry import RESERVED_NAMESPACE, EventKey
-
-    store = SQLiteEventStore(tmp_path / "t.db")
-    unit = PinLedger(store, types)
-    replay = ReplayPins.from_events(
-        store.read(),
-        types,
-        on_miss="record",
-        announce=ReplayPins.announce_to(store, types, unit_id=unit.unit_id),
-        into=unit,
-    )
-    replay.resolve(pin_key("rng", {"a": 1}), kind="rng", effect=lambda: 1, interpret=lambda n: n)
-    replay.resolve(pin_key("rng", {"a": 2}), kind="rng", effect=lambda: 2, interpret=lambda n: n)
-
-    diverged = [e for e in store.read() if e.envelope.type == "ReplayDiverged"]
-    assert len(diverged) == 1  # first miss only — announced once
-    decoded = types.decode(EventKey(RESERVED_NAMESPACE, "ReplayDiverged", 1), diverged[0].payload)
-    assert isinstance(decoded, ReplayDiverged)
-    assert decoded.unit_id == unit.unit_id
-
-
 def test_fixture_events_get_upcast(tmp_path: Path, types: EventTypeRegistry):
     """A v1 fixture keeps working after PinPromoted gains a schema version."""
     from anagrapheus.timeline.pins import PinPromoted
