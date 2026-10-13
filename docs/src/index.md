@@ -135,34 +135,3 @@ Storage is the standard library's `sqlite3`. One database file can hold every co
 [ref-identity]: reference/index.md#identity
 [ref-chronicle]: reference/index.md#chronicle
 [ref-assembly]: reference/index.md#assembly
-
-<!-- INTERNAL NOTES FOR EDITOR - DO NOT INCLUDE IN RENDERED OUTPUT
-## Page Classification
-- Type: index (front page / overview)
-- Reference used: dedicated template (section index rules + inventory key sections)
-
-## Source References
-- src/anagrapheus/__init__.py (register_builtin_events, NullHandler logging)
-- src/anagrapheus/provider/model.py (PinnedModel(wrapped, resolver, *, policy, kind, on_key))
-- src/anagrapheus/timeline/pins.py (PinLedger(store, registry), commit())
-- src/anagrapheus/timeline/replay.py (ReplayPins.from_events(events, registry, ...))
-- src/anagrapheus/timeline/sqlite.py (SQLiteEventStore(path))
-- pyproject.toml (requires-python >=3.14; extras anthropic, openai; deps doxastica, pydantic-ai-slim)
-
-## Accuracy Notes
-- taste.py verified: /tmp/.../scratchpad/docs-examples/start/overview/taste.py, run twice against the same summit.db; output identical both times (later pins with the same key win, same result).
-- Re-running taste.py appends a second run to summit.db; harmless here.
-- "model calls: 1" holds because ReplayPins strict mode raises PinMiss before awaiting the effect.
-- Assumes the package is published on PyPI for the pip/uv tabs (README previously said "not published").
-
-## Known Limitations
-- The top-level `anagrapheus.register_builtin_events` has no generated reference page: gen_ref_pages.py skips every `__init__.py`. It is therefore left unlinked.
-- Subpackage rows link to anchors on reference/index.md (#timeline etc.) because no per-subpackage page is generated. Those anchors come from the `## timeline` ... headings there; keep them in sync.
-
-## API Reference Links Used
-- reference/anagrapheus/provider/model.md#anagrapheus.provider.model.PinnedModel
-- reference/anagrapheus/provider/tools.md#anagrapheus.provider.tools.pinned_tool
-- reference/anagrapheus/timeline/pins.md#anagrapheus.timeline.pins.PinLedger
-- reference/anagrapheus/timeline/replay.md#anagrapheus.timeline.replay.ReplayPins
-- reference/anagrapheus/timeline/replay.md#anagrapheus.timeline.replay.PinMiss
--->

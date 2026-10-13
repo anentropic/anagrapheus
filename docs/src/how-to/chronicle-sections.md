@@ -29,7 +29,7 @@ This guide shows how to keep a long run's history inside a context window: each 
 
 ## 1. Write the summariser
 
-A [`Summarizer`][summarizer] is any callable that takes the range's stored events and returns a [`Consolidation`][consolidation]: the prose, plus the pin keys its model calls resolved under. Draw through a `PinnedModel` and collect the keys with `on_key`:
+A [`Summarizer`][summarizer] is any callable that takes the range's stored events and returns a [`Consolidation`][consolidation]: the prose, plus the pin keys its model calls resolved under. Draw through a [`PinnedModel`][pinned-model] and collect the keys with `on_key`:
 
 ```python title="chronicle.py"
 from collections.abc import Sequence
@@ -170,12 +170,12 @@ The tail always comes from the log, never from the chronicle. If consolidation f
 
 There are two read surfaces, at two grades:
 
-- `brief.anchors` ([`Anchors`][anchors]) has ranges, coverage and `consolidated_through()`, but no prose. Use it for anything that decides something: gating, validation, what to consolidate next.
+- `brief.anchors` ([`Anchors`][anchors]) has ranges, coverage and [`consolidated_through()`][consolidated-through], but no prose. Use it for anything that decides something: gating, validation, what to consolidate next.
 - `brief.prose` ([`Prose`][prose]) and `brief.depth()` return sections with their prose. Prose is advisory: show it to a model, but never let it settle anything.
 
 [`substring_retriever`][substring-retriever] is a deliberately naive case-insensitive search, most recent first. For real retrieval, write your own [`Retriever`][retriever]: any callable taking `(sections, query)` and returning sections.
 
-When the summarised past goes into a prompt, label it as generated. [How to Assemble Prompts from Granted Slices](assemble-prompts.md) shows how `ChronicleSlice` enforces this.
+When the summarised past goes into a prompt, label it as generated. [How to Assemble Prompts from Granted Slices](assemble-prompts.md) shows how [`ChronicleSlice`][chronicle-slice] enforces this.
 
 ## Verify it worked
 
@@ -197,7 +197,7 @@ print(carried.load(chronicle.export()))  # sections written: 1
 
 ## Rebuild only when you mean it
 
-`Projector.rebuild` refuses a generative fold:
+[`Projector.rebuild`][projector-rebuild] refuses a generative fold:
 
 ```text
 GenerativeRebuild: 'chronicle' is a generative fold: rebuilding re-runs every model call it made and returns the same anchors with different content. Carry it across instead, or pass discard_generated=True to accept both.
@@ -206,7 +206,7 @@ GenerativeRebuild: 'chronicle' is a generative fold: rebuilding re-runs every mo
 !!! danger "Rebuilding discards every section's prose"
     `discard_generated=True` drops every section and regenerates it. Anything that read the old prose read something that no longer exists, and every summary is paid for again. The anchors come back identical; the prose comes back identical only where the summariser's pins still hit.
 
-To rebuild with identical prose, give the summariser a `ReplayPins` over the log, so every summary is answered from its pin:
+To rebuild with identical prose, give the summariser a [`ReplayPins`][replay-pins] over the log, so every summary is answered from its pin:
 
 ```python
 from anagrapheus.chronicle import FOLD_NAME
@@ -266,7 +266,7 @@ through = await asyncio.to_thread(consolidate_in_this_thread, Path("talks.db"))
 
 ### The tail contains `PinPromoted` events
 
-`Brief.tail` returns every event above the position, library events included. Filter on `event.envelope.namespace`, as in step 4.
+[`Brief.tail`][brief-tail] returns every event above the position, library events included. Filter on `event.envelope.namespace`, as in step 4.
 
 ## Related
 
@@ -284,30 +284,9 @@ through = await asyncio.to_thread(consolidate_in_this_thread, Path("talks.db"))
 [prose]: ../reference/anagrapheus/chronicle/reading.md#anagrapheus.chronicle.reading.Prose
 [retriever]: ../reference/anagrapheus/chronicle/reading.md#anagrapheus.chronicle.reading.Retriever
 [substring-retriever]: ../reference/anagrapheus/chronicle/reading.md#anagrapheus.chronicle.reading.substring_retriever
-
-<!-- INTERNAL NOTES FOR EDITOR - DO NOT INCLUDE IN RENDERED OUTPUT
-## Page Classification
-- Type: how-to
-- Reference used: skills/diataxis/references/how-to-guides.md
-
-## Source References
-- src/anagrapheus/chronicle/fold.py, reading.py, sections.py, store.py, sqlite.py
-- src/anagrapheus/timeline/folds.py (Projector.rebuild, GenerativeRebuild, prepare-before-transaction)
-- examples/negotiation/story.py (RoundSummary pattern), table.py (separate projectors)
-- Verified scripts: scratchpad docs-examples/howto/chronicle.py, chronicle_carry.py
-
-## Accuracy Notes
-- Inventory names checked: `GenerativeRebuild` exists (anagrapheus.timeline.folds, re-exported from anagrapheus.timeline) and is raised by Projector.rebuild for a generative fold. `SQLiteChronicleStore.export()`/`load()` exist and behave as written (load returns count landed; second load returned 0).
-- The carry fragment uses Path("new-backend.db"); the verified script used a temp directory. Otherwise verbatim.
-- The replayed rebuild returned position 5 and prose identical to the original. Verified.
-- The PinPromoted-in-tail observation is real: committing the ledger after catch_up appended PinPromoted at seq 5, above the consolidated range.
-- `RoundSummary.__init__(self, resolver)` is unannotated to match the verified script.
-
-## Known Limitations
-- Spelling: the library's protocol is `Summarizer` and the keyword argument is `summarize=` (US spelling in code). Prose uses British "summariser"; code names kept verbatim.
-- The summariser is synchronous; `Agent.run_sync` raises RuntimeError inside a running loop (verified), and `asyncio.to_thread(consolidate.catch_up)` raises sqlite3.ProgrammingError (connection is thread-affine; verified). The worker-thread-with-own-store pattern in Troubleshooting was verified in chronicle_async2.py against a file-backed store (the snippet was adapted to take `path` as an argument). Possible library friction worth reporting.
-
-## API Reference Links Used
-- anagrapheus.chronicle.fold.Summarizer, Consolidation, ChronicleFold, EventTypes, UnitBoundary
-- anagrapheus.chronicle.reading.Brief, Anchors, Prose, Retriever, substring_retriever
--->
+[pinned-model]: ../reference/anagrapheus/provider/model.md#anagrapheus.provider.model.PinnedModel
+[consolidated-through]: ../reference/anagrapheus/chronicle/reading.md#anagrapheus.chronicle.reading.Anchors.consolidated_through
+[chronicle-slice]: ../reference/anagrapheus/assembly/slices.md#anagrapheus.assembly.slices.ChronicleSlice
+[projector-rebuild]: ../reference/anagrapheus/timeline/folds.md#anagrapheus.timeline.folds.Projector.rebuild
+[replay-pins]: ../reference/anagrapheus/timeline/replay.md#anagrapheus.timeline.replay.ReplayPins
+[brief-tail]: ../reference/anagrapheus/chronicle/reading.md#anagrapheus.chronicle.reading.Brief.tail

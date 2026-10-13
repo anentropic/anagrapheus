@@ -43,7 +43,7 @@ Everything the fold derives from the log alone (which sections exist, the range 
 
 ### The summariser builds the key
 
-A generative fold's model calls should be pinned like any other. The obvious place to build their key would be the fold, from the range it is consolidating. That key would be blind to the one thing most likely to change: the summariser's prompt. Edit the prompt, and a fold-built key would happily serve the old consolidation.
+A generative fold's model calls should be pinned like any other. The obvious place to build their key would be the fold, from the range it is consolidating. That key would be blind to the one thing most likely to change: the summariser's prompt. Edit the prompt, and a fold-built key would still serve the old consolidation.
 
 So the fold builds no key. The summariser does, by drawing through [`PinnedModel`][pinned-model], which keys the whole request, prompt included. A changed prompt is a different key, and therefore a miss. `PinnedModel`'s `on_key` callback hands the summariser the keys it used, which it returns in `Consolidation.pins` so that each section records the pins it was built from. A rebuild through replay can then be shown to be bit-exact rather than assumed to be.
 
@@ -60,12 +60,12 @@ That also means the chronicle should run on its own [`Projector`][projector], dr
 
 Generated prose is useful context for a model's next step. It must not settle anything: a validator's verdict, a gate, what counts as having happened. The rule is easy to state and easy to forget under deadline, so it is built into the API as two separate objects, neither reachable from the other:
 
-- [`Anchors`][anchors] is the deterministic surface: ranges, boundaries, supersession and `consolidated_through()`, where the consolidated past ends. Safe for decisions, because a rebuild reproduces all of it.
+- [`Anchors`][anchors] is the deterministic surface: ranges, boundaries, supersession and [`consolidated_through()`][consolidated-through], where the consolidated past ends. Safe for decisions, because a rebuild reproduces all of it.
 - [`Prose`][prose] is the generated surface: the words. Advisory only.
 
 A caller that needs to decide something takes `Anchors` and finds there is no prose on it to misuse.
 
-[`Brief`][brief] combines the two halves of the recency/depth split for reading: `tail(since_seq=...)` returns the log's own events verbatim as [`Recent`][recent], and `depth()` returns the consolidated sections. The tail is read from the log, never from the chronicle, so near-term continuity never depends on generated prose. It also makes consolidation lag invisible: if the chronicle is behind, the tail simply covers more.
+[`Brief`][brief] combines the two halves of the recency/depth split for reading: [`tail(since_seq=...)`][brief-tail] returns the log's own events verbatim as [`Recent`][recent], and [`depth()`][brief-depth] returns the consolidated sections. The tail is read from the log, never from the chronicle, so near-term continuity never depends on generated prose. It also makes consolidation lag invisible: if the chronicle is behind, the tail simply covers more.
 
 !!! warning "A shared chronicle can only carry public content"
     One chronicle is read by every role it is shown to. If its prose summarises a private event, such as a side remark only one party overheard, that event reaches every reader's prompt, including the party who believes it went unheard. There is no wording of a shared summary that describes a private event correctly for every reader. Keep private events out of what the summariser is given; [Prompt Assembly](prompt-assembly.md) shows how a slice's `admit` filter does that.
@@ -74,11 +74,11 @@ A caller that needs to decide something takes `Anchors` and finds there is no pr
 
 For a deterministic projection, rebuilding is free: drop it, replay, get the identical thing back. For the chronicle it is neither cheap nor exact. Rebuilding re-runs every model call the chronicle ever made, which is the whole cost again, and returns the same anchors with different prose. Anything that read the old prose read something that no longer exists.
 
-So `Projector.rebuild` refuses a generative fold, raising `GenerativeRebuild`, unless you pass `discard_generated=True` to say out loud that you accept both costs. The one exception to "different prose" is a rebuild whose summariser draws through a [replay resolver](pinning-and-replay.md) built from the log: consolidations whose pins were committed then come back word for word, with the model never reached.
+So [`Projector.rebuild`][projector-rebuild] refuses a generative fold, raising [`GenerativeRebuild`][generative-rebuild], unless you pass `discard_generated=True` to say out loud that you accept both costs. The one exception to "different prose" is a rebuild whose summariser draws through a [replay resolver](pinning-and-replay.md) built from the log: consolidations whose pins were committed then come back word for word, with the model never reached.
 
 ### Carry it instead
 
-Because rebuilding is lossy, the chronicle is the one projection better **carried** across a change of storage backend than rebuilt. [`SQLiteChronicleStore`][sqlite-chronicle] (any [`ChronicleStore`][chronicle-store]) offers `export()`, every row including superseded ones, and `load(sections)`, which inserts them and skips ids already present. `load` is idempotent, so an interrupted carry can simply be repeated.
+Because rebuilding is lossy, the chronicle is the one projection better **carried** across a change of storage backend than rebuilt. [`SQLiteChronicleStore`][sqlite-chronicle] (any [`ChronicleStore`][chronicle-store]) offers [`export()`][store-export], every row including superseded ones, and [`load(sections)`][store-load], which inserts them and skips ids already present. `load` is idempotent, so an interrupted carry can simply be repeated.
 
 `load` is not a merge. Section ids come from the ranges they cover, which is what makes anchors replay, so two chronicles over the same log collide on every id, and the incoming prose is dropped in favour of what is already there.
 
@@ -89,7 +89,7 @@ Carrying grants no authority. A carried chronicle and a rebuilt one are equally 
 
 ## Retrieval stays behind a port
 
-Ranked retrieval over sections is a well-served problem with its own libraries, so the chronicle exposes a `Retriever` port rather than implementing one. The bundled `substring_retriever` is case-insensitive substring matching, most recent first, and is named for what it is so that nobody mistakes it for ranked search. Replace it with your own.
+Ranked retrieval over sections is a well-served problem with its own libraries, so the chronicle exposes a `Retriever` port rather than implementing one. The bundled [`substring_retriever`][substring-retriever] is case-insensitive substring matching, most recent first, and is named for what it is so that nobody mistakes it for ranked search. Replace it with your own.
 
 ## What the library decides, and what you decide
 
@@ -119,36 +119,11 @@ For the procedure, see [How to Consolidate History into Chronicle Sections](../h
 [recent]: ../reference/anagrapheus/chronicle/reading.md#anagrapheus.chronicle.reading.Recent
 [sqlite-chronicle]: ../reference/anagrapheus/chronicle/sqlite.md#anagrapheus.chronicle.sqlite.SQLiteChronicleStore
 [chronicle-store]: ../reference/anagrapheus/chronicle/store.md#anagrapheus.chronicle.store.ChronicleStore
-
-<!-- INTERNAL NOTES FOR EDITOR - DO NOT INCLUDE IN RENDERED OUTPUT
-## Page Classification
-- Type: explanation
-- Reference used: skills/diataxis/references/explanation.md (Concept Explanation + Design Decision)
-
-## Source References
-- src/anagrapheus/chronicle/fold.py, sections.py, reading.py, store.py, sqlite.py
-- src/anagrapheus/timeline/folds.py (GenerativeFold.prepare, Projector.rebuild discard_generated)
-- src/anagrapheus/provider/model.py (on_key)
-- _design/05 §1-§8, _design/06 §9 and §9a for the "why"; not cited
-
-## Accuracy Notes
-- section_id(from, to) -> "from-to", "#n" suffix for generation > 1. Verified in chronicle/fold.py.
-- There is no library API that performs a re-consolidation; an application would append a Section with supersedes set and a generation id via ChronicleStore.append. The page describes the concept without naming an API.
-- The fold reads the range via reader.read_raw in prepare(); the summariser receives StoredEvents.
-- Summarizer/UnitBoundary keep American spelling in code names; prose uses "summariser".
-- "Replaying the rebuild through ReplayPins ... returns the same prose": the summariser must draw through a resolver that is a ReplayPins built from the log; the fold does not wire this itself.
-
-## Known Limitations
-- Nothing enforces the no-binding-read rule once prose has been read.
-- Merging divergent chronicles is impossible (range-derived ids collide).
-- Default retriever is a placeholder.
-
-## API Reference Links Used
-- anagrapheus.chronicle.sections.Section, Anchor
-- anagrapheus.chronicle.reading.Retriever, Anchors, Prose, Brief, Recent
-- anagrapheus.chronicle.fold.UnitBoundary, EventTypes, ChronicleFold, Summarizer, Consolidation
-- anagrapheus.provider.model.PinnedModel
-- anagrapheus.timeline.folds.Projector
-- anagrapheus.chronicle.sqlite.SQLiteChronicleStore
-- anagrapheus.chronicle.store.ChronicleStore
--->
+[consolidated-through]: ../reference/anagrapheus/chronicle/reading.md#anagrapheus.chronicle.reading.Anchors.consolidated_through
+[brief-tail]: ../reference/anagrapheus/chronicle/reading.md#anagrapheus.chronicle.reading.Brief.tail
+[brief-depth]: ../reference/anagrapheus/chronicle/reading.md#anagrapheus.chronicle.reading.Brief.depth
+[projector-rebuild]: ../reference/anagrapheus/timeline/folds.md#anagrapheus.timeline.folds.Projector.rebuild
+[generative-rebuild]: ../reference/anagrapheus/timeline/folds.md#anagrapheus.timeline.folds.GenerativeRebuild
+[store-export]: ../reference/anagrapheus/chronicle/store.md#anagrapheus.chronicle.store.ChronicleStore.export
+[store-load]: ../reference/anagrapheus/chronicle/store.md#anagrapheus.chronicle.store.ChronicleStore.load
+[substring-retriever]: ../reference/anagrapheus/chronicle/reading.md#anagrapheus.chronicle.reading.substring_retriever

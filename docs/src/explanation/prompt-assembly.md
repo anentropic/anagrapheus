@@ -45,14 +45,14 @@ A grant is a frozen dataclass whose every field is a slice. `assemble` refuses a
 The library provides five slices in `anagrapheus.assembly`:
 
 - [`LogSlice`][log-slice]: events up to `upto_seq` that an `admit(envelope)` predicate accepts. `admit` sees only the stored envelope, so an excluded event is never even decoded. This is where you keep a private event (a side remark only one party overheard) out of a shared prompt.
-- [`BeliefSlice`][belief-slice]: beliefs from the scopes a `visible(scope_id)` predicate accepts. Asking for any other scope raises `NotGranted`.
+- [`BeliefSlice`][belief-slice]: beliefs from the scopes a `visible(scope_id)` predicate accepts. Asking for any other scope raises [`NotGranted`][not-granted].
 - [`ChronicleSlice`][chronicle-slice]: chronicle sections reaching no further than `upto_seq`.
 - [`EventsSlice`][events-slice]: a fixed run of events, filtered by `admit`, for a summariser that is handed its range rather than reading the log.
 - [`Given`][given]: a value your application hands in that no projection produced, such as another role's pinned output, optionally citing the event it came from.
 
 Any object with an `upto_seq` property and a `handed_out()` method satisfies the [`Slice`][slice] protocol, so your own readers can take part too. The negotiation example's per-party view is one.
 
-A role holds the slices it declares and nothing else. A narrator-style role granted only a `Given` contract and a `Given` continuity window has no belief slice to misuse, however its code is written. That is a dependency rule enforced at runtime, one level below anything an import linter could check.
+A role holds the slices it declares and nothing else. A role granted only two `Given` values, such as its instructions and a window of recent text, has no belief slice to misuse, however its code is written. That is a dependency rule enforced at runtime, one level below anything an import linter could check.
 
 ### Every slice records what it handed out
 
@@ -64,8 +64,8 @@ That turns a leak into something a test can assert: "no `SideRemarkOverheard` ev
 
 A context should describe one moment of the log. So:
 
-- All slices in a grant must agree on their position; slices at different positions raise `AssemblyError`.
-- A belief slice reads a live store, so it is given a way to ask how far the belief fold has got (typically the event store's `read_position` for the fold's name). It raises `StaleRead` unless the fold is exactly at the slice's position: behind means you should catch up before assembling; ahead means something was appended mid-assembly.
+- All slices in a grant must agree on their position; slices at different positions raise [`AssemblyError`][assembly-error].
+- A belief slice reads a live store, so it is given a way to ask how far the belief fold has got (typically the event store's `read_position` for the fold's name). It raises [`StaleRead`][stale-read] unless the fold is exactly at the slice's position: behind means you should catch up before assembling; ahead means something was appended mid-assembly.
 - A grant is read for one assembly. `assemble` refuses a grant whose slices have already handed something out, so a context's `read` is exactly this call's reads.
 
 ## Parts, registers and citations
@@ -83,8 +83,8 @@ Its [`Register`][register] says what kind of thing it is:
 
 `assemble` checks every part's sources against what the grant actually handed out:
 
-- A part citing something no slice returned raises `UncitedSource`. A part cannot claim a source it never read.
-- A part citing a chronicle section under any register other than `generated` raises `MislabelledPart`.
+- A part citing something no slice returned raises [`UncitedSource`][uncited-source]. A part cannot claim a source it never read.
+- A part citing a chronicle section under any register other than `generated` raises [`MislabelledPart`][mislabelled-part].
 - Every section a slice handed out must be cited by some `generated` part, or `assemble` raises `MislabelledPart`. Otherwise prose could slip in under another register simply by leaving its citation off.
 
 !!! info "The limit of checking structure"
@@ -94,7 +94,7 @@ Its [`Register`][register] says what kind of thing it is:
 
 A [`Budget`][budget] takes your token counter (`count(part) -> int`), a `total`, and an `order` of registers to shed. The default order is `considered`, then `generated`, then `craft`. Within a register, the lowest `rank` goes first, and among equal ranks, the later part. `binding` may not appear in the order.
 
-If the binding parts alone exceed the total, or the context is still too large after shedding everything sheddable, `assemble` raises `BudgetExceeded`. A call that cannot carry its own invariants is not made: a loud refusal is better than a prompt that silently drops a rule.
+If the binding parts alone exceed the total, or the context is still too large after shedding everything sheddable, `assemble` raises [`BudgetExceeded`][budget-exceeded]. A call that cannot carry its own invariants is not made: a loud refusal is better than a prompt that silently drops a rule.
 
 The context records what was dropped in `shed`. "What was the model *not* shown?" is often the first question after a bad turn.
 
@@ -121,7 +121,7 @@ Pin keys are derived from the content of a request. Any change to how a prompt i
 ## What prompt assembly is not
 
 - **Not a chat transcript.** Each call gets a fresh context assembled from projections. Nothing accumulates message history across turns. A tool loop within one call is pydantic-ai's and is already pinned per request.
-- **Not retrieval.** An assembler consumes ranked results, for example from the chronicle's `Retriever` port. It does not rank anything itself.
+- **Not retrieval.** An assembler consumes ranked results, for example from the chronicle's [`Retriever`][retriever] port. It does not rank anything itself.
 
 ## What the library decides, and what you decide
 
@@ -148,34 +148,10 @@ For the procedure, see [How to Assemble Prompts from Granted Slices](../how-to/a
 [register]: ../reference/anagrapheus/assembly/parts.md#anagrapheus.assembly.parts.Register
 [context-describe]: ../reference/anagrapheus/assembly/parts.md#anagrapheus.assembly.parts.Context.describe
 [render-labelled]: ../reference/anagrapheus/assembly/render.md#anagrapheus.assembly.render.render_labelled
-
-<!-- INTERNAL NOTES FOR EDITOR - DO NOT INCLUDE IN RENDERED OUTPUT
-## Page Classification
-- Type: explanation
-- Reference used: skills/diataxis/references/explanation.md (Problem/Solution + Concept Explanation)
-
-## Source References
-- src/anagrapheus/assembly/assemble.py, slices.py, parts.py, render.py, errors.py
-- examples/negotiation (PartyView is a custom Slice; SideRemarkOverheard)
-- _design/07 §1-§8a for the "why"; not cited
-
-## Accuracy Notes
-- Design note proposed a golden-test helper in the library. src/ ships none: only Context.describe() "for a golden test or a log line". Page describes describe() and says the test is the application's.
-- Design note gave a renderer signature Context -> list[ModelMessage]; render_labelled actually returns a str. Page says it returns one string.
-- Design note's Context had no `read` field; current Context has role, upto_seq, parts, shed, read.
-- Design note proposed a belief slice reading "as of" a position; the build instead raises StaleRead unless the fold is exactly at upto_seq. Page describes current behaviour.
-- Budget shed order: lowest rank first, then later index first among equal ranks (sort key (rank, -i)). BudgetExceeded both when binding alone > total and when still over after shedding.
-- NotGranted is raised only by BeliefSlice for a scope outside `visible`.
-- Different positions raise AssemblyError (base class), not a subclass.
-
-## Known Limitations
-- Cannot detect an assembler copying section text into a non-generated part.
-- Context is not recorded; no record-only manifest exists.
-
-## API Reference Links Used
-- anagrapheus.assembly.assemble.assemble, Budget
-- anagrapheus.provider.model.PinnedModel
-- anagrapheus.assembly.slices.LogSlice, BeliefSlice, ChronicleSlice, EventsSlice, Given, Slice
-- anagrapheus.assembly.parts.Part, Register, Context.describe
-- anagrapheus.assembly.render.render_labelled
--->
+[not-granted]: ../reference/anagrapheus/assembly/errors.md#anagrapheus.assembly.errors.NotGranted
+[assembly-error]: ../reference/anagrapheus/assembly/errors.md#anagrapheus.assembly.errors.AssemblyError
+[stale-read]: ../reference/anagrapheus/assembly/errors.md#anagrapheus.assembly.errors.StaleRead
+[uncited-source]: ../reference/anagrapheus/assembly/errors.md#anagrapheus.assembly.errors.UncitedSource
+[mislabelled-part]: ../reference/anagrapheus/assembly/errors.md#anagrapheus.assembly.errors.MislabelledPart
+[budget-exceeded]: ../reference/anagrapheus/assembly/errors.md#anagrapheus.assembly.errors.BudgetExceeded
+[retriever]: ../reference/anagrapheus/chronicle/reading.md#anagrapheus.chronicle.reading.Retriever

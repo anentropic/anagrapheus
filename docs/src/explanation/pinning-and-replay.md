@@ -20,7 +20,7 @@ That single rule gives two behaviours:
 
 ## Replay is not running again
 
-It is worth being precise about the difference, because the two are easy to conflate.
+The two are easy to conflate, and the difference matters.
 
 **Re-running** a recorded scenario calls the model again. With a real model you get different answers, so a bug seen on turn 37 may not reappear, and a test that re-runs is slow, flaky and billed.
 
@@ -131,16 +131,16 @@ stateDiagram-v2
 - **Draw.** The first time a key is seen, the effect runs and its result is written to the ledger's **scratch**, a table in the same database that survives a crash but is never part of the log. Nothing that reads the log can see it.
 - **Reuse.** A second request with the same key, in the same unit of work, gets the scratch result back and the attempt count goes up. Concurrent requests for one key wait for the draw already in flight rather than both calling the model.
 - **Commit.** [`commit()`][pin-ledger-commit] moves every scratch pin into the log as a [`PinPromoted`][pin-promoted] event and clears the scratch, in one transaction.
-- **Abandon.** [`abandon(reason=...)`][pin-ledger-abandon] drops the scratch and appends a single `PinsAbandoned` event listing each discarded key and its attempt count. The log keeps an audit line, not a pile of provisional results.
+- **Abandon.** [`abandon(reason=...)`][pin-ledger-abandon] drops the scratch and appends a single [`PinsAbandoned`][pins-abandoned] event listing each discarded key and its attempt count. The log keeps an audit line, not a pile of provisional results.
 
 Replay reads the other way. [`ReplayPins.from_events`][replay-from-events] collects the `PinPromoted` events from a stream (all of them, or one unit of work's), and answers each key from them. It implements the same resolver interface as the ledger, so the same agent code runs live, under retry and under replay without modification.
 
 ### Strict and record replay
 
-`ReplayPins` has two postures for a key it has no pin for:
+[`ReplayPins`][replay-pins] has two postures for a key it has no pin for:
 
 - **`on_miss="strict"`**, the default, raises [`PinMiss`][pin-miss] on every miss. Its `divergence` names the missed key, the kind of call, and how many pins were hit before it.
-- **`on_miss="record"`** marks the first miss as the point of divergence and then lets the call through, drawing fresh. The run continues, announced as new rather than presented as a replay. Pass `announce=ReplayPins.announce_to(store, registry, unit_id=...)` and that announcement is appended to the log as a `ReplayDiverged` event, so the authoritative record says where the replay ended.
+- **`on_miss="record"`** marks the first miss as the point of divergence and then lets the call through, drawing fresh. The run continues, announced as new rather than presented as a replay. Pass `announce=ReplayPins.announce_to(store, registry, unit_id=...)` and that announcement is appended to the log as a [`ReplayDiverged`][replay-diverged] event, so the authoritative record says where the replay ended.
 
 Record mode is useful for controlled comparisons. Because the model's id is part of every key, swapping one role's model and replaying in record mode makes exactly that role's calls miss and draw again, while every other call replays as it was.
 
@@ -149,7 +149,7 @@ Record mode is useful for controlled comparisons. Because the model's id is part
 
 ## What counts as "the same call"
 
-The key is the whole design, and both ways of getting it wrong are silent:
+Pinning stands or falls on the key, and both ways of getting it wrong are silent:
 
 - **Too much in the key** (a timestamp, a provider-assigned id) and every call gets a fresh key. Pinning appears to work, reuse never happens, nothing raises, and the bill is the only symptom.
 - **Too little in the key** and two genuinely different calls collide, so the second is answered with the first one's response. This is the worse failure, because it returns a wrong answer with confidence.
@@ -169,7 +169,7 @@ It drops the fields that differ between two runs of an identical call: part time
     It can look as if an output schema is "how the response will be parsed" and should stay out of the key. It is not: a required output schema is sent to the model and changes what the model generates. What stays out is the parsing done after the draw, which the resolver keeps separate (see below).
 
 ??? info "Drawing and interpreting are kept apart"
-    Every resolver method takes the effect and its interpretation together: `resolve(key, kind=..., effect=..., interpret=...)`. The raw result is what gets pinned; the interpretation runs on every resolve, first draw, retry and replay alike. Changing how a result is interpreted therefore reuses the pinned raw value rather than drawing a new one. `PinnedModel` uses this to rebuild a `ModelResponse` from the stored JSON with exactly the code that handled the live response.
+    Every resolver method takes the effect and its interpretation together: [`resolve(key, kind=..., effect=..., interpret=...)`][pin-resolver-resolve]. The raw result is what gets pinned; the interpretation runs on every resolve, first draw, retry and replay alike. Changing how a result is interpreted therefore reuses the pinned raw value rather than drawing a new one. `PinnedModel` uses this to rebuild a `ModelResponse` from the stored JSON with exactly the code that handled the live response.
 
 ## Per request, not per run
 
@@ -197,11 +197,11 @@ On replay, [`PinnedStreamedResponse`][pinned-stream] rebuilds a stream from the 
 
 ### Ids are draws too
 
-Minting a fresh entity id consumes entropy just like a model call. An unpinned mint draws a different id on replay, and every belief and pin keyed on the original entity is orphaned. The identity layer's [`mint_entity_id`][mint-entity-id], and `establish` when given a resolver, draw the id through the ledger so a replayed run re-establishes the same entity. See [Identity](identity.md#minting-an-entity-id-is-a-draw).
+Minting a fresh entity id consumes entropy just like a model call. An unpinned mint draws a different id on replay, and every belief and pin keyed on the original entity is orphaned. The identity layer's [`mint_entity_id`][mint-entity-id], and [`establish`][establish] when given a resolver, draw the id through the ledger so a replayed run re-establishes the same entity. See [Identity](identity.md#minting-an-entity-id-is-a-draw).
 
 ## Recordings on disk
 
-A replay needs only the pins, not the whole log. A fresh store will mint different ids for everything else anyway. [`write_recording`][write-recording] writes events to a JSON-lines file in the log's own serialisation: one header line describing the run (which provider route recorded it, how to re-record it), then one `StoredEvent` per line in canonical JSON, so an unchanged re-recording produces a reviewable diff. `pin_events(...)` filters a stream down to just the pins.
+A replay needs only the pins, not the whole log. A fresh store will mint different ids for everything else anyway. [`write_recording`][write-recording] writes events to a JSON-lines file in the log's own serialisation: one header line describing the run (which provider route recorded it, how to re-record it), then one [`StoredEvent`][stored-event] per line in canonical JSON, so an unchanged re-recording produces a reviewable diff. [`pin_events(...)`][pin-events] filters a stream down to just the pins.
 
 Because every line is a stored event, a recording is upcast as it is read, like any other log: pass `upcasts=` to `ReplayPins.from_events`. A recording made today therefore survives a later change to the pin event's schema.
 
@@ -238,40 +238,10 @@ Wire-level cassettes still have one use pins cannot serve: catching a change in 
 [pinned-tool]: ../reference/anagrapheus/provider/tools.md#anagrapheus.provider.tools.pinned_tool
 [pinned-stream]: ../reference/anagrapheus/provider/stream.md#anagrapheus.provider.stream.PinnedStreamedResponse
 [mint-entity-id]: ../reference/anagrapheus/identity/decisions.md#anagrapheus.identity.decisions.mint_entity_id
-
-<!-- INTERNAL NOTES FOR EDITOR - DO NOT INCLUDE IN RENDERED OUTPUT
-## Page Classification
-- Type: explanation
-- Reference used: skills/diataxis/references/explanation.md (Concept Explanation + Comparative)
-
-## Source References
-- src/anagrapheus/timeline/pins.py (pin_key, PinResolver, PinLedger lifecycle, _inflight coalescing)
-- src/anagrapheus/timeline/replay.py (ReplayPins, strict/record, announce_to, from_events)
-- src/anagrapheus/timeline/recording.py (write_recording, read_recording, pin_events, header)
-- src/anagrapheus/provider/model.py, policy.py, tools.py, stream.py
-- src/anagrapheus/identity/decisions.py (mint_entity_id)
-- _design/00 §2a, _design/04 §1-§5, _design/06 §9, §12 for the "why"; not cited
-
-## Accuracy Notes
-- Example: scratchpad/docs-examples/explain/pinning_replay.py, run offline; output matched (pydantic-ai prints a banner to the terminal, not part of the shown output).
-- after_hits is 1 in the example because the same ReplayPins instance served the first request before the miss.
-- Model settings ARE in the default key (minus timeout, extra_headers, service_tier, cache, and any *_cache_* setting). The design note's original text said settings were out by default; the later amendment and the current policy.py put them in. Page describes current code.
-- Record mode pins fresh draws in the ReplayPins object's memory; they are not appended to the log by ReplayPins itself. Page does not claim they are.
-- Strict mode raises on every miss (not only the first). Verified in replay.py _miss.
-- pin_key format "p{scheme}:{kind}:{sha256_hex}" with scheme default 1. Kind for model calls is "model_call" (provider.PIN_KIND), tools "tool_call".
-- SemanticCallPolicy _VOLATILE: timestamp, id, tool_call_id, provider_name, provider_details, metadata. _DELIVERY params: cache. _DELIVERY_SETTINGS: timeout, extra_headers, service_tier, cache, plus any setting with a "cache" token.
-
-## Known Limitations
-- A replayed stream is not paced; nothing stops a replay being shown as if live.
-- Pins record semantic results; SDK wire-format changes are not caught.
-
-## API Reference Links Used
-- anagrapheus.timeline.pins.PinLedger, PinLedger.commit, PinLedger.abandon, PinPromoted, pin_key
-- anagrapheus.timeline.replay.ReplayPins.from_events, PinMiss
-- anagrapheus.timeline.recording.write_recording
-- anagrapheus.provider.policy.CallPolicy, SemanticCallPolicy
-- anagrapheus.provider.model.PinnedModel
-- anagrapheus.provider.tools.pinned_tool
-- anagrapheus.provider.stream.PinnedStreamedResponse
-- anagrapheus.identity.decisions.mint_entity_id
--->
+[pins-abandoned]: ../reference/anagrapheus/timeline/pins.md#anagrapheus.timeline.pins.PinsAbandoned
+[replay-pins]: ../reference/anagrapheus/timeline/replay.md#anagrapheus.timeline.replay.ReplayPins
+[replay-diverged]: ../reference/anagrapheus/timeline/pins.md#anagrapheus.timeline.pins.ReplayDiverged
+[pin-resolver-resolve]: ../reference/anagrapheus/timeline/pins.md#anagrapheus.timeline.pins.PinResolver.resolve
+[establish]: ../reference/anagrapheus/identity/decisions.md#anagrapheus.identity.decisions.establish
+[stored-event]: ../reference/anagrapheus/timeline/envelope.md#anagrapheus.timeline.envelope.StoredEvent
+[pin-events]: ../reference/anagrapheus/timeline/recording.md#anagrapheus.timeline.recording.pin_events

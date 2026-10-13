@@ -27,12 +27,12 @@ The four identity decisions are events with library-supplied shapes in `anagraph
 
 | Decision | Event | What it records |
 |---|---|---|
-| establish | `Established` | A new entity id and the first name it is known by |
-| alias | `Aliased` | Another name for an existing entity |
-| merge | `Merged` | Two ids turned out to name one thing; `absorbed` yields to `kept` |
-| split | `Split` | One id was covering several things; named forms move to new entities |
+| establish | [`Established`][established] | A new entity id and the first name it is known by |
+| alias | [`Aliased`][aliased] | Another name for an existing entity |
+| merge | [`Merged`][merged] | Two ids turned out to name one thing; `absorbed` yields to `kept` |
+| split | [`Split`][split-event] | One id was covering several things; the names it assigns move to new entities |
 
-The helpers [`establish`][establish], [`alias`][alias], [`merge`][merge] and [`split`][split] each return a `PendingEvent` rather than appending one. An identity decision almost always accompanies the domain event that prompted it, so the decision goes into your batch and your transaction. [`IdentityFold`][identity-fold] folds the decisions into an identity store, and [`IdentityRegistry`][identity-registry] answers questions from it.
+The helpers [`establish`][establish], [`alias`][alias], [`merge`][merge] and [`split`][split] each return a [`PendingEvent`][pending-event] rather than appending one. An identity decision almost always accompanies the domain event that prompted it, so the decision goes into your batch and your transaction. [`IdentityFold`][identity-fold] folds the decisions into an identity store, and [`IdentityRegistry`][identity-registry] answers questions from it.
 
 If your application already has its own event for one of these decisions (say an `EntityEstablished` in your own namespace), an [`IdentityVocabulary`][identity-vocabulary] binds each of the four roles to your event type and an adapter, so the fold reads your events and you never emit the library's. The default vocabulary binds the library's own events.
 
@@ -44,7 +44,7 @@ This matters for audit: [`IdentityRegistry.history(entity_id)`][history] returns
 
 ## Resolving a name returns candidates, not an answer
 
-[`IdentityRegistry.resolve(name)`][resolve] returns a `Resolution`: the name and every entity it is attached to, never a bare id. Returning a single id would make a lookup look like a decision. When you have already established that a name is unambiguous, `Resolution.sole()` returns the one candidate, and raises `AmbiguousSurfaceForm` rather than picking one if there are several.
+[`IdentityRegistry.resolve(name)`][resolve] returns a [`Resolution`][resolution]: the name and every entity it is attached to, never a bare id. Returning a single id would make a lookup look like a decision. When you have already established that a name is unambiguous, [`Resolution.sole()`][resolution-sole] returns the one candidate, and raises [`AmbiguousSurfaceForm`][ambiguous-surface-form] rather than picking one if there are several.
 
 Matching is **exact**, after Unicode NFC normalisation. NFC is a claim about representation: two encodings of the same character are the same character. Case folding, collapsing whitespace or stripping accents are claims about meaning (is *uk* the same name as *UK*?), and the layer does not make them. If your domain wants them, normalise names before they reach the registry.
 
@@ -69,9 +69,9 @@ Establishing an entity mints a fresh UUID, which consumes randomness just as a m
 
 A **merge** says two ids name one referent. In the projection, the absorbed entity points at the survivor, and its names move to the survivor so that resolving or splitting the survivor can reach them. Where both entities held the same name, the survivor's own record wins. The log is untouched, and `history()` still shows which entity originally recorded each name.
 
-A merge cycle (A into B, then B into A) is a contradiction in the log. The fold records it as written; reading the canonical id raises `MergeCycle` rather than looping, and the remedy is another decision that breaks the cycle.
+A merge cycle (A into B, then B into A) is a contradiction in the log. The fold records it as written; reading the canonical id raises [`MergeCycle`][merge-cycle] rather than looping. No decision in this version withdraws a merge, so a cycle cannot be repaired by appending another event; the guard belongs before the append, by checking that the two entities' canonical ids differ.
 
-A **split** says one id was covering several referents. Each assignment in the split creates a new entity and names the forms that move to it; forms not named stay with the original, which survives. Nothing yields to anything in a split, so the original's canonical id is unchanged.
+A **split** says one id was covering several referents. Each assignment in the split creates a new entity and lists the names that move to it; names not listed stay with the original, which survives. Nothing yields to anything in a split, so the original's canonical id is unchanged.
 
 ## Re-keying is planned by the library and applied by you
 
@@ -95,9 +95,9 @@ flowchart LR
 
 The planner handles the edge cases that would otherwise produce wrong plans quietly:
 
-- **Chains inside one batch compose.** If A is absorbed into B and B into C in the same batch, beliefs on A are planned straight onto C, not onto B, which the same batch has already superseded. A ring (A into B into A) raises `MergeCycleInBatch`, because a ring has no last element to re-key onto.
+- **Chains inside one batch compose.** If A is absorbed into B and B into C in the same batch, beliefs on A are planned straight onto C, not onto B, which the same batch has already superseded. A ring (A into B into A) raises [`MergeCycleInBatch`][merge-cycle-in-batch], because a ring has no last element to re-key onto.
 - **A split's rows stay together.** They are gathered into one plan with several candidates rather than reported as several confident single-target plans. [`BeliefRekey.sole()`][belief-rekey-sole] raises on a split's plan for the same reason `Resolution.sole()` raises on an ambiguous name.
-- **A belief that cannot be re-minted is reported, not skipped.** An unknown minting scheme, an undeclared predicate or a malformed id raises `UnrenderableBelief`, with the underlying error as its cause. Pass `skip_unrenderable=True` only when you mean to drop such beliefs knowingly.
+- **A belief that cannot be re-minted is reported, not skipped.** An unknown minting scheme, an undeclared predicate or a malformed id raises [`UnrenderableBelief`][unrenderable-belief], with the underlying error as its cause. Pass `skip_unrenderable=True` only when you mean to drop such beliefs knowingly.
 
 ### Why the library stops at the plan
 
@@ -107,7 +107,7 @@ Applying a re-key is a belief operation with real decisions in it, and they are 
 - **Which product, after a split.** Whether a belief about the old entity belongs to one product or another depends on what the belief says, which neither identity nor the belief layer may interpret. Leave such beliefs undecided and report them, or supply your own chooser.
 - **What happens on collision.** Whether the old id is retracted, and whose stance survives if the new id already holds a belief, are judgments about belief.
 
-The negotiation example's `examples/negotiation/rekeying.py` is a complete version of this loop: it applies plans per scope through belief events (never by writing to the belief store directly, which would vanish on the next rebuild), reports ambiguous beliefs instead of guessing, and chains plans when one belief names two re-keyed entities. [How to Resolve Identity and Re-key Beliefs After a Merge](../how-to/identity-and-rekey.md) walks through it.
+The negotiation example's `examples/negotiation/rekeying.py` is a complete version of this loop: it applies plans per scope through belief events (never by writing to the belief store directly, which would vanish on the next rebuild), reports ambiguous beliefs instead of guessing, and chains plans when one belief names two re-keyed entities. [How to Resolve Identity and Re-key Beliefs After a Merge](../how-to/identity-and-rekey.md) walks through a simplified version of the same loop.
 
 ## What the library decides, and what you decide
 
@@ -119,6 +119,8 @@ The negotiation example's `examples/negotiation/rekeying.py` is a complete versi
 | Ordering by a ladder you declare | The stance vocabulary and its order; provenance strings |
 | Pinning entity mints through a resolver | Mint material that distinguishes genuinely different records |
 | Re-key rows and plans | Applying plans per scope, and choosing after a split |
+
+For the procedure, see [How to Resolve Identity and Re-key Beliefs After a Merge](../how-to/identity-and-rekey.md).
 
 [establish]: ../reference/anagrapheus/identity/decisions.md#anagrapheus.identity.decisions.establish
 [alias]: ../reference/anagrapheus/identity/decisions.md#anagrapheus.identity.decisions.alias
@@ -136,37 +138,14 @@ The negotiation example's `examples/negotiation/rekeying.py` is a complete versi
 [plan-rekeys]: ../reference/anagrapheus/beliefs/rekey.md#anagrapheus.beliefs.rekey.plan_rekeys
 [belief-rekey]: ../reference/anagrapheus/beliefs/rekey.md#anagrapheus.beliefs.rekey.BeliefRekey
 [belief-rekey-sole]: ../reference/anagrapheus/beliefs/rekey.md#anagrapheus.beliefs.rekey.BeliefRekey.sole
-
-<!-- INTERNAL NOTES FOR EDITOR - DO NOT INCLUDE IN RENDERED OUTPUT
-## Page Classification
-- Type: explanation
-- Reference used: skills/diataxis/references/explanation.md (Concept Explanation + Problem/Solution)
-
-## Source References
-- src/anagrapheus/identity/decisions.py, events.py, registry.py, ladder.py, fold.py, vocabulary.py, store.py, sqlite.py (merged/split behaviour), errors.py
-- src/anagrapheus/beliefs/rekey.py, index.py
-- examples/negotiation/rekeying.py
-- _design/02 §1-§7, _design/03 §5, _design/06 §3 and §13 for the "why"; not cited
-
-## Accuracy Notes
-- Verified merge -> rekeys_since -> plan_rekeys -> sole() end to end with a throwaway script (scratchpad/docs-examples/explain/identity_check.py); not shown on the page.
-- "Correcting a bad merge": the source and docstrings say a bad merge is "undone by superseding it". There is no un-merge event in src/: a Merged sets merged_into permanently, and a reverse merge produces MergeCycle. The only corrective decision available is a Split of the survivor, which carves forms into NEW entity ids (the absorbed id keeps pointing at the survivor). The page describes that. Flagged to the orchestrator.
-- Merge moves the absorbed entity's aliases to the survivor; survivor's own row wins on a duplicate form (identity/sqlite.py merged).
-- Split: original survives; canonical() unaffected; one RekeyRow per assignment.
-- Ladder: unknown tokens rank -1 (below every rung); UNGRADED is "" and reserved.
-- establish material default {"surface_form", "provenance"} (decisions.py).
-- MergeCycle raised at read in canonical(); MergeCycleInBatch in plan_rekeys for rings within a batch.
-
-## Known Limitations
-- No library helper applies re-key plans across scopes (decided to stay in the example for 0.1.0).
-- No scope enumeration in the library or in doxastica's MemoryCore.
-- Nothing enforces the establish/resolve split.
-
-## API Reference Links Used
-- anagrapheus.identity.decisions.establish, alias, merge, split, mint_entity_id
-- anagrapheus.identity.fold.IdentityFold
-- anagrapheus.identity.registry.IdentityRegistry (.resolve, .canonical, .history, .rekeys_since)
-- anagrapheus.identity.vocabulary.IdentityVocabulary
-- anagrapheus.identity.ladder.Ladder
-- anagrapheus.beliefs.rekey.plan_rekeys, BeliefRekey, BeliefRekey.sole
--->
+[established]: ../reference/anagrapheus/identity/events.md#anagrapheus.identity.events.Established
+[aliased]: ../reference/anagrapheus/identity/events.md#anagrapheus.identity.events.Aliased
+[merged]: ../reference/anagrapheus/identity/events.md#anagrapheus.identity.events.Merged
+[split-event]: ../reference/anagrapheus/identity/events.md#anagrapheus.identity.events.Split
+[pending-event]: ../reference/anagrapheus/timeline/envelope.md#anagrapheus.timeline.envelope.PendingEvent
+[resolution]: ../reference/anagrapheus/identity/registry.md#anagrapheus.identity.registry.Resolution
+[resolution-sole]: ../reference/anagrapheus/identity/registry.md#anagrapheus.identity.registry.Resolution.sole
+[ambiguous-surface-form]: ../reference/anagrapheus/identity/errors.md#anagrapheus.identity.errors.AmbiguousSurfaceForm
+[merge-cycle]: ../reference/anagrapheus/identity/errors.md#anagrapheus.identity.errors.MergeCycle
+[merge-cycle-in-batch]: ../reference/anagrapheus/beliefs/errors.md#anagrapheus.beliefs.errors.MergeCycleInBatch
+[unrenderable-belief]: ../reference/anagrapheus/beliefs/errors.md#anagrapheus.beliefs.errors.UnrenderableBelief

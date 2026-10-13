@@ -37,7 +37,7 @@ Each box on the right is one subpackage's read model:
 | `anagrapheus.chronicle` | Prose summaries of closed ranges of the log | [The Chronicle](chronicle.md) |
 | `anagrapheus.assembly` | Nothing persistent: it reads the others at one position to build a model's context | [Prompt Assembly](prompt-assembly.md) |
 
-Because they all fold the same log, they can share one SQLite file. The SQLite stores for the identity registry, the belief index and the chronicle each take a connection; hand them the event store's own, and a projection's state and its record of how far it has read commit in the same transaction.
+Because they all fold the same log, they can share one SQLite file. The SQLite stores for the identity registry, the entity index and the chronicle each take a connection; hand them the event store's own, and a projection's state and its record of how far it has read commit in the same transaction.
 
 ## Why the log has to be the authority
 
@@ -49,7 +49,7 @@ The design pays off in three places.
 
 **Audit.** Every belief records the event it was folded from, every identity decision is an event with a position in the log, and every assembled prompt records which events, beliefs and sections it was built from. "Why does this agent believe that?" and "what was this call shown?" are questions the log can answer.
 
-The cost is discipline: anything an agent should remember must reach the log as an event, and anything computed from the log must be computed deterministically, or the rebuild stops reproducing what the run saw. The chronicle is the one deliberate exception, and it is handled with care; see [The Chronicle](chronicle.md).
+The cost is discipline: anything an agent should remember must reach the log as an event, and anything computed from the log must be computed deterministically, or the rebuild stops reproducing what the run saw. The chronicle is the one deliberate exception, with its own rules for rebuilding; see [The Chronicle](chronicle.md).
 
 ## How one turn flows through the layers
 
@@ -73,16 +73,16 @@ sequenceDiagram
 ```
 
 1. The application brings its projections up to date, so beliefs and identity reflect everything appended so far.
-2. It opens a **grant**, the set of read-only slices this role may read, at the log's current position, and calls [`assemble`][assemble]. The result is a `Context`: structured parts, each citing the events, beliefs or chronicle sections it was built from.
+2. It opens a **grant**, the set of read-only slices this role may read, at the log's current position, and calls [`assemble`][assemble]. The result is a [`Context`][context]: structured parts, each citing the events, beliefs or chronicle sections it was built from.
 3. It renders the context into messages and sends them through an agent whose model is wrapped in [`PinnedModel`][pinned-model]. The wrapper derives a key from what the model is being asked, and either draws once or reuses the response already pinned under that key.
-4. It appends what happened as events: the party's stated position, the beliefs the turn produced, and the unit of work's pins, promoted from the ledger's scratch space into the log when the ledger is committed.
+4. It appends what happened as events: the party's stated position, the beliefs the turn produced, and the unit of work's pins, promoted from the ledger's scratch area into the log when the ledger is committed.
 5. The next catch-up folds those events into the identity registry, the belief store and, at the end of a round, the chronicle.
 
 Under replay, step 3 answers from the log and the model is never called. Everything else runs exactly as it did live.
 
 ## What the library decides, and what you decide
 
-anagrapheus consistently ships the mechanism and leaves the meaning to the application. The library cannot know what your domain means by "the same question", "the same person" or "too long a prompt", and guessing would produce answers that look right while being wrong. So the split is deliberate, and it is the same in every layer.
+anagrapheus ships the mechanism and leaves the meaning to the application. The library cannot know what your domain means by "the same question", "the same person" or "too long a prompt", and guessing would produce answers that look right while being wrong. So the split is deliberate, and it is the same in every layer.
 
 | The library owns | Your application owns |
 |---|---|
@@ -119,34 +119,4 @@ The library earns its keep when runs are long, multi-agent and worth reproducing
 [assemble]: ../reference/anagrapheus/assembly/assemble.md#anagrapheus.assembly.assemble.assemble
 [pinned-model]: ../reference/anagrapheus/provider/model.md#anagrapheus.provider.model.PinnedModel
 [semantic-policy]: ../reference/anagrapheus/provider/policy.md#anagrapheus.provider.policy.SemanticCallPolicy
-
-<!-- INTERNAL NOTES FOR EDITOR - DO NOT INCLUDE IN RENDERED OUTPUT
-## Page Classification
-- Type: explanation
-- Reference used: skills/diataxis/references/explanation.md (Pattern 3, How It Works, plus a design-decision section)
-
-## Source References
-- src/anagrapheus/__init__.py (subpackages; logging NullHandler)
-- src/anagrapheus/timeline/__init__.py, store.py, sqlite.py (connection property shared by projections)
-- src/anagrapheus/provider/model.py (PinnedModel), policy.py
-- src/anagrapheus/identity/sqlite.py, beliefs/sqlite.py, chronicle/sqlite.py (all take a sqlite3 connection)
-- src/anagrapheus/assembly/assemble.py, slices.py
-- examples/negotiation/rekeying.py (apply_rekeys loop lives in the example)
-- _design/01, 04, 07 for the "why"; not cited
-
-## Accuracy Notes
-- The turn sequence is a generalisation of the negotiation example (Table): catch up, assemble, PinnedModel, append, catch up. The order of belief/domain events vs pin commit varies per application.
-- "Prompt assembly does not accumulate message history" is from the design's scope statement and matches src/ (no transcript projection exists).
-- Library-vs-application table follows context.md's ownership list and the design notes; verified each library-side item exists in src/.
-
-## Known Limitations
-- No built-in loop for applying re-key plans across scopes (decided to stay in the example for 0.1.0).
-- No scope enumeration in the library.
-
-## API Reference Links Used
-- anagrapheus.timeline.sqlite.SQLiteEventStore
-- anagrapheus.timeline.store.EventStore
-- anagrapheus.assembly.assemble.assemble
-- anagrapheus.provider.model.PinnedModel
-- anagrapheus.provider.policy.SemanticCallPolicy
--->
+[context]: ../reference/anagrapheus/assembly/parts.md#anagrapheus.assembly.parts.Context

@@ -232,8 +232,8 @@ print(again.output)
 
 Close every unit one of two ways:
 
-- [`ledger.commit()`][pin-ledger-commit] promotes every pin into the log as `PinPromoted` events, in one transaction. Do this when the unit's outcome stands; replay reads these events.
-- [`ledger.abandon(reason=...)`][pin-ledger-abandon] drops the pins and appends a single `PinsAbandoned` event recording what was discarded and how many attempts each key took. Do this when you reject the outcome and want a genuinely new draw: the next unit of work, with a new `PinLedger`, draws again.
+- [`ledger.commit()`][pin-ledger-commit] promotes every pin into the log as [`PinPromoted`][pin-promoted] events, in one transaction. Do this when the unit's outcome stands; replay reads these events.
+- [`ledger.abandon(reason=...)`][pin-ledger-abandon] drops the pins and appends a single [`PinsAbandoned`][pins-abandoned] event recording what was discarded and how many attempts each key took. Do this when you reject the outcome and want a genuinely new draw: the next unit of work, with a new `PinLedger`, draws again.
 
 The `on_key` hook receives the key of every request. Use it to log which pin produced a result, or to compare keys when calls are not being reused.
 
@@ -313,7 +313,7 @@ The key is the same one a non-streamed request would build, because streaming is
 
 ## Verify it worked
 
-Count calls, as the examples do. Wrap the model function in a counter (pydantic-ai's `FunctionModel` makes this easy) and assert that:
+Count calls, as the examples do. Wrap the model function in a counter (a `FunctionModel` delegate is the simplest place) and assert that:
 
 - a retry within one unit does not increase the count;
 - a strict replay over the committed log leaves the count unchanged.
@@ -353,35 +353,5 @@ This is the audit trail of an abandoned unit of work: its `reason`, and each dis
 [pin-ledger-commit]: ../reference/anagrapheus/timeline/pins.md#anagrapheus.timeline.pins.PinLedger.commit
 [pin-ledger-abandon]: ../reference/anagrapheus/timeline/pins.md#anagrapheus.timeline.pins.PinLedger.abandon
 [replay-pins]: ../reference/anagrapheus/timeline/replay.md#anagrapheus.timeline.replay.ReplayPins
-
-<!-- INTERNAL NOTES FOR EDITOR - DO NOT INCLUDE IN RENDERED OUTPUT
-## Page Classification
-- Type: how-to
-- Reference used: skills/diataxis/references/how-to-guides.md
-
-## Source References
-- src/anagrapheus/provider/model.py, policy.py, tools.py, stream.py
-- src/anagrapheus/timeline/pins.py (PinLedger lifecycle, resolve_async gating)
-- tests/provider/test_model.py, tests/provider/conftest.py
-- Verified scripts: scratchpad docs-examples/howto/pin_calls.py, pin_policy.py, pin_retry.py, pin_stream.py, pin_resume.py
-
-## Accuracy Notes
-- Retry reuse: verified that calling the same agent twice under one PinLedger draws once (keys equal, attempts=2 in PinsAbandoned).
-- Resume: verified with a file-backed store that PinLedger(store, types, unit_id=saved) after reopening reuses the scratch pin. The fragment uses ":memory:" naming only implicitly (store); the resume claim needs a file-backed store. The fragment says "over the same database file".
-- SemanticCallPolicy kept/dropped lists taken from _VOLATILE, _DELIVERY, _DELIVERY_SETTINGS and _delivers() in policy.py (any setting with "cache" as an underscore-separated word is dropped).
-- pinned_tool's RunContext exclusion is by the first parameter's annotation, not by name.
-- Streaming: verified streams opened once across live + replay.
-- Inventory listed `PinsAbandoned` under troubleshooting; it is an audit event, not an error. Written that way.
-
-## Known Limitations
-- `speak(resolver)` in pin_stream.py is left unannotated to match the verified script.
-- The tool's model draw count (2 model requests per run) depends on FunctionModel's tool loop; verified.
-
-## API Reference Links Used
-- anagrapheus.provider.model.PinnedModel
-- anagrapheus.provider.tools.pinned_tool
-- anagrapheus.provider.stream.PinnedStreamedResponse
-- anagrapheus.provider.policy.CallPolicy, SemanticCallPolicy
-- anagrapheus.timeline.pins.PinLedger, .commit, .abandon
-- anagrapheus.timeline.replay.ReplayPins
--->
+[pin-promoted]: ../reference/anagrapheus/timeline/pins.md#anagrapheus.timeline.pins.PinPromoted
+[pins-abandoned]: ../reference/anagrapheus/timeline/pins.md#anagrapheus.timeline.pins.PinsAbandoned

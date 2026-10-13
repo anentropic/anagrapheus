@@ -13,7 +13,7 @@ By the end you will have:
 - wrapped pydantic-ai models so that every request is *pinned*: drawn once, recorded under a key built from what was asked, and reused after that
 - committed the pinned results to an event log in SQLite
 - written a recording file and replayed it on a fresh process
-- seen a `PinMiss` when the code asks the model something the recording never saw
+- seen a [`PinMiss`][pin-miss] when the code asks the model something the recording never saw
 
 **Time:** about 15 minutes.
 **Prerequisites:** Python 3.14 or later, and familiarity with pydantic-ai agents. No API key is needed: the agents run on pydantic-ai's `FunctionModel`.
@@ -336,7 +336,7 @@ You have recorded an agent run and replayed it exactly. You now know how to:
 
 - [Tour the negotiation example](negotiation-example.md) to see pinning working alongside beliefs, identity, the chronicle and prompt assembly.
 - [Record a run and replay it offline](../how-to/record-and-replay.md) covers the same steps for your own application, with troubleshooting.
-- [Pin model and tool calls](../how-to/pin-model-and-tool-calls.md) adds `pinned_tool` and custom call policies.
+- [Pin model and tool calls](../how-to/pin-model-and-tool-calls.md) adds [`pinned_tool`][pinned-tool] and custom call policies.
 - [Pinning and replay](../explanation/pinning-and-replay.md) explains how keys are built and why a miss is reported rather than redrawn.
 
 [registry]: ../reference/anagrapheus/timeline/registry.md#anagrapheus.timeline.registry.EventTypeRegistry
@@ -349,31 +349,4 @@ You have recorded an agent run and replayed it exactly. You now know how to:
 [replay-pins]: ../reference/anagrapheus/timeline/replay.md#anagrapheus.timeline.replay.ReplayPins
 [pin-miss]: ../reference/anagrapheus/timeline/replay.md#anagrapheus.timeline.replay.PinMiss
 [divergence]: ../reference/anagrapheus/timeline/replay.md#anagrapheus.timeline.replay.Divergence
-
-<!-- INTERNAL NOTES FOR EDITOR - DO NOT INCLUDE IN RENDERED OUTPUT
-## Page Classification
-- Type: tutorial
-- Reference used: skills/diataxis/references/tutorials.md
-
-## Source References
-- src/anagrapheus/__init__.py (register_builtin_events)
-- src/anagrapheus/provider/model.py (PinnedModel)
-- src/anagrapheus/timeline/pins.py (PinLedger, commit, PinResolver protocol)
-- src/anagrapheus/timeline/replay.py (ReplayPins.from_events, strict default, PinMiss, Divergence fields kind/after_hits/missed_key)
-- src/anagrapheus/timeline/recording.py (write_recording returns count, header must not contain the format key, read_recording -> Recording(header, events), pin_events)
-- src/anagrapheus/timeline/sqlite.py (SQLiteEventStore(path), close)
-
-## Accuracy Notes
-- All scripts verified in /tmp/.../scratchpad/docs-examples/start/getting-started/ (summit.py, record.py, replay.py; changed/summit.py + changed/catch.py for Step 4 = diverge.py here). Outputs pasted verbatim.
-- PinMiss message format: f"replay diverged at key {key!r} ({kind}) after {n} hit(s)". Hash elided with an ellipsis; it depends on the pydantic-ai version's request-parameter dump.
-- Step 5 not run against a real provider (no key offline). Verified separately: infer_model("anthropic:claude-haiku-5-5") without ANTHROPIC_API_KEY raises pydantic_ai UserError at construction; with a dummy key, strict ReplayPins({}) raises PinMiss before any network call.
-- `uv init --bare` creates only pyproject.toml; not run here, standard uv behaviour.
-- Banner goes to stderr (verified), so stdout outputs above are exact.
-
-## Known Limitations
-- `register_builtin_events` (top-level) has no reference page (gen script skips __init__), so not linked.
-- PinnedModel's `on_key`, `policy`, `kind` parameters and streaming are deliberately not covered here; how-to pages own them.
-
-## API Reference Links Used
-- EventTypeRegistry, PinnedModel, PinLedger, SQLiteEventStore, pin_events, write_recording, read_recording, ReplayPins, PinMiss, Divergence (see link definitions above)
--->
+[pinned-tool]: ../reference/anagrapheus/provider/tools.md#anagrapheus.provider.tools.pinned_tool

@@ -11,21 +11,3 @@ These lessons teach anagrapheus by building and running something. Work through 
 - **[Touring the Negotiation Example](negotiation-example.md)**: Run the repository's four-round EU and UK negotiation, then inspect its log, beliefs, chronicle, prompts and replay.
 
 Start with Getting Started if pinning and replay are new to you. If you already know them, or you came here from the negotiation example, go straight to the tour.
-
-<!-- INTERNAL NOTES FOR EDITOR - DO NOT INCLUDE IN RENDERED OUTPUT
-## Page Classification
-- Type: index (section index)
-- Reference used: dedicated template (Section Index Pages rules)
-
-## Source References
-- docs/src/tutorials/getting-started.md, docs/src/tutorials/negotiation-example.md (frontmatter descriptions)
-
-## Accuracy Notes
-- Abstracts paraphrase each child page's `description` frontmatter.
-
-## Known Limitations
-- None.
-
-## API Reference Links Used
-- None.
--->

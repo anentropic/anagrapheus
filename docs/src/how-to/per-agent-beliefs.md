@@ -118,7 +118,7 @@ For beliefs that no domain event carries, such as a seeded private goal or a con
 
 ## 3. Wire the fold
 
-A [`BeliefFold`][belief-fold] folds belief-bearing events into a doxastica store, and keeps an index from each entity to the belief ids that name it. A [`Projector`][projector] runs it over the log.
+A [`BeliefFold`][belief-fold] folds belief-bearing events into a doxastica store, and keeps an **entity index** from each entity to the belief ids that name it, which re-keying reads after a merge. A [`Projector`][projector] runs it over the log.
 
 ```python title="beliefs.py (continued)"
 # 3. Wire the fold to a store and a projector.
@@ -210,7 +210,7 @@ print(divergence(fold.store, "party:uk:held", "party:uk:stated"))
 # [Disagreement(belief_id='v1:fisheries:position(…)', held='cut 5%', reference='cut 12%')]
 ```
 
-`reset_in_transaction=True` is correct here because the belief index shares the log's database, so emptying it and zeroing the fold's position commit together.
+`reset_in_transaction=True` is correct here because the entity index shares the log's database, so emptying it and zeroing the fold's position commit together.
 
 !!! warning "An in-memory belief store needs a rebuild when the file is reopened"
     The fold's position is stored in the SQLite file, but a `MemoryCore(InMemoryBackend())` lives in memory. Reopen the file in a new process and the position says the beliefs are folded while the store is empty. When you reopen a database, check `store.read_position(FOLD_NAME)` and, if it is above zero, rebuild as shown above before reading beliefs.
@@ -257,35 +257,3 @@ beliefs.check(*stated_position(None, event))  # raises if the fold would refuse 
 [belief-events]: ../reference/anagrapheus/beliefs/writer.md#anagrapheus.beliefs.writer.BeliefEvents
 [divergence]: ../reference/anagrapheus/beliefs/divergence.md#anagrapheus.beliefs.divergence.divergence
 [projector]: ../reference/anagrapheus/timeline/folds.md#anagrapheus.timeline.folds.Projector
-
-<!-- INTERNAL NOTES FOR EDITOR - DO NOT INCLUDE IN RENDERED OUTPUT
-## Page Classification
-- Type: how-to
-- Reference used: skills/diataxis/references/how-to-guides.md
-
-## Source References
-- src/anagrapheus/beliefs/predicates.py, ops.py, events.py, writer.py, fold.py, divergence.py, index.py, sqlite.py
-- tests/beliefs/conftest.py, tests/beliefs/test_fold.py
-- examples/negotiation/domain.py (predicates), scopes.py (scope naming), table.py (rebuild on reopen)
-- Verified scripts: scratchpad docs-examples/howto/beliefs.py, beliefs_errors.py
-
-## Accuracy Notes
-- `BeliefEvents` exists and works as the inventory described (revise/expand/contract return PendingEvent; check() validates ops). Verified.
-- Error messages in Troubleshooting are verbatim from beliefs_errors.py, with the TypeError one abridged by an ellipsis.
-- `check(*stated_position(None, event))` passes None as the envelope; that works only because this interpreter ignores its envelope argument. Verified.
-- Rebuild output verified (divergence unchanged after rebuild).
-- The in-memory-store-on-reopen hazard is real: examples/negotiation/table.py rebuilds beliefs on open for exactly this reason.
-- Index rows: `minted` is an upsert, so `position` (minted at seq 1 and again at seq 3) appears once with seq=1. The output block is abridged.
-
-## Known Limitations
-- doxastica has no scope enumeration (no `scopes()`); the application must know its scope names. Mentioned implicitly in "Who decides what".
-- The doxastica PyPI link is assumed; Editor may want to verify or drop it.
-
-## API Reference Links Used
-- anagrapheus.beliefs.predicates.PredicateRegistry
-- anagrapheus.beliefs.ops.Revise, Expand, Contract
-- anagrapheus.beliefs.fold.BeliefFold
-- anagrapheus.beliefs.writer.BeliefEvents
-- anagrapheus.beliefs.divergence.divergence
-- anagrapheus.timeline.folds.Projector
--->

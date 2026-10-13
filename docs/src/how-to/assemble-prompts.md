@@ -124,7 +124,7 @@ projector.catch_up()
 A grant is a frozen dataclass of slices. Build a fresh one for every assembly, since a slice's record of what it handed out belongs to one call:
 
 ```python title="assemble_prompts.py (continued)"
-# 1. The grant: everything Norway's negotiator may read, and nothing else.
+# The grant: everything Norway's negotiator may read, and nothing else.
 @dataclass(frozen=True)
 class NorwayGrant:
     room: LogSlice
@@ -162,7 +162,7 @@ Two more slices exist: [`ChronicleSlice`][chronicle-slice] for chronicle section
 The assembler is a function from the grant to parts. It must be pure: the same log, position and grant must give the same parts, or replay will miss its pins. Cite each part's sources with the reference the slice handed out:
 
 ```python title="assemble_prompts.py (continued)"
-# 2. The assembler: parts with a register, a rank and their sources.
+# The assembler: parts with a register, a rank and their sources.
 def norway_assembler(grant: NorwayGrant) -> list[Part]:
     parts = [Part("ask", Register.binding, grant.ask.value, sources=(grant.ask.ref,))]
     for state in grant.own_beliefs.scope("party:norway:held"):
@@ -222,7 +222,7 @@ With `total=80` the parts no longer fit, and the budget sheds the lowest-ranked 
 
 ## 5. Send the prompt through the pinned model
 
-Rendering is deterministic, so the same context gives the same bytes and a replay hits its pins. Send the result through `PinnedModel` as usual:
+Rendering is deterministic, so the same context gives the same bytes and a replay hits its pins. Send the result through [`PinnedModel`][pinned-model] as usual:
 
 ```python title="assemble_prompts.py (continued)"
 def norway_model(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
@@ -234,7 +234,7 @@ print(Agent(PinnedModel(FunctionModel(norway_model), ledger)).run_sync(prompt).o
 ledger.commit()
 ```
 
-Any change to what the assembler builds changes the prompt, and therefore the key: an assembly change shows up on replay as a `PinMiss`, not as a silently different answer.
+Any change to what the assembler builds changes the prompt, and therefore the key: an assembly change shows up on replay as a [`PinMiss`][pin-miss], not as a silently different answer.
 
 ## Verify it worked
 
@@ -277,7 +277,7 @@ def history(grant: HistoryGrant) -> list[Part]:
 
 ### `StaleRead: the belief fold is at 4 and this slice reads at 5`
 
-The belief fold is not at the slice's position. Run `projector.catch_up()` immediately before building the grant at `store.last_seq()`. Watch for appends you did not think of: committing a `PinLedger` appends `PinPromoted` events, which move `last_seq()` past the fold's position until the projector runs again.
+The belief fold is not at the slice's position. Run `projector.catch_up()` immediately before building the grant at `store.last_seq()`. Watch for appends you did not think of: committing a [`PinLedger`][pin-ledger] appends [`PinPromoted`][pin-promoted] events, which move `last_seq()` past the fold's position until the projector runs again.
 
 ### `NotGranted: scope 'party:uk:held' is not in this grant`
 
@@ -315,31 +315,7 @@ A grant was reused. Build a new grant for every assembly. The same exception typ
 [assemble]: ../reference/anagrapheus/assembly/assemble.md#anagrapheus.assembly.assemble.assemble
 [budget]: ../reference/anagrapheus/assembly/assemble.md#anagrapheus.assembly.assemble.Budget
 [render-labelled]: ../reference/anagrapheus/assembly/render.md#anagrapheus.assembly.render.render_labelled
-
-<!-- INTERNAL NOTES FOR EDITOR - DO NOT INCLUDE IN RENDERED OUTPUT
-## Page Classification
-- Type: how-to
-- Reference used: skills/diataxis/references/how-to-guides.md
-
-## Source References
-- src/anagrapheus/assembly/slices.py, parts.py, assemble.py, render.py, errors.py
-- examples/negotiation/story.py (summarising() uses EventsSlice + assemble)
-- Verified scripts: scratchpad docs-examples/howto/assemble_prompts.py, assemble_errors.py
-
-## Accuracy Notes
-- Inventory said "audit with handed_out". `handed_out` exists (anagrapheus.assembly.handed_out over slices), but the per-call audit a reader wants is `Context.read` / `Context.describe()["read"]`, which is what the page uses.
-- Inventory listed `NotGranted` among assemble's refusals: it is raised by BeliefSlice._read for a scope outside `visible`, i.e. at read time inside the assembler, not by assemble() itself. Page describes it that way.
-- StaleRead after ledger.commit(): reproduced. Committing appended PinPromoted at seq 4 while the belief fold position stayed at 3, so the next assembly at last_seq() raised StaleRead until catch_up ran. Real sharp edge, documented.
-- total=80 sheds the offer (rank 1); verified in assemble_errors.py.
-- The leak-test fragment depends on describe()'s "scope" key for StateRef sources (parts.py _source). Verified describe output shape.
-- The ChronicleSlice fragment verified in assemble_fragments.py against a hand-appended Section.
-
-## Known Limitations
-- An application's own reader can be a slice (Slice protocol: upto_seq + handed_out); not demonstrated.
-
-## API Reference Links Used
-- anagrapheus.assembly.slices.LogSlice, BeliefSlice, ChronicleSlice, EventsSlice, Given
-- anagrapheus.assembly.parts.Part
-- anagrapheus.assembly.assemble.assemble, Budget
-- anagrapheus.assembly.render.render_labelled
--->
+[pinned-model]: ../reference/anagrapheus/provider/model.md#anagrapheus.provider.model.PinnedModel
+[pin-miss]: ../reference/anagrapheus/timeline/replay.md#anagrapheus.timeline.replay.PinMiss
+[pin-ledger]: ../reference/anagrapheus/timeline/pins.md#anagrapheus.timeline.pins.PinLedger
+[pin-promoted]: ../reference/anagrapheus/timeline/pins.md#anagrapheus.timeline.pins.PinPromoted

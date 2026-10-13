@@ -66,7 +66,7 @@ After pydantic-ai's banner (set `PYDANTIC_AI_NO_BANNER=1` to hide it), you shoul
 replayed 4 rounds on a fresh store in strict mode: every draw answered from the log, none from a model
 ```
 
-Great: a full negotiation ran and then replayed. Here is what the lines are telling you.
+A full negotiation ran and then replayed. Here is what each line reports.
 
 - **`lineup`** names the model behind each *role*. There are three roles: `propose` makes an offer, `update` reads what happened and concludes one thing about the other side, and `summarize` writes the chronicle. Each party has its own `propose` and `update` slots.
 - **`tabled`** and **`seeded`** set the scene. The clause becomes an entity, and each party is given what it privately wants: the EU wants a settlement, and the UK is willing to concede but will not say so.
@@ -187,7 +187,7 @@ Every event in the log has a namespace. The `negotiation` events are the example
 
 The 29 pins are what made the replay possible. 28 are model requests. Each party makes two calls per round, and each round ends with one summary call. Every `propose` call also takes two requests, because the agent first asks for a tool and then answers once the tool has returned: 16 for offers, 8 for updates and 4 for summaries.
 
-The remaining pin is a tool call. Each `propose` call looks the clause up in an archive through a tool wrapped with [`pinned_tool`][pinned-tool]. The tool's key is built from its name and arguments, and the arguments are the same every time, so the archive was really reached once and every later lookup reused that pin. A replay sees the answer the run saw, not whatever the archive says now.
+The remaining pin is a tool call. Each `propose` call looks the clause up in an archive through a tool wrapped with [`pinned_tool`][pinned-tool]. The tool's key is built from its name and arguments, and the arguments are the same every time, so the archive was reached once and every later lookup reused that pin. A replay sees the answer the run saw, not whatever the archive says now.
 
 ## Step 4: Read the beliefs
 
@@ -208,7 +208,7 @@ Each belief has a *predicate*, the declared question its id names:
 - `red_line` is a party's conclusion about how far the other side will move.
 - `witnessed` records which events a party believes another party saw. These are the beliefs from which "the EU's model of the UK" is rebuilt.
 
-None of these beliefs were written directly. The example appends `BeliefRevised` events, and a [`BeliefFold`][belief-fold] folds them into the belief store, so the store can be dropped and rebuilt from the log at any time.
+None of these beliefs were written directly. The example appends [`BeliefRevised`][belief-revised] events, and a [`BeliefFold`][belief-fold] folds them into the belief store, so the store can be dropped and rebuilt from the log at any time.
 
 The last line compares two of the EU's own scopes with [`divergence`][divergence]: the EU says `hold_firm` and wants `settle`. Only the EU could ask this question, because nobody else can read its `held` scope.
 
@@ -261,7 +261,7 @@ Your ids will differ from these, and the ellipses here shorten them.
 
 This part of the script stages a common identity problem. A new party, `HMG`, is seated, and the EU forms a belief about HMG's position on the clause. Then the application decides that HMG and the UK are the same negotiator, and appends a [`merge`][merge] decision with the UK as the entity that is kept and HMG as the one absorbed.
 
-A belief id names its entities, so the EU's belief is now keyed on an entity that names nothing. [`plan_rekeys`][plan-rekeys] reads the merge from the identity layer and the entity-to-belief [`BeliefIndex`][belief-index], and returns one plan: this belief id becomes that one, with HMG's id replaced by the UK's. The first id in each pair is the party; the second, unchanged, is the clause.
+A belief id names its entities, so the EU's belief is now keyed on an entity that names nothing. [`plan_rekeys`][plan-rekeys] reads the merge from the identity layer and the entity index, a [`BeliefIndex`][belief-index] from each entity to the belief ids that name it, and returns one plan: this belief id becomes that one, with HMG's id replaced by the UK's. The first id in each pair is the party; the second, unchanged, is the clause.
 
 The library stops at the plan. Carrying it out is `apply_rekeys`, which is the example's own code in `examples/negotiation/rekeying.py`: it visits every scope the application knows about, and moves each affected belief by appending a revise for the new id and a contract (retraction) for the old one. Here it moved one belief, in the EU's `held` scope.
 
@@ -307,7 +307,7 @@ Use this table to find the code behind each part of the tour.
 |---|---|
 | Log, registry and folds | `table.py`: `Table.open` is the composition root. It opens one store, registers the library's and the example's events, and wires the identity, belief and chronicle folds into projectors. |
 | Event vocabulary and predicates | `domain.py`: the negotiation's own events and its predicate registry. |
-| Pinned model and tool calls | `agent.py`: each `Negotiator` wraps its models in `PinnedModel` and its archive lookup in `pinned_tool`. `story.py` chooses between a `PinLedger` and a replay resolver. |
+| Pinned model and tool calls | `agent.py`: each `Negotiator` wraps its models in [`PinnedModel`][pinned-model] and its archive lookup in `pinned_tool`. `story.py` chooses between a [`PinLedger`][pin-ledger] and a replay resolver. |
 | Beliefs and scopes | `scopes.py` names the scopes; `table.py` appends belief events; `view.py` limits what one party can read. |
 | Beliefs about beliefs | `nesting.py`: rebuilt on demand from a party's own `witnessed` beliefs, never stored. |
 | Identity and re-keying | `table.py` establishes parties and clauses as entities; `rekeying.py` applies a re-key plan across every scope. |
@@ -344,32 +344,6 @@ You have run a multi-agent negotiation and taken it apart layer by layer. You ha
 [belief-index]: ../reference/anagrapheus/beliefs/index.md#anagrapheus.beliefs.index.BeliefIndex
 [replay-pins]: ../reference/anagrapheus/timeline/replay.md#anagrapheus.timeline.replay.ReplayPins
 [pin-miss]: ../reference/anagrapheus/timeline/replay.md#anagrapheus.timeline.replay.PinMiss
-
-<!-- INTERNAL NOTES FOR EDITOR - DO NOT INCLUDE IN RENDERED OUTPUT
-## Page Classification
-- Type: tutorial
-- Reference used: skills/diataxis/references/tutorials.md
-
-## Source References
-- examples/negotiation/__main__.py, story.py, table.py, agent.py, rekeying.py, scopes.py, domain.py, scripted.py, ui/__main__.py
-- src/anagrapheus/beliefs/rekey.py (plan_rekeys(rekeys, index, predicates)), beliefs/divergence.py (Disagreement(belief_id, held, reference))
-- src/anagrapheus/identity/decisions.py (merge(registry, *, kept, absorbed))
-- src/anagrapheus/timeline/recording.py (pin_events), replay.py (ReplayPins.divergence property)
-
-## Accuracy Notes
-- Step 1 output captured from `uv run python -m examples.negotiation` on 2026-10-13 (pydantic-ai-slim 2.55.0); pasted verbatim minus the banner.
-- tour.py verified: /tmp/.../scratchpad/docs-examples/start/negotiation/tour.py, run both from scratchpad with PYTHONPATH=repo and copied into the repo root (as the reader does). Output pasted verbatim; UUIDs in Step 7 are shortened with ellipses and vary per run.
-- 29 pins = 28 model_call + 1 tool_call; scripted.py docstring confirms "sixteen agent calls and four consolidations, twenty-eight model requests once the tool loop's continuations are counted".
-- The main demo does NOT perform a merge; the tour script stages one (seat HMG, believe, merge, plan, apply), modelled on tests/negotiation/test_rekeying.py. Inventory's "identity merge and re-key" in the output was inaccurate for the CLI.
-- The CLI output does not show the chronicle or assembled prompts either; the tour script surfaces them.
-- `uv sync` installs the dev group, which includes anagrapheus[anthropic,openai] — hence "already installed the Anthropic and OpenAI SDKs".
-- UI defaults: host 127.0.0.1, port 8765, flags --model/--host/--port/--no-browser/--run/--log-level; refuses non-loopback host.
-- Do not mention justfile `demo`/`demo-ui` recipes (maintainer tooling).
-
-## Known Limitations
-- Real-model run (Step 9) not executed (no key). Behaviour described from __main__.py (UnrecordableOutput / UnexpectedModelBehavior -> message + exit 1; missing key reported before any draw via parser.error).
-- tour.py relies on example internals (Table, PartyView, proposing) that are not public API; acceptable since the page is about the example.
-
-## API Reference Links Used
-- pinned_tool, BeliefFold, divergence, assemble, Part, Register, merge, plan_rekeys, BeliefIndex, ReplayPins, PinMiss (definitions above)
--->
+[belief-revised]: ../reference/anagrapheus/beliefs/events.md#anagrapheus.beliefs.events.BeliefRevised
+[pinned-model]: ../reference/anagrapheus/provider/model.md#anagrapheus.provider.model.PinnedModel
+[pin-ledger]: ../reference/anagrapheus/timeline/pins.md#anagrapheus.timeline.pins.PinLedger

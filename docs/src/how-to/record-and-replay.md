@@ -23,7 +23,7 @@ This guide shows how to record the model calls of an agent run into a recording 
 
 ## 1. Register every event type
 
-An `EventTypeRegistry` maps each event type to its pydantic model. The log holds the library's own events (pins, identity decisions, beliefs) next to yours, so register both: `anagrapheus.register_builtin_events` covers every library event in one call.
+An [`EventTypeRegistry`][registry] maps each event type to its pydantic model. The log holds the library's own events (pins, identity decisions, beliefs) next to yours, so register both: `anagrapheus.register_builtin_events` covers every library event in one call.
 
 ```python title="record_replay.py"
 from pathlib import Path
@@ -114,7 +114,7 @@ print(f"recorded {count} pin(s) from {model_calls} model call(s)")
 
 What each call does:
 
-- [`PinLedger.commit()`][pin-ledger-commit] promotes the unit's pins into the log as ordinary `PinPromoted` events. Until then they sit in a scratch area that a reader of the log never sees.
+- [`PinLedger.commit()`][pin-ledger-commit] promotes the unit's pins into the log as ordinary [`PinPromoted`][pin-promoted] events. Until then they sit in a scratch area that a reader of the log never sees.
 - [`pin_events`][pin-events] keeps only the pin events. The rest of the log (your `OfferMade`, entity and belief events) is what the run *did*, and replaying the run produces those again.
 - [`write_recording`][write-recording] writes one header line and then one event per line, as canonical JSON, so re-recording an unchanged run gives a small, reviewable diff.
 
@@ -166,7 +166,7 @@ Record once against the provider, commit the recording file to your repository, 
 
 ## Continue past a miss instead of stopping
 
-Strict replay suits tests. When exploring ("what happens if the UK opens differently?"), use `on_miss="record"`: the first miss is recorded as a [`Divergence`][divergence], the call goes to the model, and the run continues as a new run. Pass `announce` to write that divergence into the log as a `ReplayDiverged` event. Here `store` and `ledger` are the live log and ledger from step 3, before the store is closed:
+Strict replay suits tests. When exploring ("what happens if the UK opens differently?"), use `on_miss="record"`: the first miss is recorded as a [`Divergence`][divergence], the call goes to the model, and the run continues as a new run. Pass `announce` to write that divergence into the log as a [`ReplayDiverged`][replay-diverged] event. Here `store` and `ledger` are the live log and ledger from step 3, before the store is closed:
 
 ```python
 replay = ReplayPins.from_events(
@@ -197,7 +197,7 @@ The exception's `divergence` attribute says which key missed and after how many 
 
 ### `RecordingError: … has no 'anagrapheus.recording' header on its first line`
 
-The file is not a recording, or its header line was removed. `read_recording` refuses a file without a header rather than load pins whose recording route is unknown.
+The file is not a recording, or its header line was removed. [`read_recording`][read-recording] refuses a file without a header rather than load pins whose recording route is unknown.
 
 ### An old recording no longer decodes
 
@@ -220,32 +220,7 @@ The file is not a recording, or its header line was removed. `read_recording` re
 [pinned-model]: ../reference/anagrapheus/provider/model.md#anagrapheus.provider.model.PinnedModel
 [pin-events]: ../reference/anagrapheus/timeline/recording.md#anagrapheus.timeline.recording.pin_events
 [write-recording]: ../reference/anagrapheus/timeline/recording.md#anagrapheus.timeline.recording.write_recording
-
-<!-- INTERNAL NOTES FOR EDITOR - DO NOT INCLUDE IN RENDERED OUTPUT
-## Page Classification
-- Type: how-to
-- Reference used: skills/diataxis/references/how-to-guides.md
-
-## Source References
-- src/anagrapheus/__init__.py (register_builtin_events)
-- src/anagrapheus/timeline/recording.py, replay.py, pins.py
-- src/anagrapheus/provider/model.py
-- tests/timeline/test_recording.py, tests/provider/test_model.py (usage patterns)
-- Verified script: scratchpad docs-examples/howto/record_replay.py (+ record_replay_errors.py for troubleshooting outputs)
-
-## Accuracy Notes
-- Inventory said "replay with ReplayPins.from_events on a fresh store": ReplayPins needs no store at all; the fresh store is only where the replayed unit re-appends its domain events. Wrote it that way.
-- FunctionModel's model_id includes the wrapped function's name ("function:function:uk_negotiator:"), so a replay must wrap a function with the same name. Verified: a renamed function misses.
-- Record mode (on_miss="record") keeps fresh draws in the ReplayPins object only; nothing is committed to the log except the optional ReplayDiverged via announce_to. Verified.
-- PinnedModel's signature annotates wrapped: Model, but WrapperModel.__init__ accepts a KnownModelName string and infers it. Construction verified with a dummy ANTHROPIC_API_KEY; no live call was made. The "anthropic:claude-haiku-5-5" snippet is construction-verified only.
-- UnknownEventType message verified verbatim with a registry that had only timeline events.
-
-## Known Limitations
-- The top-level `anagrapheus.register_builtin_events` lives in the package __init__, which gen_ref_pages.py skips, so it has no generated reference entry. Left as plain code (no link) on purpose.
-
-## API Reference Links Used
-- anagrapheus.timeline.pins.PinLedger, PinLedger.commit
-- anagrapheus.timeline.replay.ReplayPins, ReplayPins.from_events, Divergence
-- anagrapheus.provider.model.PinnedModel
-- anagrapheus.timeline.recording.pin_events, write_recording
--->
+[registry]: ../reference/anagrapheus/timeline/registry.md#anagrapheus.timeline.registry.EventTypeRegistry
+[pin-promoted]: ../reference/anagrapheus/timeline/pins.md#anagrapheus.timeline.pins.PinPromoted
+[replay-diverged]: ../reference/anagrapheus/timeline/pins.md#anagrapheus.timeline.pins.ReplayDiverged
+[read-recording]: ../reference/anagrapheus/timeline/recording.md#anagrapheus.timeline.recording.read_recording

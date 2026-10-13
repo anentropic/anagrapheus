@@ -39,7 +39,7 @@ flowchart LR
 
 ## 1. Wire the identity fold beside the belief fold
 
-The identity registry is a projection like any other: an [`IdentityFold`][identity-fold] over the log, read through an [`IdentityRegistry`][identity-registry]. Its tables, and the belief index, share the log's SQLite file.
+The identity registry is a projection like any other: an [`IdentityFold`][identity-fold] over the log, read through an [`IdentityRegistry`][identity-registry]. Its tables, and the belief fold's entity index, share the log's SQLite file.
 
 ```python title="identity.py"
 import uuid
@@ -209,6 +209,8 @@ This loop makes three decisions on the application's behalf, and yours may diffe
 - The value and the stance carry over unchanged.
 - The old belief is contracted in the same batch, so the move is atomic and both events are in the log.
 
+This loop assumes each belief names at most one re-keyed entity. For the general case, including a belief that names two re-keyed entities and a chooser for split plans, see `apply_rekeys` in the repository's `examples/negotiation/rekeying.py`.
+
 Re-key through events, as here, never by writing to the belief store directly: a direct write would skip the entity index and the log, and vanish on the next rebuild.
 
 ## Verify it worked
@@ -236,7 +238,7 @@ A [`split`][split] decision carves new entities out of one, and moves the names 
 
 ### `AmbiguousSurfaceForm: 'the Commission' matched 2 entities`
 
-`Resolution.sole()` found more than one candidate. That is a real ambiguity in your data, and the library reports it rather than choose. Inspect `registry.resolve(name).candidates` and decide, or merge the entities if they are one. To have candidates ranked, give the registry a `Ladder` of your stance words: `IdentityRegistry(identity_store, ladder=Ladder(["suspected", "believed", "certain"]))`.
+[`Resolution.sole()`][resolution-sole] found more than one candidate. That is a real ambiguity in your data, and the library reports it rather than choose. Inspect `registry.resolve(name).candidates` and decide, or merge the entities if they are one. To have candidates ranked, give the registry a [`Ladder`][ladder] of your stance tokens: `IdentityRegistry(identity_store, ladder=Ladder(["suspected", "believed", "certain"]))`.
 
 ### `UnknownEntity: no entity established with id …`
 
@@ -266,32 +268,5 @@ A belief id in the index cannot be re-minted by this registry: its predicate is 
 [merge]: ../reference/anagrapheus/identity/decisions.md#anagrapheus.identity.decisions.merge
 [split]: ../reference/anagrapheus/identity/decisions.md#anagrapheus.identity.decisions.split
 [plan-rekeys]: ../reference/anagrapheus/beliefs/rekey.md#anagrapheus.beliefs.rekey.plan_rekeys
-
-<!-- INTERNAL NOTES FOR EDITOR - DO NOT INCLUDE IN RENDERED OUTPUT
-## Page Classification
-- Type: how-to
-- Reference used: skills/diataxis/references/how-to-guides.md
-
-## Source References
-- src/anagrapheus/identity/decisions.py, registry.py, fold.py, sqlite.py (merge moves aliases), store.py (RekeyRow), ladder.py, errors.py
-- src/anagrapheus/beliefs/rekey.py, index.py, predicates.py (parse)
-- examples/negotiation/rekeying.py (the application loop this page's step 5 simplifies)
-- tests/identity/test_registry.py
-- Verified scripts: scratchpad docs-examples/howto/identity.py, identity_errors.py, identity_split.py
-
-## Accuracy Notes
-- The step 5 loop is a simplified version of examples/negotiation/rekeying.py. The example's version also handles one belief naming two re-keyed entities (several plans per old id) and a `choose` callback for splits; this page's loop does not, and says so only for splits. Editor may want a sentence pointing at the example's apply_rekeys for the general case.
-- Pinned-establish fragment verified (same material -> same id under one ledger) in identity_errors.py; `ledger` there is a PinLedger.
-- RekeyRow output abridged with placeholders.
-- Merge moves the absorbed entity's aliases to the survivor (sqlite.py merged()), so no separate alias() call is needed; verified resolve("British delegation").sole() == uk.
-
-## Known Limitations
-- LIBRARY GAP: there is no "unmerge" / supersede-a-merge event. Docstrings (identity/__init__, registry.canonical, errors.MergeCycle) say a bad merge is "undone by superseding it" or "correctable only by superseding one of the merges", but no API does this; split() creates new ids and does not restore the absorbed one. The page states this plainly and advises preventing cycles.
-- No scope enumeration in doxastica, hence the explicit scope list.
-
-## API Reference Links Used
-- anagrapheus.identity.fold.IdentityFold
-- anagrapheus.identity.registry.IdentityRegistry (.canonical, .resolve, .history, .rekeys_since)
-- anagrapheus.identity.decisions.establish, merge, split
-- anagrapheus.beliefs.rekey.plan_rekeys
--->
+[resolution-sole]: ../reference/anagrapheus/identity/registry.md#anagrapheus.identity.registry.Resolution.sole
+[ladder]: ../reference/anagrapheus/identity/ladder.md#anagrapheus.identity.ladder.Ladder

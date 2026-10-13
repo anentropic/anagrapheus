@@ -39,9 +39,9 @@ Consider "who does the UK trust?". Modelled as `trusts(uk)` with the trusted par
 
 anagrapheus turns that advice into checks a [`Predicate`][predicate] enforces mechanically:
 
-- **Arity.** Each predicate declares how many entities it takes, and minting at any other arity raises `WrongArity`. A predicate declared as `trusts/2` cannot be minted as `trusts(uk)`, so the silent-retraction shape is unreachable.
+- **Arity.** Each predicate declares how many entities it takes, and minting at any other arity raises [`WrongArity`][wrong-arity]. A predicate declared as `trusts/2` cannot be minted as `trusts(uk)`, so the silent-retraction shape is unreachable.
 - **Kind.** A [`PredicateKind`][predicate-kind] of `FUNCTIONAL` holds one value at a time, so revision correctly replaces the old answer: the UK's red line moves from `hold_firm` to `concede`. A `RELATIONAL` predicate's value only asserts that the proposition holds, so it must be a bool.
-- **Vocabulary.** A functional predicate may declare `values`, the words its answer can be. Any other word raises `OutsideVocabulary`. Without this, a live model writing `hold firm` beside a domain's `hold_firm` produces two answers no comparison can match. Vocabulary is optional because many answers cannot be listed (a location, a name), and it is not part of the id, so widening it later does not orphan existing beliefs.
+- **Vocabulary.** A functional predicate may declare `values`, the words its answer can be. Any other word raises [`OutsideVocabulary`][outside-vocabulary]. Without this, a live model writing `hold firm` beside a domain's `hold_firm` produces two answers no comparison can match. Vocabulary is optional because many answers cannot be listed (a location, a name), and it is not part of the id, so widening it later does not orphan existing beliefs.
 - **Order.** A predicate with `ordered=False` treats its arguments as interchangeable: `allied(uk, eu)` and `allied(eu, uk)` mint the same id.
 
 ```python title="belief_ids.py"
@@ -124,7 +124,7 @@ An **interpreter** is a pure function from an event to the belief operations it 
 
 There are two ways for beliefs to reach the log:
 
-- **The library's own events.** `BeliefRevised`, `BeliefExpanded` and `BeliefContracted` are for beliefs no domain event already carries: a seeded goal, a conclusion a model wrote, a re-key. [`BeliefEvents`][belief-events] builds them, runs the checks, and returns a `PendingEvent` for you to append. It writes nothing itself, so a belief changes in the same batch as whatever caused it.
+- **The library's own events.** [`BeliefRevised`][belief-revised], [`BeliefExpanded`][belief-expanded] and [`BeliefContracted`][belief-contracted] are for beliefs no domain event already carries: a seeded goal, a conclusion a model wrote, a re-key. [`BeliefEvents`][belief-events] builds them, runs the checks, and returns a [`PendingEvent`][pending-event] for you to append. It writes nothing itself, so a belief changes in the same batch as whatever caused it.
 - **Your own events.** If an event in your domain already *is* the belief (the EU overheard the UK's side remark, so the EU now believes the UK would concede), bind its type to an interpreter and pass it to `BeliefFold(..., interpret={...})`. The fold then derives the belief from your event, and no library event is appended beside it.
 
 !!! warning "An interpreter must be pure, so resolve names before the event is written"
@@ -132,7 +132,7 @@ There are two ways for beliefs to reach the log:
 
 ### Checks run before append
 
-Once an event is in the log, it is permanent. If the fold refused an operation, it would refuse it again on every replay, and the projection would be stuck on that event. So the checks belong before append: [`check(predicates, ops)`][check] verifies that each predicate is declared, the arity is right, the value is one the predicate can hold, and no proposition is written twice in one scope by one event. `BeliefEvents` calls it on every event it builds. For your own events, call it on what your interpreter returns before appending (`BeliefEvents.check(*ops)` does the same). The fold runs the same check again and raises, so a bad event that got past is loud rather than a belief silently missing.
+Once an event is in the log, it is permanent. If the fold refused an operation, it would refuse it again on every replay, and the projection would be stuck on that event. So the checks belong before append: [`check(predicates, ops)`][check] verifies that each predicate is declared, the arity is right, the value is one the predicate can hold, and no proposition is written twice in one scope by one event. `BeliefEvents` calls it on every event it builds. For your own events, call it on what your interpreter returns before appending ([`BeliefEvents.check(*ops)`][belief-events-check] does the same). The fold runs the same check again and raises, so a bad event that got past is loud rather than a belief silently missing.
 
 ### Source and cause are different questions
 
@@ -144,11 +144,11 @@ The projector commits the belief fold's position inside the log's transaction, b
 
 ### Edges between beliefs
 
-A belief can rest on another: a conclusion derived from an observation. Retract the observation and doxastica reports the conclusion as impacted. An edge in an event names its target with a [`StateRef`][state-ref], the triple of scope, belief id and source event, because doxastica's own state ids are freshly minted on every fold and could never be replayed. A reference that resolves to nothing raises `UnresolvedStateRef`, and the operation is refused whole rather than written without its dependency.
+A belief can rest on another: a conclusion derived from an observation. Retract the observation and doxastica reports the conclusion as impacted. An edge in an event names its target with a [`StateRef`][state-ref], the triple of scope, belief id and source event, because doxastica's own state ids are freshly minted on every fold and could never be replayed. A reference that resolves to nothing raises [`UnresolvedStateRef`][unresolved-state-ref], and the operation is refused whole rather than written without its dependency.
 
 ### Rebuilding the belief store
 
-doxastica has no "clear" operation, so [`BeliefFold.reset(store)`][belief-fold-reset] takes a new, empty store to fold into and empties the entity index beside it. Readers then find the current store at `BeliefFold.store`. You own that swap, because only you know what kind of store it is.
+doxastica has no "clear" operation, so [`BeliefFold.reset(store)`][belief-fold-reset] takes a new, empty store to fold into and empties the entity index beside it. Readers then find the current store at [`BeliefFold.store`][belief-fold-store]. You own that swap, because only you know what kind of store it is.
 
 !!! danger "An in-memory belief store is empty on reopen, but its position is not"
     The belief fold's **position**, the `seq` of the last event it folded, is persisted in the event store. If the doxastica store is in memory, reopening the database gives you a position saying everything has been folded and a store holding nothing. Rebuild the belief fold on open whenever its position is above zero; the negotiation example's table does exactly this.
@@ -196,34 +196,12 @@ For the procedure, see [How to Keep Per-Agent Beliefs as a Fold](../how-to/per-a
 [belief-events]: ../reference/anagrapheus/beliefs/writer.md#anagrapheus.beliefs.writer.BeliefEvents
 [beliefs-for]: ../reference/anagrapheus/beliefs/index.md#anagrapheus.beliefs.index.BeliefIndex.beliefs_for
 [divergence]: ../reference/anagrapheus/beliefs/divergence.md#anagrapheus.beliefs.divergence.divergence
-
-<!-- INTERNAL NOTES FOR EDITOR - DO NOT INCLUDE IN RENDERED OUTPUT
-## Page Classification
-- Type: explanation
-- Reference used: skills/diataxis/references/explanation.md (Concept Explanation)
-
-## Source References
-- src/anagrapheus/beliefs/predicates.py, ops.py, fold.py, writer.py, events.py, index.py, store.py, divergence.py, rekey.py, errors.py
-- examples/negotiation/domain.py (namespace "negotiation", red_line with DISPOSITIONS vocabulary), table.py (rebuilds belief fold on open)
-- _design/03 §1-§5, §9 for the "why"; not cited
-
-## Accuracy Notes
-- Example: scratchpad/docs-examples/explain/belief_ids.py, run offline; output shown is from one real run (uuids differ per run).
-- Beliefs are a fold (current behaviour). The design note's early sections describe a BeliefWriter that wrote to doxastica directly plus a BeliefMinted event; both were removed and replaced by BeliefFold + BeliefEvents. Page describes current code only.
-- The "UK model of EU view reads hold_firm vs EU reads concede" divergence example paraphrases the negotiation example's second-order scenario; the example derives this rather than storing it, so the exact scope names differ. Kept general.
-- "allied" unordered example is illustrative only (not in the example domain).
-- Stance names: doubted, suspected, believed, certain (doxastica Stance; default certain). Verified in beliefs/events.py.
-- check() raises ValueError for double write; TypeError for non-bool relational value; OutsideVocabulary; WrongArity; UnknownPredicate.
-
-## Known Limitations
-- Stale docstring: PredicateKind docstring in src/anagrapheus/beliefs/predicates.py still references BeliefWriter, which no longer exists. Will show in the generated reference.
-- Index does not survive a scheme bump question is open (nothing re-mints old ids).
-
-## API Reference Links Used
-- anagrapheus.beliefs.predicates.Predicate, PredicateKind, PredicateRegistry, PredicateRegistry.parse
-- anagrapheus.beliefs.fold.BeliefFold, BeliefFold.reset, check
-- anagrapheus.beliefs.ops.Revise, Expand, Contract, StateRef
-- anagrapheus.beliefs.writer.BeliefEvents
-- anagrapheus.beliefs.index.BeliefIndex.beliefs_for
-- anagrapheus.beliefs.divergence.divergence
--->
+[wrong-arity]: ../reference/anagrapheus/beliefs/errors.md#anagrapheus.beliefs.errors.WrongArity
+[outside-vocabulary]: ../reference/anagrapheus/beliefs/errors.md#anagrapheus.beliefs.errors.OutsideVocabulary
+[belief-revised]: ../reference/anagrapheus/beliefs/events.md#anagrapheus.beliefs.events.BeliefRevised
+[belief-expanded]: ../reference/anagrapheus/beliefs/events.md#anagrapheus.beliefs.events.BeliefExpanded
+[belief-contracted]: ../reference/anagrapheus/beliefs/events.md#anagrapheus.beliefs.events.BeliefContracted
+[pending-event]: ../reference/anagrapheus/timeline/envelope.md#anagrapheus.timeline.envelope.PendingEvent
+[belief-events-check]: ../reference/anagrapheus/beliefs/writer.md#anagrapheus.beliefs.writer.BeliefEvents.check
+[unresolved-state-ref]: ../reference/anagrapheus/beliefs/errors.md#anagrapheus.beliefs.errors.UnresolvedStateRef
+[belief-fold-store]: ../reference/anagrapheus/beliefs/fold.md#anagrapheus.beliefs.fold.BeliefFold.store

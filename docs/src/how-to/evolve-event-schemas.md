@@ -99,13 +99,13 @@ def offer_v1_to_v2(payload: dict[str, JsonValue]) -> dict[str, JsonValue]:
     return {**payload, "stock": "mackerel", "cut_percent": None}
 ```
 
-The number in `upcast(...)` is the version the step starts **from**. Version 3 later on means adding a step from 2, and a version 1 event then passes through both steps on its way in.
+The number in [`upcast(...)`][upcast-decorator] is the version the step starts **from**. Version 3 later on means adding a step from 2, and a version 1 event then passes through both steps on its way in.
 
 Upcasts must be pure functions of the payload. They run on every read, including every rebuild and every replay, years after the event was written. Fill gaps with values that were true when the old events were written, or with `None` where nothing is known, and never with anything computed from the current state.
 
 ## 3. Read through an `EventReader` everywhere
 
-An [`EventReader`][event-reader] applies the upcasts as it reads. Use it for every read of the log, and give the same reader to every `Projector`, so folds always see the current shape:
+An [`EventReader`][event-reader] applies the upcasts as it reads. Use it for every read of the log, and give the same reader to every [`Projector`][projector], so folds always see the current shape:
 
 ```python title="upcast.py (continued)"
 store = SQLiteEventStore(path)
@@ -132,7 +132,7 @@ The reader returns both events at version 2. The store itself still holds the fi
 
 Two places take raw events rather than a reader, and need the upcasts passed explicitly:
 
-- **Recordings.** `read_recording` returns events as stored, so pass `upcasts=` when replaying one: `ReplayPins.from_events(recording.events, types, upcasts=upcasts)`.
+- **Recordings.** [`read_recording`][read-recording] returns events as stored, so pass `upcasts=` when replaying one: [`ReplayPins.from_events(recording.events, types, upcasts=upcasts)`][replay-from-events].
 - **Your own code** that calls `store.read()` directly. Switch it to `reader.read()` (decoded) or `reader.read_raw()` (upcast, not decoded).
 
 ## Verify it worked
@@ -168,29 +168,7 @@ This is about the database file, not your events. The SQLite file was last opene
 
 [upcast-registry]: ../reference/anagrapheus/timeline/upcast.md#anagrapheus.timeline.upcast.UpcastRegistry
 [event-reader]: ../reference/anagrapheus/timeline/upcast.md#anagrapheus.timeline.upcast.EventReader
-
-<!-- INTERNAL NOTES FOR EDITOR - DO NOT INCLUDE IN RENDERED OUTPUT
-## Page Classification
-- Type: how-to
-- Reference used: skills/diataxis/references/how-to-guides.md
-
-## Source References
-- src/anagrapheus/timeline/upcast.py, registry.py, envelope.py, errors.py, migrations.py (SchemaTooNew), replay.py (from_events upcasts=), recording.py
-- tests/timeline/test_upcast.py, tests/timeline/test_recording.py
-- Verified scripts: scratchpad docs-examples/howto/upcast.py, upcast_errors.py, upcast_additive.py
-
-## Accuracy Notes
-- Inventory put `SchemaTooNew` under event-schema troubleshooting. It is not an event-schema error: it is raised by `migrate()` when a component's SQLite tables were written by a newer library version (timeline/migrations.py). The page says so plainly. Reproduced by setting schema_versions.version to 99 and reopening.
-- Registering only the latest model is sufficient: EventReader upcasts to `registry.latest_version()` and decodes at that key, so the v1 model need not be registered. Verified.
-- Optional-field-with-default needs no version bump or upcast (pydantic fills the default). Verified in upcast_additive.py.
-- Error messages verbatim from upcast_errors.py.
-- `Upcast` (type alias) exists in anagrapheus.timeline.upcast; the inventory named it as something to "register"; the actual call is UpcastRegistry.register / .upcast decorator.
-
-## Known Limitations
-- The negotiation example has no upcasters, so this page's example is self-contained as the inventory planned.
-- The "Verify" section lists checks in prose rather than code; each check is a call already shown on this page or in the record/replay guide.
-
-## API Reference Links Used
-- anagrapheus.timeline.upcast.UpcastRegistry
-- anagrapheus.timeline.upcast.EventReader
--->
+[upcast-decorator]: ../reference/anagrapheus/timeline/upcast.md#anagrapheus.timeline.upcast.UpcastRegistry.upcast
+[projector]: ../reference/anagrapheus/timeline/folds.md#anagrapheus.timeline.folds.Projector
+[read-recording]: ../reference/anagrapheus/timeline/recording.md#anagrapheus.timeline.recording.read_recording
+[replay-from-events]: ../reference/anagrapheus/timeline/replay.md#anagrapheus.timeline.replay.ReplayPins.from_events

@@ -76,7 +76,7 @@ Your application owns its event names. You register each payload model once, at 
 The library emits events of its own (promoted pins, identity decisions, belief changes) under the reserved namespace `"anagrapheus"`. [`EventTypeRegistry.register`][registry-register] refuses that namespace, so an application event can never collide with a library one. You register the library's events with one call to `anagrapheus.register_builtin_events(registry)`.
 
 !!! warning "Register every library event, not just one subpackage's"
-    A reader that meets an event whose key has no registered model raises `UnknownEventType`. If you use the pin ledger and the identity layer over one log but register only the timeline's events, the first identity decision the reader reaches will fail. The package-level `register_builtin_events` covers every subpackage at once, and registering events you do not use costs nothing.
+    A reader that meets an event whose key has no registered model raises [`UnknownEventType`][unknown-event-type]. If you use the pin ledger and the identity layer over one log but register only the timeline's events, the first identity decision the reader reaches will fail. The package-level `register_builtin_events` covers every subpackage at once, and registering events you do not use costs nothing.
 
 ## Folds and projections
 
@@ -86,11 +86,11 @@ In anagrapheus a fold is any object implementing the [`ProjectionFold`][projecti
 
 ### Position: how far a projection has read
 
-Each fold has a **position**: the `seq` of the last event it has folded, stored in the event store under the fold's name. `Projector.catch_up()` reads each fold's position, folds everything above it in batches, and commits the new position after each batch. Started fresh, it replays the whole log. Started on an existing database, it replays only what each fold has not yet seen.
+Each fold has a **position**: the `seq` of the last event it has folded, stored in the event store under the fold's name. [`Projector.catch_up()`][projector-catch-up] reads each fold's position, folds everything above it in batches, and commits the new position after each batch. Started fresh, it replays the whole log. Started on an existing database, it replays only what each fold has not yet seen.
 
 The position commit and the fold's writes need to move together. If a crash lands between them, either the projection is ahead of its position (and events would be folded twice) or behind it (and events would be skipped). anagrapheus closes that gap in two ways:
 
-- When the store supports transactions, as `SQLiteEventStore` does, the projector applies each batch and commits the position inside one transaction. A projection whose tables live in the same database file therefore commits atomically with its position.
+- When the store supports transactions, as [`SQLiteEventStore`][sqlite-store] does, the projector applies each batch and commits the position inside one transaction. A projection whose tables live in the same database file therefore commits atomically with its position.
 - For state that lives outside that transaction, the fold contract requires `apply` to tolerate the last batch being applied again after a crash. The belief fold, which writes to doxastica, recognises its own earlier writes and reuses them for exactly this reason.
 
 !!! info "Position, not watermark"
@@ -98,7 +98,7 @@ The position commit and the fold's writes need to move together. If a crash land
 
 ### Why projections are disposable
 
-Since a projection is computed from the log, it holds nothing the log does not. `Projector.rebuild(name, reset=...)` sets a fold's position back to zero, calls your `reset` callback to empty its state, and replays the whole log. This is what makes changing a storage backend "stand up the new adapter and replay", and why a bug in a fold is fixed by fixing the fold and rebuilding rather than by migrating its data.
+Since a projection is computed from the log, it holds nothing the log does not. [`Projector.rebuild(name, reset=...)`][projector-rebuild] sets a fold's position back to zero, calls your `reset` callback to empty its state, and replays the whole log. This is what makes changing a storage backend "stand up the new adapter and replay", and why a bug in a fold is fixed by fixing the fold and rebuilding rather than by migrating its data.
 
 The `reset_in_transaction=True` flag tells the projector that the projection's state lives in the store's own database, so the reset and the zeroed position can commit together. The default resets in a separate step, which is the safe choice for state elsewhere: a crash then leaves a replay over stale state, which `apply` must tolerate anyway, rather than an empty projection under a high position that catch-up would skip straight past.
 
@@ -120,7 +120,7 @@ The grade is required, with no default. A default would have to be `"determinist
 The projector treats the two grades differently in two places:
 
 - **A generative fold must also implement [`GenerativeFold`][generative-fold]'s `prepare(event)`.** The projector calls it for every event in a batch *before* opening the write transaction, so the slow model call never holds SQLite's write lock. `apply` then writes what was prepared, with nothing slow left in it.
-- **`rebuild` refuses a generative fold** and raises `GenerativeRebuild` unless you pass `discard_generated=True`. Rebuilding one re-runs every model call it ever made and returns different content, so it is neither cheap nor exact. The [chronicle](chronicle.md#why-rebuilding-needs-acknowledgement) is the generative fold that ships with the library.
+- **`rebuild` refuses a generative fold** and raises [`GenerativeRebuild`][generative-rebuild] unless you pass `discard_generated=True`. Rebuilding one re-runs every model call it ever made and returns different content, so it is neither cheap nor exact. The [chronicle](chronicle.md#why-rebuilding-needs-acknowledgement) is the generative fold that ships with the library.
 
 ## Evolving event schemas: upcast on read
 
@@ -128,10 +128,10 @@ Stored events are never rewritten, so a payload written under schema version 1 s
 
 The upcasts run as events are read, inside [`EventReader`][event-reader], which is what the projector and the assembly slices read through. Folds therefore only ever see the latest shape of each event type.
 
-The reader is strict about gaps. If the chain stops short of the latest registered version, it raises `UpcastGap` rather than decoding a stale payload into the new model and hoping the fields line up. The registry prefers additive change: add an optional field first, then a new event type, and bump a version only when neither will do. See [How to Evolve Event Schemas with Upcasters](../how-to/evolve-event-schemas.md) for the procedure.
+The reader is strict about gaps. If the chain stops short of the latest registered version, it raises [`UpcastGap`][upcast-gap] rather than decoding a stale payload into the new model and hoping the fields line up. The registry prefers additive change: add an optional field first, then a new event type, and bump a version only when neither will do. See [How to Evolve Event Schemas with Upcasters](../how-to/evolve-event-schemas.md) for the procedure.
 
 ??? info "Table schemas are versioned separately"
-    Payload evolution never touches the database tables. The tables themselves (the event log, positions, pin scratch, and each projection's own tables) migrate automatically when a store opens its connection, with each subpackage tracking its own schema version. Downgrade is not supported: opening a file written by a newer version of the library raises `SchemaTooNew` rather than risking a write the newer code would misread.
+    Payload evolution never touches the database tables. The tables themselves (the event log, positions, pin scratch, and each projection's own tables) migrate automatically when a store opens its connection, with each subpackage tracking its own schema version. Downgrade is not supported: opening a file written by a newer version of the library raises [`SchemaTooNew`][schema-too-new] rather than risking a write the newer code would misread.
 
 ## Where to go next
 
@@ -150,33 +150,10 @@ The reader is strict about gaps. If the chain stops short of the latest register
 [fold-determinism]: ../reference/anagrapheus/timeline/folds.md#anagrapheus.timeline.folds.ProjectionFold.fold
 [upcast-registry]: ../reference/anagrapheus/timeline/upcast.md#anagrapheus.timeline.upcast.UpcastRegistry
 [event-reader]: ../reference/anagrapheus/timeline/upcast.md#anagrapheus.timeline.upcast.EventReader
-
-<!-- INTERNAL NOTES FOR EDITOR - DO NOT INCLUDE IN RENDERED OUTPUT
-## Page Classification
-- Type: explanation
-- Reference used: skills/diataxis/references/explanation.md (Pattern 1, Concept Explanation)
-
-## Source References
-- src/anagrapheus/timeline/envelope.py, registry.py, store.py, sqlite.py, folds.py, upcast.py, migrations.py, errors.py
-- src/anagrapheus/__init__.py (register_builtin_events)
-- _design/01 §4-§9 for the "why" (namespace, storage, per-component migrations, position naming, folds without schedule); not cited
-
-## Accuracy Notes
-- Example script: scratchpad/docs-examples/explain/envelope.py, run offline with `uv run python`. The event_id and created_at in the shown output come from one real run and differ each run.
-- `Projector.rebuild` order: commit_position(0) then reset() (default), or both inside one transaction when reset_in_transaction=True. Verified in folds.py.
-- `GenerativeFold.prepare` is called by the projector for each event in the batch before the transaction (folds.py _apply_batch). Verified.
-- Projector applies inside a transaction only when the store is a TransactionalStore (SQLiteEventStore is).
-- Registry.register rejects RESERVED_NAMESPACE with ValueError; DuplicateEventType for duplicate key or model.
-- UpcastGap raised by UpcastRegistry.apply when no step from a version below target.
-- Migrations: per-component schema_versions table; SchemaTooNew in timeline/migrations.py. Did not name the table (internal).
-
-## Known Limitations
-- Upcasts are payload dict -> dict; there is no downcast.
-- read_recording returns events not upcast; ReplayPins.from_events(upcasts=...) handles it (covered on the pinning page).
-
-## API Reference Links Used
-- anagrapheus.timeline.envelope.DomainEvent / PendingEvent / StoredEvent
-- anagrapheus.timeline.registry.EventTypeRegistry, EventTypeRegistry.register
-- anagrapheus.timeline.folds.ProjectionFold / GenerativeFold / Projector / ProjectionFold.fold (FoldDeterminism type alias has no anchor in the generated reference)
-- anagrapheus.timeline.upcast.UpcastRegistry / EventReader
--->
+[unknown-event-type]: ../reference/anagrapheus/timeline/errors.md#anagrapheus.timeline.errors.UnknownEventType
+[projector-catch-up]: ../reference/anagrapheus/timeline/folds.md#anagrapheus.timeline.folds.Projector.catch_up
+[sqlite-store]: ../reference/anagrapheus/timeline/sqlite.md#anagrapheus.timeline.sqlite.SQLiteEventStore
+[projector-rebuild]: ../reference/anagrapheus/timeline/folds.md#anagrapheus.timeline.folds.Projector.rebuild
+[generative-rebuild]: ../reference/anagrapheus/timeline/folds.md#anagrapheus.timeline.folds.GenerativeRebuild
+[upcast-gap]: ../reference/anagrapheus/timeline/errors.md#anagrapheus.timeline.errors.UpcastGap
+[schema-too-new]: ../reference/anagrapheus/timeline/migrations.md#anagrapheus.timeline.migrations.SchemaTooNew

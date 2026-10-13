@@ -25,23 +25,3 @@ These pages explain why anagrapheus is shaped the way it is: what each layer is 
 
 !!! tip "Suggested reading order"
     Read the first three pages in order: the architecture, then the log, then pinning. The four layer pages after that stand on their own. Identity and beliefs make most sense read together, because a merge in one becomes a re-key in the other.
-
-<!-- INTERNAL NOTES FOR EDITOR - DO NOT INCLUDE IN RENDERED OUTPUT
-## Page Classification
-- Type: explanation (section index page)
-- Reference used: Section Index Pages rules in doc-author.md; mkdocs-material.md section index guidance
-
-## Source References
-- .doc-writer/page-inventory.md (pages 13-20)
-- mkdocs.yml nav (Explanation section already lists these seven pages)
-
-## Accuracy Notes
-- Child pages grouped into three sub-sections even though there are only 7 children; grouping supports the suggested reading order.
-- Links to ../how-to/index.md, written by another author agent in parallel.
-
-## Known Limitations
-- None.
-
-## API Reference Links Used
-- None.
--->
