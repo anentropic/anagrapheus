@@ -33,6 +33,7 @@ from anagrapheus.timeline.pins import (
     PinResolver,
     PinsAbandoned,
     ReplayDiverged,
+    is_bookkeeping,
     pin_key,
     register_builtin_events,
 )
@@ -99,6 +100,7 @@ __all__ = [
     "UpcastGap",
     "UpcastRegistry",
     "canonical_json",
+    "is_bookkeeping",
     "pin_events",
     "pin_key",
     "read_recording",

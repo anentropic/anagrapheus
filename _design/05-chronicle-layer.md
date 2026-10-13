@@ -86,6 +86,16 @@ from the log, never the chronicle**, so near-term continuity never depends on ge
 prose; and supersession keeps the superseded prose readable by id, so what a past run
 actually read can still be seen.
 
+**The tail's filter is the application's.** `Brief` predates the slices, and its tail
+was a bare read of the log, so `PinPromoted` and the other ledger events turned up in
+the "verbatim tail". It now takes `admit=` (envelope only, before decode, exactly as
+`LogSlice` does) and `tail(upto_seq=)`, and `timeline.is_bookkeeping` matches the three
+events the pin machinery appends about itself: `PinPromoted`, `PinsAbandoned` and
+`ReplayDiverged`. Excluding the reserved namespace by default was rejected: the belief
+and identity events (`BeliefRevised`, `established`) live there too, and they can be an
+app's content. Pins promoted with `promote_as` are the app's vocabulary, so the
+predicate does not see them. The default (`admit=None`) is the old behaviour.
+
 ## 5. Where the pin key is built — [R61 clause 5]
 
 Clause 5 pins generative folds, and warns that a key of stable identifiers alone

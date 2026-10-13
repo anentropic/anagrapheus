@@ -69,6 +69,8 @@ A caller that needs to decide something takes `Anchors` and finds there is no pr
 
 [`Brief`][brief] combines the two halves of the recency/depth split for reading: [`tail(since_seq=...)`][brief-tail] returns the log's own events verbatim as [`Recent`][recent], and [`depth()`][brief-depth] returns the consolidated sections. The tail is read from the log, never from the chronicle, so near-term continuity never depends on generated prose. It also makes consolidation lag invisible: if the chronicle is behind, the tail simply covers more.
 
+The tail is every event in the log above the position unless the `Brief` is given an `admit` predicate, which sees each envelope before anything is decoded. Pass `admit=lambda e: not is_bookkeeping(e)` ([`is_bookkeeping`][is-bookkeeping]) to leave out the events the pin ledger appends about itself, so the tail holds only what the run did. Which other events belong in a tail is the application's decision, so the library filters nothing by default. `tail(upto_seq=...)` stops the tail at a position, to read it at the same point as everything else.
+
 !!! warning "A shared chronicle can only carry public content"
     One chronicle is read by every role it is shown to. If its prose summarises a private event, such as a side remark only one party overheard, that event reaches every reader's prompt, including the party who believes it went unheard. There is no wording of a shared summary that describes a private event correctly for every reader. Keep private events out of what the summariser is given; [Prompt Assembly](prompt-assembly.md) shows how a slice's `admit` filter does that.
 
@@ -136,6 +138,7 @@ For the procedure, see [How to Consolidate History into Chronicle Sections](../h
 [consolidated-through]: ../reference/anagrapheus/chronicle/reading.md#anagrapheus.chronicle.reading.Anchors.consolidated_through
 [brief-tail]: ../reference/anagrapheus/chronicle/reading.md#anagrapheus.chronicle.reading.Brief.tail
 [brief-depth]: ../reference/anagrapheus/chronicle/reading.md#anagrapheus.chronicle.reading.Brief.depth
+[is-bookkeeping]: ../reference/anagrapheus/timeline/pins.md#anagrapheus.timeline.pins.is_bookkeeping
 [projector-rebuild]: ../reference/anagrapheus/timeline/folds.md#anagrapheus.timeline.folds.Projector.rebuild
 [generative-rebuild]: ../reference/anagrapheus/timeline/folds.md#anagrapheus.timeline.folds.GenerativeRebuild
 [store-export]: ../reference/anagrapheus/chronicle/store.md#anagrapheus.chronicle.store.ChronicleStore.export

@@ -57,6 +57,7 @@ from anagrapheus.timeline import (
     SQLiteEventStore,
     StoredEvent,
     UpcastRegistry,
+    is_bookkeeping,
 )
 
 
@@ -145,25 +146,26 @@ Round 1 (events 1 to 3) becomes one section, with id `"1-3"`. The UK's new offer
 A [`Brief`][brief] splits recency from depth. Read the consolidated past as sections, and everything after it verbatim from the log:
 
 ```python title="chronicle.py (continued)"
-brief = Brief(chronicle, reader)
+brief = Brief(chronicle, reader, admit=lambda e: not is_bookkeeping(e))
 through = brief.anchors.consolidated_through()
 print("consolidated through", through)
 for section in brief.depth():
     print(section.anchor.section_id, section.prose, section.pins)
 for event in brief.tail(since_seq=through).events:
-    if event.envelope.namespace == "fisheries":
-        print("recent:", event.seq, event.payload)
+    print("recent:", event.seq, event.envelope.type, event.payload)
 print([s.anchor.section_id for s in substring_retriever(brief.depth(), "norway")])
 ```
 
 ```text
 consolidated through 3
 1-3 The UK opened at 12%; Norway held at 5%. ('p1:model_call:1904ca75…',)
-recent: 4 {'party': 'UK', 'text': 'We could move to 10%.'}
+recent: 4 OfferMade {'party': 'UK', 'text': 'We could move to 10%.'}
 ['1-3']
 ```
 
 The tail always comes from the log, never from the chronicle. If consolidation falls behind, the tail simply starts earlier and nothing is missing.
+
+`admit` sees each event's envelope before anything is decoded, and the tail keeps only what it accepts. [`is_bookkeeping`][is-bookkeeping] matches the events the pin ledger appends about itself, such as the `PinPromoted` that `ledger.commit()` wrote at seq 5, so this tail holds only what happened in the negotiation. Without `admit`, the tail is every event in the log. Pass `upto_seq=` to [`tail`][brief-tail] to stop it at a position instead of at the end of the log.
 
 There are two read surfaces, at two grades:
 
@@ -400,7 +402,7 @@ The section would leave two current sections over one range, or a consolidated r
 
 ### The tail contains `PinPromoted` events
 
-[`Brief.tail`][brief-tail] returns every event above the position, library events included. Filter on `event.envelope.namespace`, as in step 4.
+The `Brief` was built without `admit`, so [`Brief.tail`][brief-tail] returns every event above the position, the pin ledger's included. Pass `admit=lambda e: not is_bookkeeping(e)`, as in step 4. If you promote pins into your own vocabulary with `promote_as`, `is_bookkeeping` does not know those events: write your own `admit` that refuses them too.
 
 ## Related
 
@@ -435,3 +437,4 @@ The section would leave two current sections over one range, or a consolidated r
 [store-append]: ../reference/anagrapheus/chronicle/store.md#anagrapheus.chronicle.store.ChronicleStore.append
 [store-append-new]: ../reference/anagrapheus/chronicle/store.md#anagrapheus.chronicle.store.ChronicleStore.append_new
 [brief-tail]: ../reference/anagrapheus/chronicle/reading.md#anagrapheus.chronicle.reading.Brief.tail
+[is-bookkeeping]: ../reference/anagrapheus/timeline/pins.md#anagrapheus.timeline.pins.is_bookkeeping
