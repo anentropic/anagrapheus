@@ -21,6 +21,7 @@ from anagrapheus.timeline import (
     RecordingError,
     ReplayPins,
     SQLiteEventStore,
+    UpcastGap,
     UpcastRegistry,
     pin_events,
     pin_key,
@@ -202,6 +203,78 @@ def test_a_recording_outlives_the_schema_it_was_written_under(tmp_path: Path):
     recording = read_recording(path)
     assert recording.events[0].envelope.schema_version == 1, "the file was not rewritten"
     replay = ReplayPins.from_events(recording.events, now, extract=extract, upcasts=upcasts)
+
+    assert replay.resolve(key, kind="app", effect=lambda: pytest.fail("drew"), interpret=str) == (
+        "sixty-forty"
+    )
+
+
+def _v1_recording(tmp_path: Path) -> tuple[Path, str]:
+    """A recording holding one ``app/Recorded`` event at version 1, and its pin key."""
+    then = EventTypeRegistry()
+    then.register(EventKey("app", "Recorded", 1), RecordedV1)
+    store = SQLiteEventStore(tmp_path / "then.db")
+    key = pin_key("app", {"q": "what was settled"})
+    store.append([then.pending(RecordedV1(k=key, r="sixty-forty"))])
+    path = tmp_path / "then.jsonl"
+    write_recording(path, store.read(), header={"route": "app:archive"})
+    store.close()
+    return path, key
+
+
+def _extract(_: StoredEvent, decoded: DomainEvent) -> tuple[str, JsonValue]:
+    if isinstance(decoded, RecordedV2):
+        return decoded.key, decoded.result
+    assert isinstance(decoded, RecordedV1)
+    return decoded.k, decoded.r
+
+
+@pytest.mark.parametrize("keep_v1", [True, False], ids=["v1-still-registered", "v2-only"])
+def test_an_old_version_without_upcasts_is_refused_by_name(tmp_path: Path, keep_v1: bool):
+    """
+    Forgetting ``upcasts=`` names the fix instead of misreading the recording.
+
+    With version 1 still registered the event would otherwise decode as the old model
+    and reach ``extract`` in a shape the application no longer expects; with only
+    version 2 registered it would fail as an unknown event type, which does not say
+    what to pass.
+    """
+    path, _ = _v1_recording(tmp_path)
+    now = EventTypeRegistry()
+    if keep_v1:
+        now.register(EventKey("app", "Recorded", 1), RecordedV1)
+    now.register(EventKey("app", "Recorded", 2), RecordedV2)
+
+    with pytest.raises(
+        UpcastGap, match=r"stored as v1 .* latest registered schema is v2; pass upcasts="
+    ):
+        ReplayPins.from_events(read_recording(path).events, now, extract=_extract)
+
+
+def test_a_current_version_needs_no_upcasts(tmp_path: Path):
+    """An event already at the latest registered version replays without ``upcasts=``."""
+    path, key = _v1_recording(tmp_path)
+    now = EventTypeRegistry()
+    now.register(EventKey("app", "Recorded", 1), RecordedV1)
+
+    replay = ReplayPins.from_events(read_recording(path).events, now, extract=_extract)
+
+    assert replay.resolve(key, kind="app", effect=lambda: pytest.fail("drew"), interpret=str) == (
+        "sixty-forty"
+    )
+
+
+def test_an_old_version_with_upcasts_replays_as_the_latest(tmp_path: Path):
+    """The same recording, with ``upcasts=`` passed, reaches ``extract`` as version 2."""
+    path, key = _v1_recording(tmp_path)
+    now = EventTypeRegistry()
+    now.register(EventKey("app", "Recorded", 2), RecordedV2)
+    upcasts = UpcastRegistry()
+    upcasts.register("app", "Recorded", 1, lambda p: {"key": p["k"], "result": p["r"]})
+
+    replay = ReplayPins.from_events(
+        read_recording(path).events, now, extract=_extract, upcasts=upcasts
+    )
 
     assert replay.resolve(key, kind="app", effect=lambda: pytest.fail("drew"), interpret=str) == (
         "sixty-forty"
