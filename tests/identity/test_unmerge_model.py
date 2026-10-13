@@ -9,7 +9,6 @@ keeps the split's judgment as it was made.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 from uuid import UUID
@@ -266,16 +265,42 @@ def _path_members(rig: Rig) -> set[tuple[str, int, int]]:
     return {(str(form), int(seq), int(merged)) for form, seq, merged in rows}
 
 
-def _paths_spelled_out(rig: Rig) -> set[tuple[str, int, int]]:
-    """The same membership, read from each claim's own path."""
-    rows = rig.store.connection.execute(
-        "SELECT surface_form, seq, path FROM identity_claims"
-    ).fetchall()
-    return {
-        (str(form), int(seq), int(merged))
-        for form, seq, path in rows
-        for merged in json.loads(path)
+def _paths_out_of_line(rig: Rig) -> list[tuple[str, int, int | None]]:
+    """
+    Every claim whose path does not lead to where it stands, with its latest merge.
+
+    A path names only merges that still stand, each later than the recording it
+    carried. Unless a split has set the claim aside, the latest of them, the one at
+    the highest position, is the merge that brought it to the entity it stands on, and
+    a claim with no path stands on the entity that recorded it.
+    """
+    conn = rig.store.connection
+    standing = {
+        int(seq): str(kept)
+        for seq, kept in conn.execute(
+            "SELECT merged_seq, merged_into FROM identity_entities WHERE merged_seq IS NOT NULL"
+        )
     }
+    recorded = {
+        int(seq): str(entity)
+        for seq, entity, kind in conn.execute("SELECT seq, entity_id, kind FROM identity_decisions")
+        if kind in {"established", "aliased", "split_from"}
+    }
+    paths: dict[tuple[str, int], list[int]] = {}
+    for form, seq, merged in _path_members(rig):
+        paths.setdefault((form, seq), []).append(merged)
+    wrong: list[tuple[str, int, int | None]] = []
+    claims = conn.execute("SELECT surface_form, seq, entity_id, aside FROM identity_claims")
+    for form, seq, entity, aside in claims:
+        path = sorted(paths.pop((str(form), int(seq)), []), reverse=True)
+        latest = path[0] if path else None
+        stale = any(merged not in standing or merged <= seq for merged in path)
+        holder = recorded[seq] if latest is None else standing.get(latest)
+        if stale or (not aside and str(entity) != holder):
+            wrong.append((str(form), int(seq), latest))
+    # A membership row for a claim that no longer exists.
+    wrong.extend((form, seq, None) for form, seq in paths)
+    return wrong
 
 
 @settings(max_examples=400, deadline=None)
@@ -317,7 +342,7 @@ def test_unmerge_matches_the_model(
                 "SELECT surface_form, seq FROM identity_aliases"
             ).fetchall()
             assert len({tuple(row) for row in rows}) == len(rows)
-            assert _path_members(rig) == _paths_spelled_out(rig)
+            assert _paths_out_of_line(rig) == [], (index, decision)
 
             if decision.kind == "unmerge":
                 assert decision.withdraws is not None

@@ -99,6 +99,19 @@ MIGRATIONS: Final[tuple[tuple[str, ...], ...]] = (
         SELECT surface_form, seq, stance, entity_id, '[]', 0 FROM identity_aliases
         """,
     ),
+    # v3 — identity_claim_paths becomes the only record of a claim's path. The JSON
+    # copy in identity_claims.path said the same thing in order, but the order follows
+    # from the merges' positions, so the column is dropped. Any membership row missing
+    # is first filled in from it; a projection folded at v2 already has every one.
+    # The column is in no index or constraint, so nothing blocks the drop.
+    (
+        """
+        INSERT OR IGNORE INTO identity_claim_paths (surface_form, claim_seq, merge_seq)
+        SELECT c.surface_form, c.seq, CAST(step.value AS INTEGER)
+        FROM identity_claims AS c, json_each(c.path) AS step
+        """,
+        "ALTER TABLE identity_claims DROP COLUMN path",
+    ),
 )
 
 LATEST_VERSION: Final = len(MIGRATIONS)
