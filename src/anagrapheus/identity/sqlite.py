@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from anagrapheus.identity.events import normalize_surface_form
@@ -47,9 +47,11 @@ class SQLiteIdentityStore:
     runs through its merge back to the absorbed entity, wherever later merges of the
     survivor carried it, and drops that merge and every later one from the path. That
     is the whole rule: what an unmerge withdraws is found by the specific rows its
-    merge moved, never by a form's name. Each step of a path is also kept as a row of
-    its own, indexed by the merge, so an unmerge reads only the claims its merge
-    carried, however many claims the projection holds.
+    merge moved, never by a form's name. Each step of a path is kept as a row of its
+    own, indexed by the merge, so an unmerge reads only the claims its merge carried,
+    however many claims the projection holds. A path's order is not stored: decisions
+    are applied in log order, so a later merge always has the higher position, and
+    the path reads latest first by position alone.
 
     An entity shows one row per form, the first of the claims standing on it: its own
     recordings first, newest first, then what merges brought, the earliest merge first
@@ -222,8 +224,8 @@ class SQLiteIdentityStore:
         """A new recording of a form on an entity: a claim of its own, shown first."""
         normalized = normalize_surface_form(surface_form)
         self._conn.execute(
-            "INSERT INTO identity_claims (surface_form, seq, stance, entity_id, path, aside) "
-            "VALUES (?, ?, ?, ?, '[]', 0)",
+            "INSERT INTO identity_claims (surface_form, seq, stance, entity_id, aside) "
+            "VALUES (?, ?, ?, ?, 0)",
             (normalized, seq, stance, str(entity_id)),
         )
         self._show(entity_id, normalized)
@@ -237,15 +239,15 @@ class SQLiteIdentityStore:
         the split left it.
         """
         rows = self._conn.execute(
-            "SELECT surface_form, seq, path FROM identity_claims WHERE entity_id = ? AND aside = 0",
+            "SELECT surface_form, seq FROM identity_claims WHERE entity_id = ? AND aside = 0",
             (str(absorbed),),
         ).fetchall()
         for row in rows:
-            path = [seq, *_path(row["path"])]
+            # Every merge already on this path was applied earlier in the log, so this
+            # one, at a higher position, goes first when the path is read latest first.
             self._conn.execute(
-                "UPDATE identity_claims SET entity_id = ?, path = ? "
-                "WHERE surface_form = ? AND seq = ?",
-                (str(kept), json.dumps(path), row["surface_form"], row["seq"]),
+                "UPDATE identity_claims SET entity_id = ? WHERE surface_form = ? AND seq = ?",
+                (str(kept), row["surface_form"], row["seq"]),
             )
             self._conn.execute(
                 "INSERT OR IGNORE INTO identity_claim_paths (surface_form, claim_seq, merge_seq) "
@@ -266,24 +268,24 @@ class SQLiteIdentityStore:
         split judged the row it took, not the merge that brought this one.
         """
         rows = self._conn.execute(
-            "SELECT c.surface_form, c.seq, c.entity_id, c.path FROM identity_claim_paths p "
+            "SELECT c.surface_form, c.seq, c.entity_id FROM identity_claim_paths p "
             "JOIN identity_claims c ON c.surface_form = p.surface_form AND c.seq = p.claim_seq "
             "WHERE p.merge_seq = ? ORDER BY c.surface_form, c.seq",
             (merged_seq,),
         ).fetchall()
         touched: set[tuple[str, str]] = set()
         for row in rows:
-            path = _path(row["path"])
-            cut = path.index(merged_seq) + 1
             self._conn.execute(
-                "UPDATE identity_claims SET entity_id = ?, path = ?, aside = 0 "
+                "UPDATE identity_claims SET entity_id = ?, aside = 0 "
                 "WHERE surface_form = ? AND seq = ?",
-                (str(absorbed), json.dumps(path[cut:]), row["surface_form"], row["seq"]),
+                (str(absorbed), row["surface_form"], row["seq"]),
             )
-            self._conn.executemany(
+            # The merges after this one on the path are exactly those at higher
+            # positions, since a path only ever gains merges later in the log.
+            self._conn.execute(
                 "DELETE FROM identity_claim_paths "
-                "WHERE surface_form = ? AND claim_seq = ? AND merge_seq = ?",
-                [(row["surface_form"], row["seq"], dropped) for dropped in path[:cut]],
+                "WHERE surface_form = ? AND claim_seq = ? AND merge_seq >= ?",
+                (row["surface_form"], row["seq"], merged_seq),
             )
             touched.add((str(row["entity_id"]), str(row["surface_form"])))
             touched.add((str(absorbed), str(row["surface_form"])))
@@ -293,14 +295,28 @@ class SQLiteIdentityStore:
 
     def _shown(self, entity_id: UUID, surface_form: str) -> tuple[int, str] | None:
         """The sequence and stance of the claim an entity shows for a form, if any."""
+        normalized = normalize_surface_form(surface_form)
         rows = self._conn.execute(
-            "SELECT seq, stance, path FROM identity_claims "
+            "SELECT seq, stance FROM identity_claims "
             "WHERE entity_id = ? AND surface_form = ? AND aside = 0",
-            (str(entity_id), normalize_surface_form(surface_form)),
+            (str(entity_id), normalized),
         ).fetchall()
         if not rows:
             return None
-        first = min(rows, key=lambda row: _rank(int(row["seq"]), _path(row["path"])))
+        # Latest merge first: a merge can only add itself to a path after every merge
+        # already there, and the log hands it a higher position than theirs, so
+        # descending position is the order the merges happened in, newest first.
+        steps = self._conn.execute(
+            "SELECT p.claim_seq, p.merge_seq FROM identity_claim_paths p "
+            "JOIN identity_claims c ON c.surface_form = p.surface_form AND c.seq = p.claim_seq "
+            "WHERE c.entity_id = ? AND c.surface_form = ? AND c.aside = 0 "
+            "ORDER BY p.claim_seq, p.merge_seq DESC",
+            (str(entity_id), normalized),
+        ).fetchall()
+        paths: dict[int, list[int]] = {}
+        for step in steps:
+            paths.setdefault(int(step["claim_seq"]), []).append(int(step["merge_seq"]))
+        first = min(rows, key=lambda row: _rank(int(row["seq"]), paths.get(int(row["seq"]), [])))
         return int(first["seq"]), str(first["stance"])
 
     def _show(self, entity_id: UUID, surface_form: str) -> None:
@@ -477,11 +493,6 @@ class SQLiteIdentityStore:
         )
 
 
-def _path(raw: object) -> list[int]:
-    """A claim's path: the positions of the merges that carried it, latest first."""
-    return [int(cast("int", seq)) for seq in cast("list[object]", json.loads(str(raw)))]
-
-
 def _rank(seq: int, path: list[int]) -> tuple[tuple[int, int], ...]:
     """
     Where a claim stands among the claims of one form on one entity: lowest shows.
@@ -489,6 +500,7 @@ def _rank(seq: int, path: list[int]) -> tuple[tuple[int, int], ...]:
     Read from the entity it stands on down to the one that recorded it, each step is
     either the merge that brought it, ranked by when, or the recording itself. A
     recording outranks anything a merge brought, and the newest recording outranks
-    older ones.
+    older ones. ``path`` is the positions of the merges that carried the claim, latest
+    first.
     """
     return (*((1, merged) for merged in path), (0, -seq))

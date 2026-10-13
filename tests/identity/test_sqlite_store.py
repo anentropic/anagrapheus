@@ -205,7 +205,7 @@ def _claims(conn: sqlite3.Connection) -> set[tuple[object, ...]]:
     return {
         tuple(row)
         for row in conn.execute(
-            "SELECT surface_form, seq, stance, entity_id, path, aside FROM identity_claims"
+            "SELECT surface_form, seq, stance, entity_id, aside FROM identity_claims"
         )
     }
 
@@ -232,12 +232,12 @@ def test_a_populated_v1_projection_backfills_each_shown_row_as_a_claim(tmp_path:
     rig = build_rig(tmp_path / "v1.db")
     try:
         conn = rig.store.connection
-        assert component_version(conn, COMPONENT) == 2
+        assert component_version(conn, COMPONENT) == LATEST_VERSION
         assert _claims(conn) == {
-            ("acme", 1, "", K, "[]", 0),
-            ("acme-old", 2, "", K, "[]", 0),
-            ("acme-uk", 4, "certain", K, "[]", 0),
-            ("acme-b", 5, "", K, "[]", 0),
+            ("acme", 1, "", K, 0),
+            ("acme-old", 2, "", K, 0),
+            ("acme-uk", 4, "certain", K, 0),
+            ("acme-b", 5, "", K, 0),
         }
         assert _path_members(conn) == set()
         migrated = snapshot(conn)
@@ -289,11 +289,11 @@ def test_an_unmerge_over_a_migrated_v1_merge_gives_nothing_back_until_rebuild(tm
         rig.rebuild()
 
         assert _claims(rig.store.connection) == {
-            ("acme", 1, "", K, "[]", 0),
-            ("acme-old", 2, "", A, "[]", 0),
-            ("acme-uk", 3, "believed", A, "[]", 0),
-            ("acme-uk", 4, "certain", K, "[]", 0),
-            ("acme-b", 5, "", K, "[7]", 0),
+            ("acme", 1, "", K, 0),
+            ("acme-old", 2, "", A, 0),
+            ("acme-uk", 3, "believed", A, 0),
+            ("acme-uk", 4, "certain", K, 0),
+            ("acme-b", 5, "", K, 0),
         }
         assert _path_members(rig.store.connection) == {("acme-b", 5, 7)}
         shown = {
@@ -312,5 +312,204 @@ def test_an_unmerge_over_a_migrated_v1_merge_gives_nothing_back_until_rebuild(tm
             KEPT,
             ABSORBED,
         }
+    finally:
+        rig.store.close()
+
+
+# -- a populated v2 projection --------------------------------------------------------
+
+
+def _v2_log(types: EventTypeRegistry) -> list[PendingEvent]:
+    """
+    A merge chained onto another, so two claims carry a path of two merges.
+
+    Positions: 1 K "acme", 2 A "acme-old", 3 A "acme-uk" believed, 4 K "acme-uk"
+    certain, 5 B "acme-b", 6 A into B, 7 B into K.
+    """
+    return [
+        establish(types, "acme", provenance="crm", entity_id=KEPT)[1],
+        establish(types, "acme-old", provenance="import", entity_id=ABSORBED)[1],
+        alias(types, ABSORBED, "acme-uk", "believed"),
+        alias(types, KEPT, "acme-uk", "certain"),
+        establish(types, "acme-b", provenance="ledger", entity_id=OTHER)[1],
+        merge(types, kept=OTHER, absorbed=ABSORBED),
+        merge(types, kept=KEPT, absorbed=OTHER),
+    ]
+
+
+#: What the v2 fold left after ``_v2_log``: everything stands on K, and each claim the
+#: merges carried keeps its path twice, as JSON latest first and as membership rows.
+V2_ROWS: dict[str, list[tuple[object, ...]]] = {
+    "identity_entities": [
+        (K, 1, "crm", None, None),
+        (A, 2, "import", B, 6),
+        (B, 5, "ledger", K, 7),
+    ],
+    "identity_aliases": [
+        (K, "acme", "", 1),
+        (K, "acme-old", "", 2),
+        (K, "acme-uk", "certain", 4),
+        (K, "acme-b", "", 5),
+    ],
+    "identity_claims": [
+        ("acme", 1, "", K, "[]", 0),
+        ("acme-old", 2, "", K, "[7, 6]", 0),
+        ("acme-uk", 3, "believed", K, "[7, 6]", 0),
+        ("acme-uk", 4, "certain", K, "[]", 0),
+        ("acme-b", 5, "", K, "[7]", 0),
+    ],
+    "identity_claim_paths": [
+        ("acme-old", 2, 6),
+        ("acme-old", 2, 7),
+        ("acme-uk", 3, 6),
+        ("acme-uk", 3, 7),
+        ("acme-b", 5, 7),
+    ],
+    "identity_decisions": [
+        (1, K, "established", _detail(form="acme")),
+        (2, A, "established", _detail(form="acme-old")),
+        (3, A, "aliased", _detail(form="acme-uk", stance="believed")),
+        (4, K, "aliased", _detail(form="acme-uk", stance="certain")),
+        (5, B, "established", _detail(form="acme-b")),
+        (
+            6,
+            A,
+            "absorbed",
+            _detail(
+                kept=B,
+                absorbed=A,
+                moved=[["acme-old", "", 2], ["acme-uk", "believed", 3]],
+                shared=[],
+            ),
+        ),
+        (6, B, "merged", _detail(kept=B, absorbed=A)),
+        (
+            7,
+            B,
+            "absorbed",
+            _detail(
+                kept=K,
+                absorbed=B,
+                moved=[["acme-old", "", 2], ["acme-b", "", 5]],
+                shared=[["acme-uk", "believed", 3]],
+            ),
+        ),
+        (7, K, "merged", _detail(kept=K, absorbed=B)),
+    ],
+    "identity_rekeys": [(6, "merge", A, B), (7, "merge", B, K)],
+}
+
+
+def _build_v2(path: Path, *, with_path_rows: bool) -> None:
+    """
+    The log, and the identity projection at schema v2 as the v2 fold left it.
+
+    Without ``with_path_rows`` the membership rows are left out, so only the JSON
+    paths say which merges carried what.
+    """
+    types = EventTypeRegistry()
+    register_builtin_events(types)
+    store = SQLiteEventStore(path)
+    try:
+        store.append(_v2_log(types))
+        conn = store.connection
+        for statements in MIGRATIONS[:2]:
+            for statement in statements:
+                conn.execute(statement)
+        _set_version(conn, 2)
+        for table, rows in V2_ROWS.items():
+            if table == "identity_claim_paths" and not with_path_rows:
+                continue
+            marks = ", ".join("?" * len(rows[0]))
+            conn.executemany(f"INSERT INTO {table} VALUES ({marks})", rows)  # noqa: S608
+        store.commit_position(FOLD_NAME, 7)
+    finally:
+        store.close()
+
+
+def _without_json_paths(rows: list[tuple[object, ...]]) -> list[tuple[object, ...]]:
+    """v2 claim rows as v3 keeps them: the same columns but the JSON path."""
+    return [(form, seq, stance, entity, aside) for form, seq, stance, entity, _, aside in rows]
+
+
+def test_the_v2_fixture_is_what_the_fold_writes(tmp_path: Path):
+    """
+    The hand-written v2 rows are what folding the same log writes today.
+
+    Each JSON path is the claim's membership rows read latest merge first, so the
+    fixture's paths are pinned to the fold as well.
+    """
+    rig = build_rig(tmp_path / "fresh.db")
+    try:
+        rig.commit(*_v2_log(rig.types))
+        conn = rig.store.connection
+        folded = snapshot(conn)
+        for table, rows in V2_ROWS.items():
+            if table == "identity_claims":
+                rows = _without_json_paths(rows)
+            assert sorted(map(repr, folded[table])) == sorted(map(repr, rows)), table
+        for form, seq, _, _, path, _ in V2_ROWS["identity_claims"]:
+            steps = conn.execute(
+                "SELECT merge_seq FROM identity_claim_paths "
+                "WHERE surface_form = ? AND claim_seq = ? ORDER BY merge_seq DESC",
+                (form, seq),
+            ).fetchall()
+            assert [step for (step,) in steps] == json.loads(str(path)), (form, seq)
+    finally:
+        rig.store.close()
+
+
+@pytest.mark.parametrize("with_path_rows", [True, False], ids=["v2-rows", "json-only"])
+def test_a_populated_v2_projection_keeps_its_paths_through_v3(
+    tmp_path: Path, *, with_path_rows: bool
+):
+    """
+    Migrating drops the JSON column and keeps every path as membership rows.
+
+    Rows already there are kept and missing ones are filled in from the JSON. The
+    unmerges after migrating then send back exactly what each merge carried, and the
+    result is what rebuilding the log from scratch gives.
+    """
+    _build_v2(tmp_path / "v2.db", with_path_rows=with_path_rows)
+    rig = build_rig(tmp_path / "v2.db")
+    try:
+        conn = rig.store.connection
+        assert component_version(conn, COMPONENT) == LATEST_VERSION
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(identity_claims)")}
+        assert "path" not in columns
+        migrated = snapshot(conn)
+        for table, rows in V2_ROWS.items():
+            if table == "identity_claims":
+                rows = _without_json_paths(rows)
+            assert sorted(map(repr, migrated[table])) == sorted(map(repr, rows)), table
+
+        rig.commit(unmerge(rig.types, rig.registry, kept=OTHER, absorbed=ABSORBED))
+
+        last = rig.registry.history(ABSORBED)[-1]
+        assert (last.kind, json.loads(last.detail)["restored"]) == (
+            "unmerged",
+            ["acme-old", "acme-uk"],
+        )
+        assert _path_members(conn) == {("acme-b", 5, 7)}
+        shown = {
+            entity: {(r.surface_form, r.stance, r.seq) for r in rig.registry.surface_forms(entity)}
+            for entity in (KEPT, ABSORBED, OTHER)
+        }
+        assert shown == {
+            KEPT: {("acme", "", 1), ("acme-uk", "certain", 4), ("acme-b", "", 5)},
+            ABSORBED: {("acme-old", "", 2), ("acme-uk", "believed", 3)},
+            OTHER: set(),
+        }
+
+        rig.commit(unmerge(rig.types, rig.registry, kept=KEPT, absorbed=OTHER))
+
+        assert _path_members(conn) == set()
+        assert [r.surface_form for r in rig.registry.surface_forms(OTHER)] == ["acme-b"]
+        assert rig.registry.resolve("acme-b").sole() == OTHER
+        assert rig.registry.resolve("acme-old").sole() == ABSORBED
+
+        before = snapshot(conn)
+        rig.rebuild()
+        assert snapshot(conn) == before
     finally:
         rig.store.close()
