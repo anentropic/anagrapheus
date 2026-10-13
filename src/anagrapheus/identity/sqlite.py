@@ -157,9 +157,12 @@ class SQLiteIdentityStore:
         merged_seq = absorbed.merged_seq
         restored = [] if merged_seq is None else self._withdraw(merged_seq, event.absorbed)
         # Split-shaped: a belief keyed on the survivor may have been about either
-        # entity, and only what the belief says can tell which.
-        self._rekey(seq, "unmerge", event.kept, event.kept)
-        self._rekey(seq, "unmerge", event.kept, event.absorbed)
+        # entity, and only what the belief says can tell which. If the survivor has
+        # since been merged on, its beliefs moved with it, so the rows name where it
+        # stands now rather than the id it had when this merge happened.
+        holder = self._standing(event.kept)
+        self._rekey(seq, "unmerge", holder, holder)
+        self._rekey(seq, "unmerge", holder, event.absorbed)
         detail["merged_seq"] = merged_seq
         self._decision(seq, event.absorbed, "unmerged", {**detail, "restored": restored})
         self._decision(seq, event.kept, "unmerged", detail)
@@ -292,6 +295,16 @@ class SQLiteIdentityStore:
             )
         else:
             self._put_alias(entity_id, surface_form, shown[1], shown[0])
+
+    def _standing(self, entity_id: UUID) -> UUID:
+        """Follow ``entity_id``'s merges to the entity it currently resolves to."""
+        seen = {entity_id}
+        row = self.entity(entity_id)
+        while row is not None and row.merged_into is not None and row.merged_into not in seen:
+            seen.add(row.merged_into)
+            entity_id = row.merged_into
+            row = self.entity(entity_id)
+        return entity_id
 
     # ---- reads --------------------------------------------------------------------
 
