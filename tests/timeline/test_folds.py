@@ -598,3 +598,35 @@ def test_a_store_positioned_fold_may_catch_up_inside_a_transaction(tmp_path: Pat
         raise Abort
     assert store.read_position("sql_sum") == 0
     assert SqlSum.total(store) == 0
+
+
+def test_catch_up_refuses_an_async_only_fold_before_folding_anything(tmp_path: Path):
+    """No fold in the projector runs, so none is left ahead of the others."""
+    types, store, reader = make_stack(tmp_path / "t.db")
+    store.append([types.pending(StepTaken(n=i)) for i in (1, 2)])
+    projector = Projector(store, reader, [SqlSum(), AsyncDrawn(store)])
+
+    with pytest.raises(TypeError, match="catch_up_async"):
+        projector.catch_up()
+    assert store.read_position("sql_sum") == 0
+    assert SqlSum.total(store) == 0
+
+
+def test_catch_up_async_refuses_an_owned_position_inside_an_open_transaction(tmp_path: Path):
+    types, store, reader = make_stack(tmp_path / "t.db")
+    store.append([types.pending(StepTaken(n=1))])
+    owned = OwnedAsyncDrawn()
+    projector = Projector(store, reader, [owned])
+
+    async def inside() -> None:
+        with store.transaction():
+            with pytest.raises(TimelineError, match="owned_async"):
+                await projector.catch_up_async()
+            with pytest.raises(TimelineError, match="owned_async"):
+                await projector.rebuild_async(
+                    "owned_async", reset=lambda: None, discard_generated=True
+                )
+
+    asyncio.run(inside())
+    assert owned.seen == []
+    assert asyncio.run(projector.catch_up_async()) == {"owned_async": 1}

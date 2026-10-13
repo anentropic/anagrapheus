@@ -40,6 +40,7 @@ __all__ = [
     "GenerativeFold",
     "GenerativeRebuild",
     "OwnsPosition",
+    "PreparesSynchronously",
     "ProjectionFold",
     "Projector",
 ]
@@ -157,8 +158,10 @@ class GenerativeFold(Protocol):
 
     So a generative fold splits in two. :meth:`prepare` draws, outside any transaction.
     ``apply`` then writes what was prepared, under the lock, with nothing slow left in
-    it. **Every generative fold must implement it**, or its awaited twin
-    :class:`AsyncGenerativeFold`, and the projector calls it by the declared grade rather
+    it. **Every generative fold must implement this or its awaited twin**,
+    :class:`AsyncGenerativeFold`: :meth:`Projector.catch_up` calls only ``prepare``, and
+    :meth:`Projector.catch_up_async` calls ``prepare_async`` where the fold has it and
+    ``prepare`` where it does not. The projector calls it by the declared grade rather
     than by duck-typing, so a fold that forgot fails loudly.
     """
 
@@ -202,6 +205,46 @@ class AsyncGenerativeFold(Protocol):
         return without awaiting anything slow.
         """
         ...
+
+
+@runtime_checkable
+class PreparesSynchronously(Protocol):
+    """
+    A generative fold that has a synchronous ``prepare`` but may be unable to use it.
+
+    A fold that implements both preparations can depend on its configuration for which
+    one works: a fold handed an async draw has a ``prepare`` that could only refuse. The
+    projector asks this before doing anything, so :meth:`Projector.catch_up` and
+    :meth:`Projector.rebuild` refuse such a fold before folding or resetting anything,
+    rather than part-way through.
+
+    Optional. A generative fold without it is taken to prepare synchronously when it has
+    a ``prepare`` at all.
+    """
+
+    @property
+    def prepares_synchronously(self) -> bool:
+        """Whether ``prepare`` can draw; ``False`` when only ``prepare_async`` can."""
+        ...
+
+
+def _prepares_synchronously(fold: ProjectionFold) -> bool:
+    """Whether the synchronous path can prepare ``fold``."""
+    if fold.fold != "generative":
+        return True
+    if isinstance(fold, PreparesSynchronously):
+        return fold.prepares_synchronously
+    return hasattr(fold, "prepare") or not isinstance(fold, AsyncGenerativeFold)
+
+
+def _refuse_async_only(folds: Sequence[ProjectionFold]) -> None:
+    """Raise if the synchronous path cannot prepare one of ``folds``."""
+    for fold in folds:
+        if not _prepares_synchronously(fold):
+            raise TypeError(
+                f"{fold.name!r} only prepares asynchronously; "
+                f"drive its projector with catch_up_async() or rebuild_async()"
+            )
 
 
 def _refuse_inside_transaction(store: EventStore, folds: Sequence[ProjectionFold]) -> None:
@@ -255,8 +298,13 @@ class Projector:
         position (:class:`OwnsPosition`): that position, and the state it guards, cannot
         roll back with the transaction, so the call raises :class:`TimelineError` before
         folding anything.
+
+        A generative fold that can only prepare asynchronously (see
+        :class:`PreparesSynchronously`) is refused with :class:`TypeError`, also before
+        anything is folded; drive it with :meth:`catch_up_async`.
         """
         _validate_batch_size(batch_size)
+        _refuse_async_only(self._folds)
         _refuse_inside_transaction(self._store, self._folds)
         return {fold.name: self._run(fold, batch_size=batch_size) for fold in self._folds}
 
@@ -272,10 +320,18 @@ class Projector:
         touched on the thread that opened it, and deterministic and synchronous folds
         work here unchanged.
 
+        A synchronous ``prepare`` is called on the event loop's thread and blocks the
+        loop until it returns. It must not start an event loop of its own, which rules
+        out a blocking model client such as ``Agent.run_sync``: such a draw belongs in
+        ``prepare_async``.
+
         Folds run one after another, never concurrently, and so do their draws. Do not
-        drive one projector from two tasks at once: each would fold the same batch.
+        drive one projector from two tasks at once: each would fold the same batch. A fold
+        that keeps its own position is refused while a transaction is open, as in
+        :meth:`catch_up`.
         """
         _validate_batch_size(batch_size)
+        _refuse_inside_transaction(self._store, self._folds)
         return {
             fold.name: await self._run_async(fold, batch_size=batch_size) for fold in self._folds
         }
@@ -330,7 +386,9 @@ class Projector:
 
         A fold that keeps its own position (:class:`OwnsPosition`) has it set to zero on
         the fold, in the same order, and is refused while a transaction is open on the
-        store, as :meth:`catch_up` explains.
+        store, as :meth:`catch_up` explains. A fold that can only prepare asynchronously
+        is refused before ``reset`` runs, so its old state survives; use
+        :meth:`rebuild_async`.
         """
         fold = self._reset(
             name,
@@ -338,6 +396,7 @@ class Projector:
             batch_size=batch_size,
             reset_in_transaction=reset_in_transaction,
             discard_generated=discard_generated,
+            awaited=False,
         )
         return self._run(fold, batch_size=batch_size)
 
@@ -363,6 +422,7 @@ class Projector:
             batch_size=batch_size,
             reset_in_transaction=reset_in_transaction,
             discard_generated=discard_generated,
+            awaited=True,
         )
         return await self._run_async(fold, batch_size=batch_size)
 
@@ -374,6 +434,7 @@ class Projector:
         batch_size: int,
         reset_in_transaction: bool,
         discard_generated: bool,
+        awaited: bool,
     ) -> ProjectionFold:
         """Validate a rebuild, zero the fold's position and reset its state."""
         fold = next((f for f in self._folds if f.name == name), None)
@@ -386,6 +447,8 @@ class Projector:
                 f"across instead, or pass discard_generated=True to accept both."
             )
         _validate_batch_size(batch_size)
+        if not awaited:
+            _refuse_async_only([fold])
         _refuse_inside_transaction(self._store, [fold])
         if reset_in_transaction:
             if not isinstance(self._store, TransactionalStore):
@@ -441,11 +504,7 @@ class Projector:
         # Outside the transaction, deliberately -- see `GenerativeFold`. A batch may hold
         # several boundaries, so this is where a whole batch's model calls happen, and
         # none of them is holding the write lock while it does.
-        if isinstance(fold, AsyncGenerativeFold) and not hasattr(fold, "prepare"):
-            raise TypeError(
-                f"{fold.name!r} only prepares asynchronously; "
-                f"drive its projector with catch_up_async()"
-            )
+        _refuse_async_only([fold])
         generative = cast("GenerativeFold", fold)
         for event in batch:
             generative.prepare(event)

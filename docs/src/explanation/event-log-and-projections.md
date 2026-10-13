@@ -125,7 +125,7 @@ The grade is required, with no default. A default would have to be `"determinist
 
 The projector treats the two grades differently in two places:
 
-- **A generative fold must also implement [`GenerativeFold`][generative-fold]'s `prepare(event)`.** The projector calls it for every event in a batch *before* opening the write transaction, so the slow model call never holds SQLite's write lock. `apply` then writes what was prepared, with nothing slow left in it. A fold whose draw is a coroutine implements [`AsyncGenerativeFold`][async-generative-fold]'s `prepare_async(event)` instead or as well, which `catch_up_async()` awaits.
+- **A generative fold must also implement a preparation method**: [`GenerativeFold`][generative-fold]'s `prepare(event)`, [`AsyncGenerativeFold`][async-generative-fold]'s `prepare_async(event)`, or both. The projector calls it for every event in a batch *before* opening the write transaction, so the slow model call never holds SQLite's write lock. `apply` then writes what was prepared, with nothing slow left in it. `catch_up()` and `rebuild()` call only `prepare`, and refuse a fold without one before doing anything. `catch_up_async()` and `rebuild_async()` await `prepare_async` where the fold has it and otherwise call `prepare` on the event loop's thread.
 - **`rebuild` refuses a generative fold** and raises [`GenerativeRebuild`][generative-rebuild] unless you pass `discard_generated=True`. Rebuilding one re-runs every model call it ever made and returns different content, so it is neither cheap nor exact. The [chronicle](chronicle.md#why-rebuilding-needs-acknowledgement) is the generative fold that ships with the library.
 
 ## Evolving event schemas: upcast on read
