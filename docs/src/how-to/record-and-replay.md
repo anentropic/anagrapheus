@@ -159,14 +159,14 @@ Zero model calls during replay is the property to test for. Under strict replay 
 Recording works the same against a real model. Pass a model string or a configured pydantic-ai model to `PinnedModel`, with the `anthropic` or `openai` extra installed and the provider's API key set:
 
 ```python
-agent = Agent(PinnedModel("anthropic:claude-sonnet-4-5", ledger))
+agent = Agent(PinnedModel("anthropic:claude-haiku-5-5", ledger))
 ```
 
 Record once against the provider, commit the recording file to your repository, and replay it in tests with `ReplayPins`. Replay never sends a request, but pydantic-ai still needs a credential to construct the provider's model object, so set a placeholder such as `ANTHROPIC_API_KEY=unused` where tests replay. Record the model id in the header, since it is part of every key.
 
 ## Continue past a miss instead of stopping
 
-Strict replay suits tests. When exploring ("what happens if the UK opens differently?"), use `on_miss="record"`: the first miss is recorded as a [`Divergence`][divergence], the call goes to the model, and the run continues as a new run. Pass `announce` to write that divergence into the log as a `ReplayDiverged` event:
+Strict replay suits tests. When exploring ("what happens if the UK opens differently?"), use `on_miss="record"`: the first miss is recorded as a [`Divergence`][divergence], the call goes to the model, and the run continues as a new run. Pass `announce` to write that divergence into the log as a `ReplayDiverged` event. Here `store` and `ledger` are the live log and ledger from step 3, before the store is closed:
 
 ```python
 replay = ReplayPins.from_events(
@@ -237,7 +237,7 @@ The file is not a recording, or its header line was removed. `read_recording` re
 - Inventory said "replay with ReplayPins.from_events on a fresh store": ReplayPins needs no store at all; the fresh store is only where the replayed unit re-appends its domain events. Wrote it that way.
 - FunctionModel's model_id includes the wrapped function's name ("function:function:uk_negotiator:"), so a replay must wrap a function with the same name. Verified: a renamed function misses.
 - Record mode (on_miss="record") keeps fresh draws in the ReplayPins object only; nothing is committed to the log except the optional ReplayDiverged via announce_to. Verified.
-- PinnedModel's signature annotates wrapped: Model, but WrapperModel.__init__ accepts a KnownModelName string and infers it. Construction verified with a dummy ANTHROPIC_API_KEY; no live call was made. The "anthropic:claude-sonnet-4-5" snippet is construction-verified only.
+- PinnedModel's signature annotates wrapped: Model, but WrapperModel.__init__ accepts a KnownModelName string and infers it. Construction verified with a dummy ANTHROPIC_API_KEY; no live call was made. The "anthropic:claude-haiku-5-5" snippet is construction-verified only.
 - UnknownEventType message verified verbatim with a registry that had only timeline events.
 
 ## Known Limitations
