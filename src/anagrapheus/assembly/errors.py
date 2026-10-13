@@ -21,7 +21,12 @@ class NotGranted(AssemblyError, LookupError):
 
 
 class StaleRead(AssemblyError):
-    """A slice was read while the projection under it was not at the slice's position."""
+    """
+    A slice was read while the projection under it held a different state than at its position.
+
+    For a belief slice: the belief fold is behind or ahead of the slice's position by at
+    least one event the fold reads. Events the fold ignores in between do not count.
+    """
 
 
 class MislabelledPart(AssemblyError, ValueError):

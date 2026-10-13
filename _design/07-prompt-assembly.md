@@ -85,9 +85,10 @@ of read-only slices, all opened at one log position:
 - `LogSlice`: events up to `upto_seq` that an `admit(envelope)` predicate accepts.
   This is where R58's class gate goes. The application reads `event_class` from its
   own models; see "R58" under §6.
-- `BeliefSlice`: granted scopes only, from a store whose fold is at `upto_seq`. It
-  refuses to read (`StaleRead`) when the fold is anywhere else, so a fold that moves
-  during assembly cannot tear the context (§8).
+- `BeliefSlice`: granted scopes only, from a store whose fold holds the beliefs the
+  log holds at `upto_seq`. It refuses to read (`StaleRead`) when an event the fold
+  reads lies between the two, so a fold that moves during assembly cannot tear the
+  context (§8, §8b).
 - `ChronicleSlice`: sections reaching no further than `upto_seq`.
 - `EventsSlice`: a fixed run of events through `admit`, for a generative fold, which
   is handed its range rather than reading the log.
@@ -301,3 +302,33 @@ Four findings, all real, and each one a bypass of something the note claims:
 - **A log slice filters before decoding.** `EventReader.read` and `read_raw` gained
   `upto_seq` and `where`, applied to the stored envelope before any upcast, so an event
   past the position or refused by `admit` cannot fail a read it was never part of.
+
+### 8b. Staleness counts only events the fold reads
+
+The §8 check was exact: the fold had to be at `upto_seq`. That refused contexts that
+could not tear. `PinLedger.commit()` appends `PinPromoted` events, which no belief
+interpreter claims, so `last_seq()` moved past the fold while the beliefs at both
+positions were identical. The demo hid this by catching up inside
+`PartyView.settled()` (the "settling" bullet in §8), and every other caller had to know
+to do the same.
+
+- **`BeliefFold.claims(envelope)`** is the fold's `(namespace, type)` interpreter
+  lookup, exposed. It decodes nothing.
+- **The slice scans the gap.** When the fold's position and `upto_seq` differ, the
+  slice reads the events between them, in either direction, filtered on the envelope
+  by `claims`, and refuses at the first one the fold reads. Behind or ahead by only
+  unclaimed events is the same belief state, so it reads. The cost is an O(gap)
+  envelope scan per read. An O(1) variant, where the fold records the last position at
+  which its state changed, would need an index migration and is not worth it yet.
+- **A slice past the end of the log refuses.** There is nothing there to scan yet,
+  and a belief event appended later would pass once the fold reached it, so the
+  position is refused rather than trusted.
+- **`BeliefSlice.over(fold, projector, reader, visible=, upto_seq=)`** wires the
+  position, the reader and `claims` from the fold. The position is asked of the
+  projector, which knows whether the fold or the log's database keeps it, so a
+  `durable=False` fold works unchanged. A slice built by hand without `reader` and
+  `claims` keeps the exact check.
+- **The demo no longer settles.** `PartyView.settled()` opens at `last_seq()` with no
+  catch-up, and the test that moved the log with `table_clause` (no belief) now moves
+  it with a belief event. Tabling a clause after settling is now read past, and a test
+  says so.

@@ -65,7 +65,7 @@ That turns a leak into something a test can assert: "no `SideRemarkOverheard` ev
 A context should describe one moment of the log. So:
 
 - All slices in a grant must agree on their position; slices at different positions raise [`AssemblyError`][assembly-error].
-- A belief slice reads a live store, so it is given a way to ask how far the belief fold has got (typically the event store's `read_position` for the fold's name). It raises [`StaleRead`][stale-read] unless the fold is exactly at the slice's position: behind means you should catch up before assembling; ahead means something was appended mid-assembly.
+- A belief slice reads a live store, so it is given a way to ask how far the belief fold has got (the projector's `position` for the fold's name, which [`BeliefSlice.over`][belief-slice-over] wires for you). It raises [`StaleRead`][stale-read] if an event the fold claims lies between the fold's position and the slice's: behind means you should catch up before assembling; ahead means a belief event was appended mid-assembly. An event no belief comes from, such as a promoted pin, cannot tear a context, so the fold may be behind or ahead by any number of those. Only envelopes are read to decide this.
 - A grant is read for one assembly. `assemble` refuses a grant whose slices have already handed something out, so a context's `read` is exactly this call's reads.
 
 ## Parts, registers and citations
@@ -140,6 +140,7 @@ For the procedure, see [How to Assemble Prompts from Granted Slices](../how-to/a
 [pinned-model]: ../reference/anagrapheus/provider/model.md#anagrapheus.provider.model.PinnedModel
 [log-slice]: ../reference/anagrapheus/assembly/slices.md#anagrapheus.assembly.slices.LogSlice
 [belief-slice]: ../reference/anagrapheus/assembly/slices.md#anagrapheus.assembly.slices.BeliefSlice
+[belief-slice-over]: ../reference/anagrapheus/assembly/slices.md#anagrapheus.assembly.slices.BeliefSlice.over
 [chronicle-slice]: ../reference/anagrapheus/assembly/slices.md#anagrapheus.assembly.slices.ChronicleSlice
 [events-slice]: ../reference/anagrapheus/assembly/slices.md#anagrapheus.assembly.slices.EventsSlice
 [given]: ../reference/anagrapheus/assembly/slices.md#anagrapheus.assembly.slices.Given

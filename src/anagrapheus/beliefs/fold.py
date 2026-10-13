@@ -63,7 +63,7 @@ if TYPE_CHECKING:
     from anagrapheus.beliefs.ops import BeliefOp, Interpreter, StateRef
     from anagrapheus.beliefs.predicates import PredicateRegistry
     from anagrapheus.beliefs.store import BeliefIndexStore
-    from anagrapheus.timeline.envelope import StoredEvent
+    from anagrapheus.timeline.envelope import Envelope, StoredEvent
     from anagrapheus.timeline.folds import FoldDeterminism
     from anagrapheus.timeline.registry import EventTypeRegistry
 
@@ -187,6 +187,15 @@ class BeliefFold:
         """
         self._store = store
         self._index.reset()
+
+    def claims(self, envelope: Envelope) -> bool:
+        """
+        Whether this fold reads the event ``envelope`` heads, judged by its type alone.
+
+        Nothing is decoded, so it is cheap enough to scan a run of the log with: an
+        event this fold does not claim cannot change a belief.
+        """
+        return (envelope.namespace, envelope.type) in self._interpret
 
     def apply(self, event: StoredEvent, txn: object) -> None:
         """Fold one event, if an interpreter claims its type."""

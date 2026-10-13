@@ -100,10 +100,30 @@ def test_a_settled_view_refuses_to_read_after_the_log_moves(tmp_path: Path):
     """A context half from before an event and half from after it describes no moment."""
     table = _replayed(tmp_path / "moving.db")
     try:
+        clause = next(iter(table.clauses))
         view = table.view("eu").settled()
-        table.table_clause("a late addition")
+        table.believe(
+            held("eu"),
+            "position",
+            (table.seats["eu"], table.clauses[clause]),
+            "a late change of mind",
+            table.tabled_at[clause],
+        )
 
         with pytest.raises(StaleRead):
             view.own()
+    finally:
+        table.close()
+
+
+def test_a_settled_view_reads_on_when_the_log_moves_without_a_belief(tmp_path: Path):
+    """Tabling a clause changes no belief, so the view still describes its moment."""
+    table = _replayed(tmp_path / "moving.db")
+    try:
+        view = table.view("eu").settled()
+        before = view.own()
+        table.table_clause("a late addition")
+
+        assert view.own() == before
     finally:
         table.close()
