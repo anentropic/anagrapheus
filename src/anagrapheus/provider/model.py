@@ -1,15 +1,17 @@
 """
 A model whose every request draws through the pin ledger.
 
-Doc 00 §2 gives the provider *the model call* and forbids it any state that outlives
-the call. :class:`PinnedModel` holds to that exactly: it owns no state of its own, and
-what persists is the ledger's, which the caller passes in and the caller commits.
+The provider owns *the model call* and is forbidden any state that outlives the call.
+:class:`PinnedModel` holds to that exactly: it owns no state of its own, and what
+persists is the ledger's, which the caller passes in and the caller commits.
 
-The pin attaches **per request**, not per agent run. §4a keys on what consumes the
+The pin attaches **per request**, not per agent run. A pin keys on what consumes the
 entropy, and inside one run a tool loop makes several draws — so several keys. Pinning
 the run's final answer instead would replay the conclusion while re-running every step
 that reached it, which is most of what replay is for.
 """
+
+# Design: note 04; upstream agent-core doc 00 §2, §4a.
 
 from __future__ import annotations
 
@@ -132,9 +134,9 @@ class PinnedModel(WrapperModel):
         Stream the call, pinning what it accumulates to; replay it from the pin after.
 
         **The key is the same one :meth:`request` would build.** Streaming is how a
-        response is *received*, not part of what the model is asked, and §4a keys on the
-        semantic identity of the call — so a conversation pins the same whether it was
-        streamed or not, and a corpus recorded either way replays either way. That
+        response is *received*, not part of what the model is asked, and a pin keys on
+        the semantic identity of the call — so a conversation pins the same whether it
+        was streamed or not, and a corpus recorded either way replays either way. That
         property is worth testing in both directions, and is.
 
         ``run_context`` is excluded for the same reason ``pinned_tool`` excludes a
