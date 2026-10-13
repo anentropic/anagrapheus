@@ -39,7 +39,7 @@ flowchart LR
 
 ## 1. Bring the projections to the position you will read at
 
-Every slice in a grant reads at one log position. A belief slice refuses to read unless the belief fold is exactly there, so run the projector first and read at the log's last position:
+Every slice in a grant reads at one log position. A belief slice refuses to read if a belief event lies between that position and the belief fold's own position, so run the projector first and read at the log's last position:
 
 ```python title="assemble_prompts.py"
 import uuid
@@ -63,7 +63,6 @@ from anagrapheus.assembly import (
     render_labelled,
 )
 from anagrapheus.beliefs import (
-    FOLD_NAME,
     BeliefEvents,
     BeliefFold,
     Predicate,
@@ -138,11 +137,12 @@ def norway_grant(upto_seq: int) -> NorwayGrant:
             upto_seq=upto_seq,
             admit=lambda env: (env.namespace, env.type) == ("fisheries", "OfferMade"),
         ),
-        own_beliefs=BeliefSlice(
-            fold.store,
+        own_beliefs=BeliefSlice.over(
+            fold,
+            projector,
+            reader,
             visible=lambda scope: scope == "party:norway:held",
             upto_seq=upto_seq,
-            folded_through=lambda: projector.position(FOLD_NAME),
         ),
         ask=Given("ask", "Respond to the latest offer in one sentence."),
     )
@@ -151,7 +151,7 @@ def norway_grant(upto_seq: int) -> NorwayGrant:
 The slices used here:
 
 - [`LogSlice`][log-slice] reads events up to `upto_seq` that `admit` accepts. `admit` sees only the envelope, so a refused event is never even decoded. This is where a private event is kept out of a shared prompt.
-- [`BeliefSlice`][belief-slice] reads the scopes `visible` accepts. `folded_through` reports how far the belief fold has got, and the slice refuses to read if that is not `upto_seq`. Ask the projector rather than the store: an in-memory fold (`durable=False`) keeps its position on itself, not in the file.
+- [`BeliefSlice`][belief-slice] reads the scopes `visible` accepts. [`BeliefSlice.over`][belief-slice-over] asks the projector how far the belief fold has got, which is right for either kind of fold: an in-memory fold (`durable=False`) keeps its position on itself, not in the file. The slice refuses to read if an event the fold claims lies between the fold's position and `upto_seq`. Events the fold ignores, such as offers or promoted pins, are read past without complaint.
 - [`Given`][given] wraps a value your application computed, such as the instruction.
 
 Two more slices exist: [`ChronicleSlice`][chronicle-slice] for chronicle sections, and [`EventsSlice`][events-slice] for a fixed run of events, such as the range a summariser is given.
@@ -456,7 +456,9 @@ Norway can accept 6%, no more.
 
 ### `StaleRead: the belief fold is at 4 and this slice reads at 5`
 
-The belief fold is not at the slice's position. Run `projector.catch_up()` immediately before building the grant at `store.last_seq()`. Watch for appends you did not think of: committing a [`PinLedger`][pin-ledger] appends [`PinPromoted`][pin-promoted] events, which move `last_seq()` past the fold's position until the projector runs again.
+A belief event lies between the fold's position and the slice's, so the context would mix beliefs from either side of it. If the fold is behind, run `projector.catch_up()` before building the grant at `store.last_seq()`. If it is ahead, a belief event was appended and folded while the grant was being read; build a new grant. Appends that carry no belief do not cause this: committing a [`PinLedger`][pin-ledger] appends [`PinPromoted`][pin-promoted] events, which no belief fold claims, so you can assemble straight after it without catching up.
+
+The same error, ending `the log ends before 5`, means the slice was built at a position the log has not reached.
 
 ### `NotGranted: scope 'party:uk:held' is not in this grant`
 
@@ -487,6 +489,7 @@ A grant was reused. Build a new grant for every assembly. The same exception typ
 
 [log-slice]: ../reference/anagrapheus/assembly/slices.md#anagrapheus.assembly.slices.LogSlice
 [belief-slice]: ../reference/anagrapheus/assembly/slices.md#anagrapheus.assembly.slices.BeliefSlice
+[belief-slice-over]: ../reference/anagrapheus/assembly/slices.md#anagrapheus.assembly.slices.BeliefSlice.over
 [chronicle-slice]: ../reference/anagrapheus/assembly/slices.md#anagrapheus.assembly.slices.ChronicleSlice
 [events-slice]: ../reference/anagrapheus/assembly/slices.md#anagrapheus.assembly.slices.EventsSlice
 [given]: ../reference/anagrapheus/assembly/slices.md#anagrapheus.assembly.slices.Given

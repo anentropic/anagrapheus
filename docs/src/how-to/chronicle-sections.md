@@ -57,6 +57,7 @@ from anagrapheus.timeline import (
     SQLiteEventStore,
     StoredEvent,
     UpcastRegistry,
+    is_bookkeeping,
 )
 
 
@@ -145,25 +146,26 @@ Round 1 (events 1 to 3) becomes one section, with id `"1-3"`. The UK's new offer
 A [`Brief`][brief] splits recency from depth. Read the consolidated past as sections, and everything after it verbatim from the log:
 
 ```python title="chronicle.py (continued)"
-brief = Brief(chronicle, reader)
+brief = Brief(chronicle, reader, admit=lambda e: not is_bookkeeping(e))
 through = brief.anchors.consolidated_through()
 print("consolidated through", through)
 for section in brief.depth():
     print(section.anchor.section_id, section.prose, section.pins)
 for event in brief.tail(since_seq=through).events:
-    if event.envelope.namespace == "fisheries":
-        print("recent:", event.seq, event.payload)
+    print("recent:", event.seq, event.envelope.type, event.payload)
 print([s.anchor.section_id for s in substring_retriever(brief.depth(), "norway")])
 ```
 
 ```text
 consolidated through 3
 1-3 The UK opened at 12%; Norway held at 5%. ('p1:model_call:1904ca75…',)
-recent: 4 {'party': 'UK', 'text': 'We could move to 10%.'}
+recent: 4 OfferMade {'party': 'UK', 'text': 'We could move to 10%.'}
 ['1-3']
 ```
 
 The tail always comes from the log, never from the chronicle. If consolidation falls behind, the tail simply starts earlier and nothing is missing.
+
+`admit` sees each event's envelope before anything is decoded, and the tail keeps only what it accepts. [`is_bookkeeping`][is-bookkeeping] matches the events the pin ledger appends about itself, such as the `PinPromoted` that `ledger.commit()` wrote at seq 5, so this tail holds only what happened in the negotiation. Without `admit`, the tail is every event in the log. Pass `upto_seq=` to [`tail`][brief-tail] to stop it at a position instead of at the end of the log.
 
 There are two read surfaces, at two grades:
 
@@ -299,6 +301,79 @@ Some things to know about the awaited path:
 
 To write a generative fold of your own that awaits its draws, implement [`AsyncGenerativeFold`][async-generative-fold]'s `prepare_async(event)` beside `apply`.
 
+## Re-consolidate a section
+
+The fold consolidates each range once. To write a better account of a range the chronicle already covers, for example after improving the summariser's prompt, call [`reconsolidate`][reconsolidate] with the id of the current section. It reads the same range again from the log, calls your summariser on it, and appends the result as the next generation, superseding the old section:
+
+```python title="chronicle.py (continued)"
+import logging
+
+from anagrapheus.chronicle import ChronicleFork, reconsolidate
+
+logging.basicConfig(format="%(levelname)s %(name)s: %(message)s")
+
+
+def revised_model(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+    return ModelResponse(
+        parts=[TextPart("Round 1: the UK asked for a 12% mackerel cut; Norway offered 5%.")]
+    )
+
+
+class RevisedRoundSummary:
+    """The round summariser with a revised prompt that names the stock."""
+
+    def __init__(self, resolver) -> None:
+        self._resolver = resolver
+
+    def __call__(self, events: Sequence[StoredEvent]) -> Consolidation:
+        lines = [
+            f"{e.payload['party']}: {e.payload['text']}"
+            for e in events
+            if e.envelope.type == "OfferMade"
+        ]
+        keys: list[str] = []
+        model = PinnedModel(FunctionModel(revised_model), self._resolver, on_key=keys.append)
+        result = Agent(model).run_sync(
+            "Summarise this round of a fisheries negotiation in one sentence, naming the stock:\n"
+            + "\n".join(lines)
+        )
+        return Consolidation(prose=result.output, pins=tuple(keys))
+
+
+ledger = PinLedger(store, types)
+revised = reconsolidate(chronicle, reader, "1-3", RevisedRoundSummary(ledger))
+ledger.commit()
+print(revised.anchor)
+for section in brief.depth():
+    print(section.anchor.section_id, section.prose)
+print("still readable:", brief.prose.section("1-3").prose)
+
+try:
+    reconsolidate(chronicle, reader, "1-3", RevisedRoundSummary(ledger))
+except ChronicleFork as refused:
+    print("refused:", refused)
+```
+
+```text
+WARNING anagrapheus.chronicle.reconsolidation: re-consolidated 1-3 as 1-3#2 (seq 1..3): runs that read the old prose will diverge on replay, and a rebuild of the chronicle discards the new section
+Anchor(section_id='1-3#2', from_seq=1, to_seq=3, unit=3, supersedes='1-3')
+1-3#2 Round 1: the UK asked for a 12% mackerel cut; Norway offered 5%.
+4-7 The UK moved to 10%; Norway met it at 8%.
+still readable: The UK opened at 12%; Norway held at 5%.
+refused: section '1-3' is already superseded; the current one is '1-3#2'
+```
+
+The new section keeps the old one's range and unit, and its id carries the generation: `"1-3#2"`, then `"1-3#3"`. The superseded prose stays readable by id, so you can still see what an earlier run read.
+
+Some things to know about re-consolidating:
+
+- **Pass the current section.** A section that is already superseded is refused with [`ChronicleFork`][chronicle-fork] before the summariser is called, because superseding it again would leave two current sections over one range. The message names the section to use instead.
+- **Every call logs a warning.** Later prompts read the new prose, so a run that read the old prose no longer replays against it. The warning is logged through `logging`, on the `anagrapheus.chronicle.reconsolidation` logger, so that this is never silent.
+- **It is outside the replay guarantee.** Nothing in the log records a re-consolidation, so rebuilding the chronicle discards it and returns generation 1. [Carry the chronicle](#carry-the-chronicle-to-a-new-store) to keep it.
+- **From async code, await [`reconsolidate_async`][reconsolidate-async].** It takes the same arguments and accepts either kind of summariser; `reconsolidate` raises `TypeError` for an async one.
+
+To write a section by hand instead, use the store's [`append_new`][store-append-new], which raises [`SectionCollision`][section-collision] if the id is already stored. Its [`append`][store-append] keeps the existing row on a collision, because that is what a replayed fold batch needs. Both refuse a section that would fork the chronicle: one that supersedes an already-superseded section, one that supersedes a section over a different range, or one that overlaps a current section without superseding it.
+
 ## Troubleshooting
 
 ### No sections appear
@@ -317,9 +392,17 @@ The summariser calls `Agent.run_sync` from inside an event loop, either because 
 
 The fold's summariser is a coroutine, and its projector was driven with `catch_up()` or `rebuild()`. Nothing was folded or reset. Use `catch_up_async()` or `rebuild_async()`. A summariser that is a plain function returning an awaitable is only found out once called, and raises `TypeError: 'chronicle' has an async summarizer` instead; write it as an `async def`.
 
+### `ChronicleFork: section '…' is already superseded`
+
+You passed `reconsolidate` an older generation. Pass the id the message names as current, or find it with `brief.prose.covering(seq)`.
+
+### `ChronicleFork` from `append` or `load`
+
+The section would leave two current sections over one range, or a consolidated range that no current section fully covers. A hand-written section must supersede the current section for its range and cover exactly that range, from the same `from_seq` to the same `to_seq`, and `load` refuses the whole transfer if any incoming section overlaps a current one it does not supersede.
+
 ### The tail contains `PinPromoted` events
 
-[`Brief.tail`][brief-tail] returns every event above the position, library events included. Filter on `event.envelope.namespace`, as in step 4.
+The `Brief` was built without `admit`, so [`Brief.tail`][brief-tail] returns every event above the position, the pin ledger's included. Pass `admit=lambda e: not is_bookkeeping(e)`, as in step 4. If you promote pins into your own vocabulary with `promote_as`, `is_bookkeeping` does not know those events: write your own `admit` that refuses them too.
 
 ## Related
 
@@ -347,4 +430,11 @@ The fold's summariser is a coroutine, and its projector was driven with `catch_u
 [projector-catch-up-async]: ../reference/anagrapheus/timeline/folds.md#anagrapheus.timeline.folds.Projector.catch_up_async
 [projector-rebuild-async]: ../reference/anagrapheus/timeline/folds.md#anagrapheus.timeline.folds.Projector.rebuild_async
 [async-generative-fold]: ../reference/anagrapheus/timeline/folds.md#anagrapheus.timeline.folds.AsyncGenerativeFold
+[reconsolidate]: ../reference/anagrapheus/chronicle/reconsolidation.md#anagrapheus.chronicle.reconsolidation.reconsolidate
+[reconsolidate-async]: ../reference/anagrapheus/chronicle/reconsolidation.md#anagrapheus.chronicle.reconsolidation.reconsolidate_async
+[chronicle-fork]: ../reference/anagrapheus/chronicle/errors.md#anagrapheus.chronicle.errors.ChronicleFork
+[section-collision]: ../reference/anagrapheus/chronicle/errors.md#anagrapheus.chronicle.errors.SectionCollision
+[store-append]: ../reference/anagrapheus/chronicle/store.md#anagrapheus.chronicle.store.ChronicleStore.append
+[store-append-new]: ../reference/anagrapheus/chronicle/store.md#anagrapheus.chronicle.store.ChronicleStore.append_new
 [brief-tail]: ../reference/anagrapheus/chronicle/reading.md#anagrapheus.chronicle.reading.Brief.tail
+[is-bookkeeping]: ../reference/anagrapheus/timeline/pins.md#anagrapheus.timeline.pins.is_bookkeeping

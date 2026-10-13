@@ -86,6 +86,16 @@ from the log, never the chronicle**, so near-term continuity never depends on ge
 prose; and supersession keeps the superseded prose readable by id, so what a past run
 actually read can still be seen.
 
+**The tail's filter is the application's.** `Brief` predates the slices, and its tail
+was a bare read of the log, so `PinPromoted` and the other ledger events turned up in
+the "verbatim tail". It now takes `admit=` (envelope only, before decode, exactly as
+`LogSlice` does) and `tail(upto_seq=)`, and `timeline.is_bookkeeping` matches the three
+events the pin machinery appends about itself: `PinPromoted`, `PinsAbandoned` and
+`ReplayDiverged`. Excluding the reserved namespace by default was rejected: the belief
+and identity events (`BeliefRevised`, `established`) live there too, and they can be an
+app's content. Pins promoted with `promote_as` are the app's vocabulary, so the
+predicate does not see them. The default (`admit=None`) is the old behaviour.
+
 ## 5. Where the pin key is built — [R61 clause 5]
 
 Clause 5 pins generative folds, and warns that a key of stable identifiers alone
@@ -259,7 +269,13 @@ Additive, no events. `check_same_thread=False` stays declined, per note 04 §5.
 - **Re-consolidation invalidates replay for runs that read the old prose.** Correct
   behaviour under R56 — the divergence is announced, not silent — but it means
   re-consolidating is a heavier operation than it looks, and nothing currently warns at
-  the call site.
+  the call site. **The warning now has a home (2026-10-13):** `reconsolidate()` and
+  `reconsolidate_async()` in `chronicle/reconsolidation.py` log a warning on every call
+  that runs which read the old prose will diverge on replay. They also refuse a
+  superseded section and write through `ChronicleStore.append_new`, which raises on an
+  id collision; every store write, `append` and `load` included, now refuses a fork (two
+  current sections over one range). Fold replay keeps `append`'s keep-the-existing-row
+  rule. The divergence itself stands: re-consolidation remains outside anchor replay.
 - **The default retriever is a placeholder and should stay one.** Named
   `substring_retriever` so it cannot be mistaken for ranked retrieval. The risk is the
   opposite of the usual one: a default that looked competent would discourage replacing

@@ -38,7 +38,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
     from contextlib import AbstractAsyncContextManager
 
-    from anagrapheus.timeline.envelope import PendingEvent
+    from anagrapheus.timeline.envelope import Envelope, PendingEvent
     from anagrapheus.timeline.registry import EventTypeRegistry
     from anagrapheus.timeline.store import LedgerStore
 
@@ -49,6 +49,7 @@ __all__ = [
     "PinResolver",
     "PinsAbandoned",
     "ReplayDiverged",
+    "is_bookkeeping",
     "pin_key",
     "register_builtin_events",
 ]
@@ -169,6 +170,29 @@ def register_builtin_events(registry: EventTypeRegistry) -> None:
     registry._register(EventKey(RESERVED_NAMESPACE, "PinPromoted", 1), PinPromoted)  # noqa: SLF001
     registry._register(EventKey(RESERVED_NAMESPACE, "PinsAbandoned", 1), PinsAbandoned)  # noqa: SLF001
     registry._register(EventKey(RESERVED_NAMESPACE, "ReplayDiverged", 1), ReplayDiverged)  # noqa: SLF001
+
+
+#: The events the pin machinery appends about itself, by ``(namespace, type)``.
+_BOOKKEEPING: frozenset[tuple[str, str]] = frozenset(
+    (RESERVED_NAMESPACE, name) for name in ("PinPromoted", "PinsAbandoned", "ReplayDiverged")
+)
+
+
+def is_bookkeeping(envelope: Envelope) -> bool:
+    """
+    Whether ``envelope`` is one of the pin machinery's own records, not the run's content.
+
+    True for :class:`PinPromoted`, :class:`PinsAbandoned` and :class:`ReplayDiverged`
+    under the reserved namespace, at any schema version: the events the ledger and a
+    replay append so that a run can be reproduced and audited. Nothing a run *did* is
+    among them, so a reader showing what happened can drop them; pass
+    ``lambda e: not is_bookkeeping(e)`` as an ``admit``.
+
+    The other events in the reserved namespace (minted beliefs, established entities)
+    are content and are not matched. Neither are pins promoted into the application's
+    own vocabulary with ``promote_as``: those are the application's to recognise.
+    """
+    return (envelope.namespace, envelope.type) in _BOOKKEEPING
 
 
 class PinLedger:

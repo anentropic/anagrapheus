@@ -24,11 +24,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, NamedTuple, Protocol
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from anagrapheus.chronicle.sections import Anchor, Section, SectionId
     from anagrapheus.chronicle.store import ChronicleStore
-    from anagrapheus.timeline.envelope import StoredEvent
+    from anagrapheus.timeline.envelope import Envelope, StoredEvent
     from anagrapheus.timeline.upcast import EventReader
 
 __all__ = ["Anchors", "Brief", "Prose", "Recent", "Retriever", "substring_retriever"]
@@ -121,17 +121,37 @@ class Brief:
     The tail is read **from the log, never from the chronicle**, which is one of the
     guarantees that generated prose is never binding: near-term continuity never depends
     on generated prose, whatever the chronicle does or does not contain.
+
+    ``admit`` sees each stored envelope before anything is upcast, and the tail keeps
+    only the events it accepts. Leave it out and the tail is every event, the pin
+    ledger's own included; pass ``lambda e: not is_bookkeeping(e)``
+    (:func:`~anagrapheus.timeline.pins.is_bookkeeping`) to keep only what the run did.
     """
 
-    def __init__(self, store: ChronicleStore, reader: EventReader) -> None:
+    def __init__(
+        self,
+        store: ChronicleStore,
+        reader: EventReader,
+        *,
+        admit: Callable[[Envelope], bool] | None = None,
+    ) -> None:
         self._store = store
         self._reader = reader
+        self._admit = admit
         self.anchors = Anchors(store)
         self.prose = Prose(store)
 
-    def tail(self, *, since_seq: int) -> Recent:
-        """The log's own events above ``since_seq``, verbatim."""
-        return Recent(events=list(self._reader.read_raw(since_seq=since_seq)), since_seq=since_seq)
+    def tail(self, *, since_seq: int, upto_seq: int | None = None) -> Recent:
+        """
+        The log's own events above ``since_seq`` that ``admit`` accepts, verbatim.
+
+        ``upto_seq`` stops the tail at that position, so it can be read at the same
+        position as anything else; leave it out to read to the end of the log.
+        """
+        # Filtered on the stored envelope before upcast, so a refused event, or one past
+        # `upto_seq`, is never touched.
+        events = self._reader.read_raw(since_seq, upto_seq=upto_seq, where=self._admit)
+        return Recent(events=list(events), since_seq=since_seq)
 
     def depth(self, *, upto_seq: int | None = None) -> Sequence[Section]:
         """The consolidated past — advisory prose, for a reasoning step to read."""

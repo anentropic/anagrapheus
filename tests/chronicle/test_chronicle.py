@@ -7,13 +7,13 @@ from typing import TYPE_CHECKING
 
 from anagrapheus.chronicle import (
     Anchors,
+    Brief,
     Consolidation,
     Prose,
-    Section,
-    section_id,
+    reconsolidate,
     substring_retriever,
 )
-from anagrapheus.chronicle.sections import Anchor
+from anagrapheus.timeline import EventReader, PinLedger, UpcastRegistry, is_bookkeeping, pin_key
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -59,20 +59,10 @@ def test_an_old_section_is_superseded_never_edited(rig: Rig):
     rig.commit(rig.step("a"), rig.close("one"))
     original = rig.anchors.all()[0]
 
-    rig.chronicle.append(
-        Section(
-            anchor=Anchor(
-                section_id=section_id(1, original.to_seq, generation=2),
-                from_seq=1,
-                to_seq=original.to_seq,
-                unit=original.unit,
-                supersedes=original.section_id,
-            ),
-            prose="the later account",
-        )
-    )
+    later = reconsolidate(rig.chronicle, rig.reader, original.section_id, rig.summarizer)
 
     assert [a.section_id for a in rig.anchors.all()] == [f"1-{original.to_seq}#2"]
+    assert later.prose.startswith("[g2]")
     superseded = rig.prose.section(original.section_id)
     assert superseded is not None
     assert superseded.prose.startswith("[g1]"), "the old prose survives, unedited"
@@ -209,3 +199,45 @@ def test_two_boundaries_in_one_batch_do_not_overlap(rig: Rig):
     rig.projector.catch_up()
 
     assert [(a.from_seq, a.to_seq) for a in rig.anchors.all()] == [(1, 2), (3, 4)]
+
+
+def _pin_and_commit(rig: Rig) -> int:
+    """Draw one pin and promote it into the log, as a finished unit of work does."""
+    ledger = PinLedger(rig.store, rig.types)
+    ledger.resolve(
+        pin_key("app", {"q": "anything"}), kind="draw", effect=lambda: "drawn", interpret=str
+    )
+    return ledger.commit()
+
+
+def test_the_tail_holds_pin_events_unless_admit_refuses_them(rig: Rig):
+    """Without ``admit`` the tail is every event; with the stock one, only the run's."""
+    rig.commit(rig.step("a"), rig.close("one"))
+    through = rig.anchors.consolidated_through()
+    rig.append(rig.step("b"))
+    _pin_and_commit(rig)
+    rig.append(rig.step("c"))
+
+    everything = rig.brief.tail(since_seq=through)
+    content = Brief(
+        rig.chronicle,
+        EventReader(rig.store, UpcastRegistry(), rig.types),
+        admit=lambda e: not is_bookkeeping(e),
+    ).tail(since_seq=through)
+
+    assert [e.envelope.type for e in everything.events] == ["StepTaken", "PinPromoted", "StepTaken"]
+    assert [e.payload["what"] for e in content.events] == ["b", "c"]
+    assert content.since_seq == through
+
+
+def test_upto_seq_bounds_the_tail(rig: Rig):
+    rig.commit(rig.step("a"), rig.close("one"))
+    through = rig.anchors.consolidated_through()
+    upto = rig.append(rig.step("b"), rig.step("c"))
+    rig.append(rig.step("d"))
+
+    assert [e.payload["what"] for e in rig.brief.tail(since_seq=through, upto_seq=upto).events] == [
+        "b",
+        "c",
+    ]
+    assert [e.payload["what"] for e in rig.brief.tail(since_seq=through).events] == ["b", "c", "d"]

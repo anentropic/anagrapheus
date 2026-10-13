@@ -10,14 +10,16 @@ it commit together.
 from __future__ import annotations
 
 import sqlite3
+from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
+from anagrapheus.chronicle.errors import ChronicleFork, SectionCollision, UnknownSection
 from anagrapheus.chronicle.migrations import COMPONENT, MIGRATIONS
 from anagrapheus.chronicle.sections import Anchor, Section
 from anagrapheus.timeline.migrations import migrate
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Generator, Iterable, Sequence
 
     from anagrapheus.chronicle.sections import SectionId
 
@@ -37,34 +39,24 @@ class SQLiteChronicleStore:
     # ---- writes ---------------------------------------------------------------------
 
     def append(self, section: Section) -> None:
-        """Add a section. Never updates: a correction supersedes rather than edits."""
-        # DO NOTHING rather than DO UPDATE, unlike the sibling adapters. The fold
-        # contract allows the last batch to be re-applied after a crash, and a section
-        # id is derived from its range -- so a replayed batch must find the existing row
-        # and leave its prose alone. Overwriting would silently swap one valid
-        # consolidation for another, which is the one thing append-only forbids.
-        self._conn.execute(
-            f"INSERT INTO chronicle_sections ({_COLUMNS}) "  # noqa: S608 -- a literal
-            "VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (section_id) DO NOTHING",
-            (
-                section.anchor.section_id,
-                section.anchor.from_seq,
-                section.anchor.to_seq,
-                section.anchor.unit,
-                section.anchor.supersedes,
-                section.prose,
-                _dump(section.pins),
-            ),
-        )
+        """Add a section, keeping the existing row on an id collision. Refuses a fork."""
+        # Keep rather than overwrite on a collision, unlike the sibling adapters. The
+        # fold contract allows the last batch to be re-applied after a crash, and a
+        # section id is derived from its range -- so a replayed batch must find the
+        # existing row and leave its prose alone. Overwriting would silently swap one
+        # valid consolidation for another, which is the one thing append-only forbids.
+        with self._atomic():
+            self._insert(section, strict=False)
+
+    def append_new(self, section: Section) -> None:
+        """Add a section that must not already exist. Refuses a collision and a fork."""
+        with self._atomic():
+            self._insert(section, strict=True)
 
     def load(self, sections: Iterable[Section]) -> int:
         """Insert exported sections, skipping ids already present. Transfer, not merge."""
-        landed = 0
-        for section in sections:
-            before = self._conn.total_changes
-            self.append(section)
-            landed += self._conn.total_changes - before
-        return landed
+        with self._atomic():
+            return sum(self._insert(s, strict=False) for s in _supersession_order(sections))
 
     def reset(self) -> None:
         """Drop every section. Only reached through an acknowledged rebuild."""
@@ -128,6 +120,102 @@ class SQLiteChronicleStore:
 
     # ---- internals ------------------------------------------------------------------
 
+    @contextmanager
+    def _atomic(self) -> Generator[None]:
+        """
+        Make a check and the insert it guards one unit.
+
+        Joins a transaction already open on the shared connection -- the projector's,
+        when the fold appends -- as a savepoint, and otherwise takes the write lock
+        before reading, so no other connection can slip a section in between.
+        """
+        if self._conn.in_transaction:
+            self._conn.execute("SAVEPOINT anagrapheus_chronicle")
+            try:
+                yield
+            except BaseException:
+                self._conn.execute("ROLLBACK TO anagrapheus_chronicle")
+                self._conn.execute("RELEASE anagrapheus_chronicle")
+                raise
+            self._conn.execute("RELEASE anagrapheus_chronicle")
+            return
+        self._conn.execute("BEGIN IMMEDIATE")
+        try:
+            yield
+        except BaseException:
+            self._conn.execute("ROLLBACK")
+            raise
+        self._conn.execute("COMMIT")
+
+    def _insert(self, section: Section, *, strict: bool) -> bool:
+        """Insert one section unless its id is stored; refuse a fork. Whether it landed."""
+        anchor = section.anchor
+        if self.section(anchor.section_id) is not None:
+            # Checked before the fork guard: a replayed fold section whose range has
+            # since been re-consolidated would otherwise look like an overlap.
+            if strict:
+                raise SectionCollision(f"section {anchor.section_id!r} is already stored")
+            return False
+        if anchor.supersedes is not None:
+            parent = self.section(anchor.supersedes)
+            if parent is None:
+                raise UnknownSection(
+                    f"{anchor.section_id!r} supersedes {anchor.supersedes!r}, "
+                    "which is not in the store"
+                )
+            # Checked before the parent is excluded from the overlap query below. A
+            # successor over a different range would leave the superseded row counting
+            # towards `consolidated_through` while no current section covers the seqs
+            # the successor dropped -- or would claim seqs nothing consolidated.
+            old, new = parent.anchor, anchor
+            if (new.from_seq, new.to_seq) != (old.from_seq, old.to_seq):
+                raise ChronicleFork(
+                    f"{new.section_id!r} covers {new.from_seq}..{new.to_seq}, but "
+                    f"{old.section_id!r} covers {old.from_seq}..{old.to_seq}: a section "
+                    "that supersedes another must cover the same range"
+                )
+            successor = self._conn.execute(
+                "SELECT section_id FROM chronicle_sections WHERE supersedes = ? LIMIT 1",
+                (anchor.supersedes,),
+            ).fetchone()
+            if successor is not None:
+                raise ChronicleFork(
+                    f"{anchor.section_id!r} supersedes {anchor.supersedes!r}, which "
+                    f"{successor['section_id']!r} already supersedes"
+                )
+        overlap = self._conn.execute(
+            """
+            SELECT section_id FROM chronicle_sections
+             WHERE from_seq <= :to AND to_seq >= :from
+               AND section_id IS NOT :supersedes
+               AND section_id NOT IN (
+                       SELECT supersedes FROM chronicle_sections WHERE supersedes IS NOT NULL
+                   )
+             ORDER BY from_seq
+             LIMIT 1
+            """,
+            {"from": anchor.from_seq, "to": anchor.to_seq, "supersedes": anchor.supersedes},
+        ).fetchone()
+        if overlap is not None:
+            raise ChronicleFork(
+                f"{anchor.section_id!r} covers {anchor.from_seq}..{anchor.to_seq}, which "
+                f"overlaps current section {overlap['section_id']!r} without superseding it"
+            )
+        self._conn.execute(
+            f"INSERT INTO chronicle_sections ({_COLUMNS}) "  # noqa: S608 -- a literal
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                anchor.section_id,
+                anchor.from_seq,
+                anchor.to_seq,
+                anchor.unit,
+                anchor.supersedes,
+                section.prose,
+                _dump(section.pins),
+            ),
+        )
+        return True
+
     def _current(self, upto_seq: int | None) -> Sequence[sqlite3.Row]:
         """
         Rows nothing supersedes, oldest first.
@@ -148,6 +236,26 @@ class SQLiteChronicleStore:
             """,  # noqa: S608 -- `clause` is one of two literals
             {"upto": upto_seq},
         ).fetchall()
+
+
+def _supersession_order(sections: Iterable[Section]) -> list[Section]:
+    """
+    ``sections`` reordered so each lands after the one it supersedes.
+
+    An export is ordered by range and id, and ids sort as text: generation 10 of a range
+    sorts before generation 2, which supersedes nothing it could follow. Otherwise
+    stable, so an export that is already in order loads in that order.
+    """
+    pending = list(sections)
+    ordered: list[Section] = []
+    while pending:
+        waiting = {s.anchor.section_id for s in pending}
+        ready = [s for s in pending if s.anchor.supersedes not in waiting]
+        if not ready:
+            raise ChronicleFork("these sections supersede each other in a cycle")
+        ordered.extend(ready)
+        pending = [s for s in pending if s.anchor.supersedes in waiting]
+    return ordered
 
 
 def _dump(pins: tuple[str, ...]) -> str:

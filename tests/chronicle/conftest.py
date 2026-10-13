@@ -79,6 +79,7 @@ class Rig:
 
     store: SQLiteEventStore
     types: EventTypeRegistry
+    reader: EventReader
     chronicle: SQLiteChronicleStore
     fold: ChronicleFold
     projector: Projector
@@ -135,6 +136,7 @@ def build_rig(path: Path) -> Rig:
     return Rig(
         store=store,
         types=types,
+        reader=reader,
         chronicle=chronicle,
         fold=fold,
         projector=Projector(store, reader, [fold]),
