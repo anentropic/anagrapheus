@@ -30,6 +30,12 @@ Three consequences the API makes structural rather than advisory:
 
 # Design: note 05; upstream agent-core doc 00 §7; upstream NVM R26, R61.
 
+from anagrapheus.chronicle.errors import (
+    ChronicleError,
+    ChronicleFork,
+    SectionCollision,
+    UnknownSection,
+)
 from anagrapheus.chronicle.fold import (
     FOLD_NAME,
     AsyncSummarizer,
@@ -48,6 +54,7 @@ from anagrapheus.chronicle.reading import (
     Retriever,
     substring_retriever,
 )
+from anagrapheus.chronicle.reconsolidation import reconsolidate, reconsolidate_async
 from anagrapheus.chronicle.sections import Anchor, Section, SectionId
 from anagrapheus.chronicle.sqlite import SQLiteChronicleStore
 from anagrapheus.chronicle.store import ChronicleStore
@@ -58,7 +65,9 @@ __all__ = [
     "Anchors",
     "AsyncSummarizer",
     "Brief",
+    "ChronicleError",
     "ChronicleFold",
+    "ChronicleFork",
     "ChronicleStore",
     "Consolidation",
     "EventTypes",
@@ -67,9 +76,13 @@ __all__ = [
     "Retriever",
     "SQLiteChronicleStore",
     "Section",
+    "SectionCollision",
     "SectionId",
     "Summarizer",
     "UnitBoundary",
+    "UnknownSection",
+    "reconsolidate",
+    "reconsolidate_async",
     "section_id",
     "substring_retriever",
 ]

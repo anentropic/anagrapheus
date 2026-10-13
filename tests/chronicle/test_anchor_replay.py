@@ -16,8 +16,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from anagrapheus.chronicle import Section, section_id
-from anagrapheus.chronicle.sections import Anchor
+from anagrapheus.chronicle import reconsolidate
 from anagrapheus.timeline import GenerativeRebuild
 
 if TYPE_CHECKING:
@@ -92,17 +91,7 @@ def test_a_hand_made_reconsolidation_is_outside_the_claim(rig: Rig):
     """
     rig.commit(rig.step("a"), rig.close("one"))
     original = rig.anchors.all()[0]
-    better = Section(
-        anchor=Anchor(
-            section_id=section_id(original.from_seq, original.to_seq, generation=2),
-            from_seq=original.from_seq,
-            to_seq=original.to_seq,
-            unit=original.unit,
-            supersedes=original.section_id,
-        ),
-        prose="a better account of the same events",
-    )
-    rig.chronicle.append(better)
+    better = reconsolidate(rig.chronicle, rig.reader, original.section_id, rig.summarizer)
     assert [a.section_id for a in rig.anchors.all()] == [better.anchor.section_id]
 
     carried = list(rig.chronicle.export())

@@ -82,12 +82,22 @@ So [`Projector.rebuild`][projector-rebuild] refuses a generative fold, raising [
 
 Because rebuilding is lossy, the chronicle is the one projection better **carried** across a change of storage backend than rebuilt. [`SQLiteChronicleStore`][sqlite-chronicle] (any [`ChronicleStore`][chronicle-store]) offers [`export()`][store-export], every row including superseded ones, and [`load(sections)`][store-load], which inserts them and skips ids already present. `load` is idempotent, so an interrupted carry can simply be repeated.
 
-`load` is not a merge. Section ids come from the ranges they cover, which is what makes anchors replay, so two chronicles over the same log collide on every id, and the incoming prose is dropped in favour of what is already there.
+`load` is not a merge, and it refuses a carry that would fork the chronicle rather than landing part of it. Section ids come from the ranges they cover, which is what makes anchors replay, so two chronicles over the same log collide on every id, and the incoming prose is dropped in favour of what is already there.
 
 Carrying grants no authority. A carried chronicle and a rebuilt one are equally valid, because neither is the record of what happened: the log is.
 
-!!! info "Deliberate re-consolidation sits outside the replay guarantee"
-    Re-consolidating a range by hand, say with a better prompt, writes a section that supersedes the old one. Nothing in the log records that you did it, so it is not something a fold can derive: a rebuild discards it and returns the original generation. That is one more reason to carry a chronicle rather than rebuild it. It also means re-consolidation changes what later prompts are shown, so runs that read the old prose will no longer replay against the new one.
+## Re-consolidation, and why the chronicle cannot fork
+
+The fold consolidates each range once. Writing a better account of a range later, say with a better prompt, is the application's decision, made through [`reconsolidate`][reconsolidate] (or [`reconsolidate_async`][reconsolidate-async] from async code). It reads the range again from the log, draws a new consolidation, and appends it as the next generation of that range, superseding the current section. The old prose stays readable by id.
+
+A superseding section written by hand can go wrong in two silent ways. Written under an id already stored, it would be dropped, because the fold's append keeps the existing row on a collision: right for a replayed fold batch, wrong for a deliberate write. Superseding a section that is already superseded would leave **two current sections over one range**, so "the section covering this event" would have two answers. The library closes both:
+
+- `reconsolidate` only accepts the current section for a range, and refuses a superseded one before calling the summariser.
+- It writes through the store's strict path, [`append_new`][store-append-new], which raises [`SectionCollision`][section-collision] instead of keeping the existing row.
+- Every write the store accepts, through either path and through `load`, keeps the current sections from overlapping, and a superseding section must cover exactly the range of the one it supersedes, so a correction never leaves part of a consolidated range uncovered. A write that would fork the chronicle raises [`ChronicleFork`][chronicle-fork]. The fold's own [`append`][store-append] still keeps the existing row when it replays a batch, so replay stays idempotent.
+
+!!! info "Re-consolidation sits outside the replay guarantee"
+    Nothing in the log records a re-consolidation, so it is not something a fold can derive: a rebuild discards it and returns the original generation. That is one more reason to carry a chronicle rather than rebuild it. It also changes what later prompts are shown, so runs that read the old prose will no longer replay against the new one. `reconsolidate` logs a warning saying so on every call, through the standard `logging` module, so the divergence is announced rather than silent.
 
 ## Retrieval stays behind a port
 
@@ -102,6 +112,7 @@ Ranked retrieval over sections is a well-served problem with its own libraries, 
 | Drawing outside the write transaction | Which projector runs the chronicle, and when |
 | Separate `Anchors` and `Prose` surfaces; the tail from the log | Not letting prose settle anything once you have read it |
 | Refusing an unacknowledged rebuild; `export` and `load` | Whether to carry or rebuild; ranked retrieval |
+| Refusing a fork; announcing that a re-consolidation diverges replay | Whether and when to re-consolidate a range |
 
 For the procedure, see [How to Consolidate History into Chronicle Sections](../how-to/chronicle-sections.md).
 
@@ -129,4 +140,10 @@ For the procedure, see [How to Consolidate History into Chronicle Sections](../h
 [generative-rebuild]: ../reference/anagrapheus/timeline/folds.md#anagrapheus.timeline.folds.GenerativeRebuild
 [store-export]: ../reference/anagrapheus/chronicle/store.md#anagrapheus.chronicle.store.ChronicleStore.export
 [store-load]: ../reference/anagrapheus/chronicle/store.md#anagrapheus.chronicle.store.ChronicleStore.load
+[reconsolidate]: ../reference/anagrapheus/chronicle/reconsolidation.md#anagrapheus.chronicle.reconsolidation.reconsolidate
+[reconsolidate-async]: ../reference/anagrapheus/chronicle/reconsolidation.md#anagrapheus.chronicle.reconsolidation.reconsolidate_async
+[chronicle-fork]: ../reference/anagrapheus/chronicle/errors.md#anagrapheus.chronicle.errors.ChronicleFork
+[section-collision]: ../reference/anagrapheus/chronicle/errors.md#anagrapheus.chronicle.errors.SectionCollision
+[store-append]: ../reference/anagrapheus/chronicle/store.md#anagrapheus.chronicle.store.ChronicleStore.append
+[store-append-new]: ../reference/anagrapheus/chronicle/store.md#anagrapheus.chronicle.store.ChronicleStore.append_new
 [substring-retriever]: ../reference/anagrapheus/chronicle/reading.md#anagrapheus.chronicle.reading.substring_retriever
