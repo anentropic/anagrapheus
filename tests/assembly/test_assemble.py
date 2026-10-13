@@ -28,7 +28,7 @@ from anagrapheus.assembly import (
 )
 from anagrapheus.beliefs import FOLD_NAME, StateRef
 from anagrapheus.chronicle import Anchor, Section, SQLiteChronicleStore
-from anagrapheus.timeline import EventReader, UpcastRegistry
+from anagrapheus.timeline import EventReader, PinLedger, Projector, UpcastRegistry, pin_key
 from tests.beliefs.conftest import Rig, build_rig
 
 if TYPE_CHECKING:
@@ -145,6 +145,92 @@ def test_a_belief_slice_refuses_to_read_across_a_moving_fold(rig: Rig):
 
     with pytest.raises(StaleRead):
         slice_.scope("world")
+
+
+def _over(rig: Rig, *, upto_seq: int | None = None) -> BeliefSlice:
+    return BeliefSlice.over(
+        rig.fold,
+        rig.projector,
+        EventReader(rig.store, UpcastRegistry(), rig.types),
+        visible=frozenset({"world"}).__contains__,
+        upto_seq=rig.store.last_seq() if upto_seq is None else upto_seq,
+    )
+
+
+def _pin_and_commit(rig: Rig) -> int:
+    """Draw one pin and promote it into the log, as a finished unit of work does."""
+    ledger = PinLedger(rig.store, rig.types)
+    ledger.resolve(
+        pin_key("app", {"q": "anything"}), kind="draw", effect=lambda: "drawn", interpret=str
+    )
+    return ledger.commit()
+
+
+def test_the_belief_fold_claims_belief_events_and_nothing_else(rig: Rig):
+    rig.commit(rig.asserted("location", uuid.uuid7()))
+    _pin_and_commit(rig)
+    envelopes = [event.envelope for event in rig.store.read()]
+
+    assert [rig.fold.claims(env) for env in envelopes] == [True, False]
+
+
+@pytest.mark.parametrize("durable", [False, True], ids=["fold-owned", "store-owned"])
+def test_promoted_pins_do_not_make_a_belief_read_stale(tmp_path: Path, durable: bool):
+    """A pin lands in the log after the fold caught up, and no belief comes from it."""
+    rig = build_rig(tmp_path / "pins.db", durable=durable)
+    try:
+        held = rig.believer("world").revise("location", (uuid.uuid7(),), "London")
+        last = _pin_and_commit(rig)
+        assert rig.projector.position(FOLD_NAME) < last, "the fold has not seen the pin"
+
+        assert _over(rig, upto_seq=last).scope("world") == [held]
+    finally:
+        rig.store.close()
+
+
+def test_an_append_no_belief_comes_from_does_not_tear_a_slice(rig: Rig):
+    held = rig.believer("world").revise("location", (uuid.uuid7(),), "London")
+    slice_ = _over(rig)
+    _pin_and_commit(rig)
+    rig.projector.catch_up()
+
+    assert slice_.scope("world") == [held], "the fold is ahead, by nothing it reads"
+
+
+def test_a_belief_event_the_fold_has_not_reached_makes_a_read_stale(rig: Rig):
+    rig.believer("world").revise("location", (uuid.uuid7(),), "London")
+    rig.append(rig.asserted("location", uuid.uuid7(), scope="world"))
+    _pin_and_commit(rig)
+
+    with pytest.raises(StaleRead, match="changes beliefs"):
+        _over(rig).scope("world")
+
+
+def test_a_belief_event_folded_past_the_slice_makes_a_read_stale(rig: Rig):
+    slice_ = _over(rig)
+    _pin_and_commit(rig)
+    rig.believer("world").revise("location", (uuid.uuid7(),), "London")
+
+    with pytest.raises(StaleRead, match="changes beliefs"):
+        slice_.scope("world")
+
+
+def test_a_slice_past_the_end_of_the_log_refuses(rig: Rig):
+    """Nothing is there yet to find, and a belief event appended there later would pass."""
+    rig.believer("world").revise("location", (uuid.uuid7(),), "London")
+
+    with pytest.raises(StaleRead, match="the log ends before"):
+        _over(rig, upto_seq=rig.store.last_seq() + 1).scope("world")
+
+
+def test_a_slice_over_a_fold_the_projector_does_not_run_is_refused(rig: Rig):
+    """Its position would be asked of something that does not know it, so not even once."""
+    reader = EventReader(rig.store, UpcastRegistry(), rig.types)
+
+    with pytest.raises(KeyError):
+        BeliefSlice.over(
+            rig.fold, Projector(rig.store, reader, []), reader, visible=bool, upto_seq=0
+        )
 
 
 def test_a_log_slice_never_hands_out_what_admit_refuses(rig: Rig):

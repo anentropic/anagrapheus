@@ -15,9 +15,10 @@ still holds when the wording changes (note 07 §3a).
 
 **Slices read at one position.** A log slice is bounded by ``upto_seq``. A belief slice
 reads the store live, so it is handed a way to ask how far the belief fold has got, and
-it refuses to answer when that is not ``upto_seq``: a fold that moved during assembly
-would otherwise tear the context, with half its beliefs from before an event and half
-from after it.
+it refuses to answer when an event the fold reads lies between that and ``upto_seq``: a
+fold that moved during assembly would otherwise tear the context, with half its beliefs
+from before an event and half from after it. Events the fold ignores are not a tear, so
+a pin promoted into the log, or any other append no belief comes from, is not refused.
 """
 
 from __future__ import annotations
@@ -37,9 +38,11 @@ if TYPE_CHECKING:
     from doxastica import BeliefState, BeliefStore
 
     from anagrapheus.assembly.parts import Source
+    from anagrapheus.beliefs.fold import BeliefFold
     from anagrapheus.chronicle.sections import Section
     from anagrapheus.chronicle.store import ChronicleStore
     from anagrapheus.timeline.envelope import DomainEvent, Envelope, StoredEvent
+    from anagrapheus.timeline.folds import Projector
     from anagrapheus.timeline.upcast import EventReader
 
 __all__ = [
@@ -169,12 +172,19 @@ class BeliefSlice:
     """
     The scopes ``visible`` accepts, read from a belief store folded to ``upto_seq``.
 
-    ``folded_through`` reports the belief fold's position — typically
-    ``lambda: store.read_position(FOLD_NAME)``. A read refuses with
-    :class:`~anagrapheus.assembly.errors.StaleRead` when it is not ``upto_seq``, whether
-    the fold is behind (catch up before assembling) or ahead (something was appended
-    while assembling). Pass ``upto_seq=None`` and no ``folded_through`` for a live
-    slice, which reads whatever the store holds now and promises no position.
+    Build one with :meth:`over`, which wires the rest from the fold. By hand:
+    ``folded_through`` reports the belief fold's position, ``reader`` reads the log and
+    ``claims`` says which events the fold reads (:meth:`BeliefFold.claims
+    <anagrapheus.beliefs.fold.BeliefFold.claims>`). A read refuses with
+    :class:`~anagrapheus.assembly.errors.StaleRead` when an event ``claims`` accepts
+    lies between the fold's position and ``upto_seq``, whether the fold is behind (catch
+    up before assembling) or ahead (a belief event was appended while assembling), and
+    when ``upto_seq`` is past the end of the log. Only envelopes are scanned. Leave out
+    ``reader`` and ``claims`` and every event counts, so the fold must be exactly at
+    ``upto_seq``.
+
+    Pass ``upto_seq=None`` and no ``folded_through`` for a live slice, which reads
+    whatever the store holds now and promises no position.
     """
 
     def __init__(
@@ -184,14 +194,51 @@ class BeliefSlice:
         visible: Callable[[str], bool],
         upto_seq: int | None = None,
         folded_through: Callable[[], int] | None = None,
+        reader: EventReader | None = None,
+        claims: Callable[[Envelope], bool] | None = None,
     ) -> None:
         if (upto_seq is None) != (folded_through is None):
             raise ValueError("a belief slice takes both upto_seq and folded_through, or neither")
+        if (reader is None) != (claims is None):
+            raise ValueError("a belief slice takes both reader and claims, or neither")
+        if reader is not None and upto_seq is None:
+            raise ValueError("a live belief slice has no position to check, so takes no reader")
         self._store = store
         self._visible = visible
         self._upto = upto_seq
         self._folded_through = folded_through
+        self._reader = reader
+        self._claims = claims
         self._ledger = _Ledger()
+
+    @classmethod
+    def over(
+        cls,
+        fold: BeliefFold,
+        projector: Projector,
+        reader: EventReader,
+        *,
+        visible: Callable[[str], bool],
+        upto_seq: int,
+    ) -> BeliefSlice:
+        """
+        A slice over ``fold``'s store at ``upto_seq``, checked against the fold itself.
+
+        The position is asked of ``projector``, which answers wherever the fold keeps it
+        — in the log's database for a durable fold, on the fold for one that is not —
+        so ``fold`` must be one of its folds. Only events ``fold`` claims can make a
+        read stale.
+        """
+        name = fold.name
+        projector.position(name)  # a fold the projector does not run fails here, not mid-read
+        return cls(
+            fold.store,
+            visible=visible,
+            upto_seq=upto_seq,
+            folded_through=lambda: projector.position(name),
+            reader=reader,
+            claims=fold.claims,
+        )
 
     @property
     def upto_seq(self) -> int | None:
@@ -221,14 +268,31 @@ class BeliefSlice:
     def _read(self, scope_id: str) -> list[BeliefState]:
         if not self._visible(scope_id):
             raise NotGranted(f"scope {scope_id!r} is not in this grant")
-        if self._folded_through is not None:
-            folded = self._folded_through()
-            if folded != self._upto:
-                raise StaleRead(
-                    f"the belief fold is at {folded} and this slice reads at {self._upto}; "
-                    f"a context read across a moving fold would mix two positions"
-                )
+        if self._folded_through is not None and self._upto is not None:
+            self._check_position(self._folded_through(), self._upto)
         return list(self._store.query_scope(scope_id, BeliefFilter()))
+
+    def _check_position(self, folded: int, upto: int) -> None:
+        """Raise unless the fold at ``folded`` holds the beliefs the log holds at ``upto``."""
+        if folded == upto:
+            return
+        stale = (
+            f"the belief fold is at {folded} and this slice reads at {upto}; "
+            f"a context read across a moving fold would mix two positions"
+        )
+        if self._reader is None or self._claims is None:
+            raise StaleRead(stale)
+        low, high = sorted((folded, upto))
+        # Filtered on the envelope, so nothing the fold ignores is upcast or decoded, and
+        # the scan stops at the first event the fold reads.
+        for event in self._reader.read_raw(low, upto_seq=high, where=self._claims):
+            raise StaleRead(f"{stale}: event {event.seq} between them changes beliefs")
+        if folded < upto:
+            # Positions the log has not reached yet hold nothing to find, and a belief
+            # event appended there later would pass this check once the fold reached it.
+            reached = next(self._reader.read_raw(upto - 1, limit=1), None)
+            if reached is None:
+                raise StaleRead(f"{stale}: the log ends before {upto}")
 
     def handed_out(self) -> tuple[Source, ...]:
         """Every belief state returned so far."""

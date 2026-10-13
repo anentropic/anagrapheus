@@ -58,7 +58,6 @@ from typing import TYPE_CHECKING
 from examples.negotiation.scopes import held, stated
 
 from anagrapheus.assembly import BeliefSlice, ChronicleSlice, LogSlice, handed_out
-from anagrapheus.beliefs import FOLD_NAME
 from anagrapheus.identity import IdentityRegistry
 
 if TYPE_CHECKING:
@@ -108,15 +107,20 @@ class PartyView:
         # the worst of both. A negotiation that seats a party mid-round is ordinary.
         self.seats = MappingProxyType(table.seats)
         self.clauses = MappingProxyType(table.clauses)
+
+        def visible(scope: str) -> bool:
+            return _visible(scope, party)
+
         # A *guarded* reader, not `table.core.query_scope` bound. Aliasing the bound
         # method was the first attempt and it left the guarantee entirely open: a bound
         # method carries `__self__`, so the core -- reads and writes both -- came along
         # with it. See the module docstring.
-        self._beliefs = BeliefSlice(
-            table.core,
-            visible=lambda scope: _visible(scope, party),
-            upto_seq=at,
-            folded_through=None if at is None else lambda: table.settle.position(FOLD_NAME),
+        self._beliefs = (
+            BeliefSlice(table.core, visible=visible)
+            if at is None
+            else BeliefSlice.over(
+                table.beliefs, table.settle, table.reader, visible=visible, upto_seq=at
+            )
         )
         self.read = _guarded(self._beliefs.scope, party)
         # A live view reads to the end of the log; a settled one stops where it opened.
@@ -125,10 +129,10 @@ class PartyView:
         self._chronicle = ChronicleSlice(table.chronicle, upto_seq=reach)
 
         def settle() -> PartyView:
-            # Bring the pure folds up first. A pin committed by the ledger lands in the
-            # log without passing through `Table.append`, so the belief fold can be a
-            # few events behind the log for no reason that matters to a belief.
-            table.settle.catch_up()
+            # No catch-up first. A pin the ledger commits lands in the log without
+            # passing through `Table.append`, so the belief fold may be a few events
+            # behind the log, but none of them is one it reads: the slice tells those
+            # apart from a belief event it has not folded, and refuses only the latter.
             return PartyView(table, party, at=table.store.last_seq())
 
         self._settle = settle
@@ -210,9 +214,9 @@ class PartyView:
         """
         The view again, settled at the log's current position for one model call.
 
-        The pure folds are brought up first, and the settled view's belief reads refuse
-        if the belief fold moves after that, so a context assembled from it describes
-        one moment of the negotiation.
+        Its belief reads refuse if a belief event lies between the belief fold and that
+        position, in either direction, so a context assembled from it describes one
+        moment of the negotiation. Other appends, such as promoted pins, do not count.
         """
         return self._settle()
 
