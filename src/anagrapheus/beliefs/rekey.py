@@ -151,8 +151,11 @@ def plan_rekeys(
             # A holder other than the row's own entity stays where it is, or goes
             # wherever the batch takes it, rather than onto the row's entity.
             stays = [holder if target == from_entity else target for target in targets]
-            for row in index.beliefs_for(holder):
-                settled = _settle(kind, holder, stays, seq, batch)
+            rows = index.beliefs_for(holder)
+            if not rows:
+                continue
+            settled = _settle(kind, holder, stays, seq, batch)
+            for row in rows:
                 candidates = _successors(row.belief_id, holder, settled, predicates)
                 if candidates is None:
                     if skip_unrenderable:
