@@ -11,7 +11,7 @@ dependencies = [
     "anyio>=4.0",
     "doxastica>=0.2,<0.3",
     "pydantic>=2.11,<3",
-    "pydantic-ai-slim>=1.0",
+    "pydantic-ai-slim>=2,<3",
 ]
 
 [build-system]
@@ -22,11 +22,11 @@ build-backend = "uv_build"
 # Only tier 3 -- the live smoke test -- needs a real provider. Kept out of the base
 # install so the library stays provider-agnostic: pydantic-ai is the seam, and which
 # provider sits behind it is the consumer's choice.
-anthropic = ["pydantic-ai-slim[anthropic]>=1.0"]
+anthropic = ["pydantic-ai-slim[anthropic]>=2,<3"]
 # The OpenAI SDK, which pydantic-ai uses for OpenAI itself and for every
 # OpenAI-compatible route -- OpenRouter among them. Named for what it installs, as
 # pydantic-ai names its own extra, rather than for one provider that uses it.
-openai = ["pydantic-ai-slim[openai]>=1.0"]
+openai = ["pydantic-ai-slim[openai]>=2,<3"]
 
 [dependency-groups]
 dev = [
