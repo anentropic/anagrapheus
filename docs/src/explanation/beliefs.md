@@ -140,7 +140,7 @@ Every belief state records a `source_event_id`, and in anagrapheus that is alway
 
 ### Surviving a crash
 
-The projector commits the belief fold's position inside the log's transaction, but doxastica is outside that transaction. A crash between the two re-applies the last batch on restart, and doxastica's `revise` is not idempotent. The fold handles this exactly: before writing, it looks for a state in this scope, for this belief, sourced from this event. If one exists, the operation already ran, so the state is reused and only its edges are laid again (laying an edge twice is harmless). This works because of the rule above that one event writes one proposition in one scope at most once.
+The projector advances the belief fold's position only once a batch's transaction has committed (for a durable fold, the position commits inside it), but doxastica is outside that transaction. A crash between the two re-applies the last batch on restart, and doxastica's `revise` is not idempotent. The fold handles this exactly: before writing, it looks for a state in this scope, for this belief, sourced from this event. If one exists, the operation already ran, so the state is reused and only its edges are laid again (laying an edge twice is harmless). This works because of the rule above that one event writes one proposition in one scope at most once.
 
 ### Edges between beliefs
 
@@ -150,8 +150,14 @@ A belief can rest on another: a conclusion derived from an observation. Retract 
 
 doxastica has no "clear" operation, so [`BeliefFold.reset(store)`][belief-fold-reset] takes a new, empty store to fold into and empties the entity index beside it. Readers then find the current store at [`BeliefFold.store`][belief-fold-store]. You own that swap, because only you know what kind of store it is.
 
-!!! danger "An in-memory belief store is empty on reopen, but its position is not"
-    The belief fold's **position**, the `seq` of the last event it folded, is persisted in the event store. If the doxastica store is in memory, reopening the database gives you a position saying everything has been folded and a store holding nothing. Rebuild the belief fold on open whenever its position is above zero; the negotiation example's table does exactly this.
+### Where the position lives
+
+The belief fold's **position** is the `seq` of the last event it folded. It must survive exactly as long as the beliefs do, or a reopened log would say everything has been folded over a store holding nothing, and every read would silently come back empty. So [`BeliefFold`][belief-fold] takes a required `durable` flag, with no default:
+
+- **`durable=False`**, for a store that goes with the process, such as `MemoryCore(InMemoryBackend())`. The fold keeps its position on itself, starting at 0, so the first catch-up in each process folds the whole log again. The entity index, which does survive in the log's file, is written again too, and that is harmless because each write is an upsert.
+- **`durable=True`**, for a store that outlives the process. The position is kept in the log's database like every other fold's, so a reopen folds only what was appended since.
+
+A default would have to be one of the two, and `durable=True` would hand an in-memory store a guarantee it cannot keep. Read the position with [`Projector.position(name)`][projector-position], which answers for both.
 
 ## The entity index
 
@@ -188,6 +194,7 @@ For the procedure, see [How to Keep Per-Agent Beliefs as a Fold](../how-to/per-a
 [registry-parse]: ../reference/anagrapheus/beliefs/predicates.md#anagrapheus.beliefs.predicates.PredicateRegistry.parse
 [belief-fold]: ../reference/anagrapheus/beliefs/fold.md#anagrapheus.beliefs.fold.BeliefFold
 [belief-fold-reset]: ../reference/anagrapheus/beliefs/fold.md#anagrapheus.beliefs.fold.BeliefFold.reset
+[projector-position]: ../reference/anagrapheus/timeline/folds.md#anagrapheus.timeline.folds.Projector.position
 [check]: ../reference/anagrapheus/beliefs/fold.md#anagrapheus.beliefs.fold.check
 [revise]: ../reference/anagrapheus/beliefs/ops.md#anagrapheus.beliefs.ops.Revise
 [expand]: ../reference/anagrapheus/beliefs/ops.md#anagrapheus.beliefs.ops.Expand

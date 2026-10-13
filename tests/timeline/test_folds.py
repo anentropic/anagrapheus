@@ -8,6 +8,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from anagrapheus.timeline.envelope import DomainEvent, StoredEvent
+from anagrapheus.timeline.errors import TimelineError
 from anagrapheus.timeline.folds import Projector
 from anagrapheus.timeline.registry import EventTypeRegistry
 from anagrapheus.timeline.sqlite import SQLiteEventStore
@@ -259,3 +260,130 @@ def test_two_projectors_split_the_schedule(tmp_path: Path):
     between_turns.catch_up()
     assert deferred.seen == [1, 2, 3]
     assert store.read_position(critical.name) == store.read_position(deferred.name) == 3
+
+
+class OwnedLog(MemoryLog):
+    """External state that keeps its own position, as :class:`OwnsPosition` describes."""
+
+    name = "owned_log"
+
+    def __init__(self, *, fail_at: int | None = None) -> None:
+        super().__init__()
+        self.position = 0
+        self.fail_at = fail_at
+
+    def read_position(self) -> int | None:
+        return self.position
+
+    def commit_position(self, seq: int) -> None:
+        self.position = seq
+
+    def apply(self, event: StoredEvent, txn: object) -> None:
+        if event.seq == self.fail_at:
+            raise RuntimeError("the batch dies here")
+        super().apply(event, txn)
+
+
+def test_a_fold_that_owns_its_position_is_positioned_on_itself(tmp_path: Path):
+    """The store's row stays untouched, so a fresh fold object starts from zero."""
+    types, store, reader = make_stack(tmp_path / "t.db")
+    store.append([types.pending(StepTaken(n=i)) for i in (1, 2, 3)])
+    fold = OwnedLog()
+    projector = Projector(store, reader, [fold])
+
+    assert projector.catch_up(batch_size=2) == {"owned_log": 3}
+    assert fold.position == projector.position("owned_log") == 3
+    assert dict(projector.positions()) == {"owned_log": 3}
+    assert store.read_position("owned_log") == 0
+
+    again = OwnedLog()
+    Projector(store, reader, [again]).catch_up()
+    assert again.seen == [1, 2, 3]
+
+
+def test_an_owned_position_does_not_advance_past_a_failed_batch(tmp_path: Path):
+    types, store, reader = make_stack(tmp_path / "t.db")
+    store.append([types.pending(StepTaken(n=i)) for i in (1, 2, 3, 4)])
+    fold = OwnedLog(fail_at=3)
+    projector = Projector(store, reader, [fold])
+
+    with pytest.raises(RuntimeError):
+        projector.catch_up(batch_size=2)
+    assert fold.position == 2
+
+    fold.fail_at = None
+    projector.catch_up(batch_size=2)
+    assert fold.position == 4
+
+
+def test_rebuild_zeroes_an_owned_position(tmp_path: Path):
+    types, store, reader = make_stack(tmp_path / "t.db")
+    store.append([types.pending(StepTaken(n=i)) for i in (1, 2)])
+    fold = OwnedLog()
+    projector = Projector(store, reader, [fold])
+    projector.catch_up()
+
+    seen_at_reset: list[int] = []
+    assert projector.rebuild("owned_log", reset=lambda: seen_at_reset.append(fold.position)) == 2
+    assert seen_at_reset == [0]
+    assert fold.seen == [1, 2, 1, 2]
+    assert store.read_position("owned_log") == 0
+
+
+def test_a_fold_answering_none_is_positioned_in_the_store(tmp_path: Path):
+    """How one class serves both cases: ``None`` hands the position back to the store."""
+
+    class Durable(OwnedLog):
+        def read_position(self) -> int | None:
+            return None
+
+        def commit_position(self, seq: int) -> None:
+            raise AssertionError("never called for a fold the store positions")
+
+    types, store, reader = make_stack(tmp_path / "t.db")
+    store.append([types.pending(StepTaken(n=1))])
+    projector = Projector(store, reader, [Durable()])
+    projector.catch_up()
+    assert store.read_position("owned_log") == projector.position("owned_log") == 1
+
+
+def test_an_owned_position_is_refused_inside_an_open_transaction(tmp_path: Path):
+    """
+    An outer rollback would undo the events but not the fold's state or position.
+
+    Were it allowed, the rolled-back seqs would be reused by the next append and the
+    fold, positioned above them, would skip the new events.
+    """
+    types, store, reader = make_stack(tmp_path / "t.db")
+    store.append([types.pending(StepTaken(n=1))])
+    fold = OwnedLog()
+    projector = Projector(store, reader, [fold, MemoryLog()])
+
+    with store.transaction():
+        store.append([types.pending(StepTaken(n=2))])
+        with pytest.raises(TimelineError, match="owned_log"):
+            projector.catch_up()
+        with pytest.raises(TimelineError, match="owned_log"):
+            projector.rebuild("owned_log", reset=lambda: None)
+    assert fold.seen == []
+    assert fold.position == 0
+
+    projector.catch_up()
+    assert fold.seen == [1, 2]
+
+
+def test_a_store_positioned_fold_may_catch_up_inside_a_transaction(tmp_path: Path):
+    """Its position is in the store, so it rolls back with everything else."""
+    types, store, reader = make_stack(tmp_path / "t.db")
+    store.append([types.pending(StepTaken(n=1))])
+    projector = Projector(store, reader, [SqlSum()])
+
+    class Abort(Exception):
+        pass
+
+    with pytest.raises(Abort), store.transaction():
+        store.append([types.pending(StepTaken(n=2))])
+        assert projector.catch_up() == {"sql_sum": 2}
+        raise Abort
+    assert store.read_position("sql_sum") == 0
+    assert SqlSum.total(store) == 0

@@ -6,6 +6,12 @@ the keys miss — and a miss is detectable: strict mode raises at the first miss
 mode marks the run divergent and continues by drawing fresh. Either way it is a new
 run continuing the same history, announced — never a different run wearing the word
 "replay".
+
+Record mode draws through a :class:`~anagrapheus.timeline.pins.PinLedger` passed as
+``into=``, so the new run is a unit of work like any other: its fresh draws and the pins
+it replayed both land in that ledger's scratch, and ``ledger.commit()`` promotes them
+with a :class:`~anagrapheus.timeline.pins.ReplayDiverged` in one transaction. The new
+run's log then replays the new run strictly.
 """
 
 from __future__ import annotations
@@ -21,7 +27,7 @@ from pydantic import BaseModel
 from anagrapheus.timeline._canonical import Json, concrete_json
 from anagrapheus.timeline.envelope import DomainEvent, StoredEvent
 from anagrapheus.timeline.errors import TimelineError
-from anagrapheus.timeline.pins import PinKey, PinPromoted, ReplayDiverged
+from anagrapheus.timeline.pins import PinKey, PinPromoted
 from anagrapheus.timeline.registry import RESERVED_NAMESPACE, EventKey
 
 if TYPE_CHECKING:
@@ -29,8 +35,8 @@ if TYPE_CHECKING:
     from contextlib import AbstractAsyncContextManager
     from uuid import UUID
 
+    from anagrapheus.timeline.pins import PinLedger
     from anagrapheus.timeline.registry import EventTypeRegistry
-    from anagrapheus.timeline.store import EventStore
     from anagrapheus.timeline.upcast import UpcastRegistry
 
 
@@ -68,6 +74,15 @@ class ReplayPins:
     work is written once and replays without modification. ``on_miss`` picks the posture:
     ``"strict"`` raises :class:`PinMiss`; ``"record"`` marks the divergence at the
     first miss and falls through to the effect — the run continues, announced as new.
+
+    Record mode needs ``into``, the :class:`~anagrapheus.timeline.pins.PinLedger` the
+    new run is recorded in. A miss draws through it, so the fresh draw lands in its
+    scratch; a hit is adopted into the same scratch, so the ledger holds the whole new
+    run and not only the part that differed. ``into.commit()`` then promotes those pins
+    and a :class:`~anagrapheus.timeline.pins.ReplayDiverged` for the first miss, in one
+    transaction. Without ``into`` a record-mode run's draws would reach no log, so it
+    is refused. That commit is the only place the divergence is written, so a run
+    announces it once; until then, :attr:`divergence` says where it happened.
     """
 
     def __init__(
@@ -75,39 +90,27 @@ class ReplayPins:
         pins: dict[str, Json],
         *,
         on_miss: Literal["strict", "record"] = "strict",
-        announce: Callable[[Divergence], None] | None = None,
+        into: PinLedger | None = None,
     ) -> None:
         if on_miss not in ("strict", "record"):
             # Literal annotations are not enforced at runtime; a typo must not
             # silently weaken strict replay into live draws.
             raise ValueError(f"on_miss must be 'strict' or 'record', got {on_miss!r}")
+        if on_miss == "record" and into is None:
+            raise ValueError(
+                "on_miss='record' needs into=PinLedger(...): a record-mode run draws "
+                "fresh, and without a ledger those draws would never reach the log"
+            )
+        if on_miss == "strict" and into is not None:
+            raise ValueError("into= records a new run; it applies only to on_miss='record'")
         self._pins = pins
         self._on_miss: Literal["strict", "record"] = on_miss
-        self._announce = announce
+        self._into = into
         self._hits = 0
-        # One lock per key, so concurrent draws for one key coalesce; see `_lock_for`.
-        # Keys with a draw in flight right now, plain or streamed.
+        # Keys with a draw in flight right now, plain or streamed, so concurrent draws
+        # for one key coalesce; see `_await_inflight`.
         self._inflight: dict[PinKey, Event] = {}
         self._divergence: Divergence | None = None
-
-    @staticmethod
-    def announce_to(
-        store: EventStore, registry: EventTypeRegistry, *, unit_id: UUID
-    ) -> Callable[[Divergence], None]:
-        """
-        An ``announce`` callback that appends a :class:`ReplayDiverged` event.
-
-        With this wired, a record-mode run that stops being a replay says so in the
-        authoritative log, not just in this object's memory.
-        """
-
-        def announce(divergence: Divergence) -> None:
-            event = ReplayDiverged(
-                unit_id=unit_id, missed_key=divergence.missed_key, kind=divergence.kind
-            )
-            store.append([registry.pending(event)])
-
-        return announce
 
     @classmethod
     def from_events(
@@ -119,7 +122,7 @@ class ReplayPins:
         extract: ExtractFn | None = None,
         upcasts: UpcastRegistry | None = None,
         on_miss: Literal["strict", "record"] = "strict",
-        announce: Callable[[Divergence], None] | None = None,
+        into: PinLedger | None = None,
     ) -> Self:
         """
         Build a replay source from a stream (or fixture) of stored events.
@@ -131,6 +134,7 @@ class ReplayPins:
         loads (later pins win on key collision). Pass ``upcasts`` when the events did
         not already go through an :class:`EventReader` — raw fixtures, for example —
         so pin event payloads get the same upcast-on-read as everything else.
+        ``on_miss`` and ``into`` are as for the class.
         """
         if extract is not None and unit_id is not None:
             raise ValueError("unit_id cannot narrow custom-promoted events; filter inside extract")
@@ -158,12 +162,17 @@ class ReplayPins:
             if unit_id is not None and decoded.unit_id != unit_id:
                 continue
             pins[decoded.key] = cast("Json", decoded.result)
-        return cls(pins, on_miss=on_miss, announce=announce)
+        return cls(pins, on_miss=on_miss, into=into)
 
     @property
     def divergence(self) -> Divergence | None:
         """The first miss, if this replay has stopped being a replay."""
         return self._divergence
+
+    @property
+    def ledger(self) -> PinLedger | None:
+        """The ledger a record-mode run draws into (``into``), or ``None`` for strict."""
+        return self._into
 
     def resolve[R: Json, O](
         self,
@@ -178,14 +187,15 @@ class ReplayPins:
 
         Strict mode raises on every miss, not only the first — catching one
         :class:`PinMiss` must not turn later misses into silent live draws. Record
-        mode announces the first miss, then pins the fresh draw, so replayed and
-        fresh keys alike keep reuse-under-retry semantics.
+        mode marks the first miss, then draws through the ``into`` ledger, so replayed
+        and fresh keys alike keep reuse-under-retry semantics and reach its scratch.
         """
         if key in self._pins:
-            self._hits += 1
-            return interpret(cast("R", self._pins[key]))
-        self._miss(key, kind)
-        return interpret(self._record(key, effect()))
+            return interpret(cast("R", self._hit(key, kind)))
+        ledger = self._miss(key, kind)
+        return interpret(
+            self._remember(key, ledger.resolve(key, kind=kind, effect=effect, interpret=_raw))
+        )
 
     async def resolve_async[R: Json, O](
         self,
@@ -208,15 +218,14 @@ class ReplayPins:
         # plain one share a key.
         await self._await_inflight(key)
         if key in self._pins:
-            self._hits += 1
-            return interpret(cast("R", self._pins[key]))
-        self._miss(key, kind)
+            return interpret(cast("R", self._hit(key, kind)))
+        ledger = self._miss(key, kind)
         gate = self._begin(key)
         try:
-            raw = self._record(key, await effect())
+            raw = await ledger.resolve_async(key, kind=kind, effect=effect, interpret=_raw)
         finally:
             self._end(key, gate)
-        return interpret(raw)
+        return interpret(self._remember(key, raw))
 
     @asynccontextmanager
     async def resolve_stream[R: Json, S](
@@ -243,23 +252,25 @@ class ReplayPins:
         """
         await self._await_inflight(key)
         if key in self._pins:
-            self._hits += 1
-            yield interpret(cast("R", self._pins[key]))
+            yield interpret(cast("R", self._hit(key, kind)))
             return
 
         # After the wait, so a caller that ends up reusing another's pin never counts
         # as a divergence.
-        self._miss(key, kind)
+        ledger = self._miss(key, kind)
         gate = self._begin(key)
         try:
-            async with effect() as live:
-                try:
-                    yield live
-                finally:
-                    # Recorded even when abandoned, exactly as the live ledger does:
-                    # record mode exists to build a corpus, and a partial response is
-                    # part of what happened.
-                    self._record(key, capture(live))
+            # The ledger records even an abandoned stream, as it does live: record mode
+            # builds a corpus, and a partial response is part of what happened. The
+            # wrappers keep a copy here too, so later calls on this key are hits.
+            async with ledger.resolve_stream(
+                key,
+                kind=kind,
+                effect=effect,
+                capture=lambda live: self._remember(key, capture(live)),
+                interpret=lambda raw: interpret(self._remember(key, raw)),
+            ) as stream:
+                yield stream
         finally:
             self._end(key, gate)
 
@@ -285,21 +296,38 @@ class ReplayPins:
         del self._inflight[key]
         gate.set()
 
-    def _miss(self, key: PinKey, kind: str) -> None:
-        """Apply the ``on_miss`` policy: raise, or announce the first and carry on."""
+    def _hit(self, key: PinKey, kind: str) -> Json:
+        """Answer from the pins; in record mode, adopt the answer into the new run."""
+        self._hits += 1
+        pinned = self._pins[key]
+        if self._into is not None:
+            pinned = self._into.adopt(key, kind=kind, result=pinned)
+        return pinned
+
+    def _miss(self, key: PinKey, kind: str) -> PinLedger:
+        """
+        Apply the ``on_miss`` policy: raise, or mark the first and carry on.
+
+        Returns the ledger to draw through, which record mode always has.
+        """
         miss = Divergence(missed_key=key, kind=kind, after_hits=self._hits)
         _log.warning("replay missed %s after %d hit(s) (%s)", key, self._hits, self._on_miss)
-        if self._on_miss == "strict":
+        if self._on_miss == "strict" or self._into is None:
             if self._divergence is None:
                 self._divergence = miss
             raise PinMiss(miss)
         if self._divergence is None:
             self._divergence = miss
-            if self._announce is not None:
-                self._announce(miss)
+            self._into.mark_diverged(missed_key=key, kind=kind)
+        return self._into
 
-    def _record[R: Json](self, key: PinKey, drawn: R) -> R:
-        """Pin a fresh draw, so replayed and fresh keys alike keep reuse-under-retry."""
-        raw = cast("R", concrete_json(drawn))
+    def _remember[R: Json](self, key: PinKey, raw: R) -> R:
+        """Keep a drawn result here too, so later calls on this key are hits."""
+        raw = cast("R", concrete_json(raw))
         self._pins[key] = cast("Json", raw)
         return raw
+
+
+def _raw[R](raw: R) -> R:
+    """The identity ``interpret``: the ledger hands back the concretized raw result."""
+    return raw

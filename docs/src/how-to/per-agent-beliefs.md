@@ -129,10 +129,13 @@ fold = BeliefFold(
     predicates,
     SQLiteBeliefIndexStore(store.connection),
     types,
+    durable=False,
     interpret={("fisheries", "PositionStated"): stated_position},
 )
 projector = Projector(store, reader, [fold])
 ```
+
+`durable` says whether the belief store outlives the process. It is required, because the fold keeps its position in a different place for each answer; [step 6](#6-reopen-the-log-in-a-new-process) shows why that matters.
 
 The `interpret` mapping is keyed by `(namespace, type)`. The fold understands the library's own belief events without being told, and skips every event that no interpreter claims.
 
@@ -141,7 +144,7 @@ The beliefs themselves live in the doxastica store you pass in, a `MemoryCore` o
 - `InMemoryBackend`, used throughout this guide. It needs nothing beyond doxastica, and holds beliefs only for the life of the process.
 - `LadybugBackend`, in `doxastica.backends.ladybug`, which stores beliefs in a LadybugDB graph database file. It needs the optional driver (`pip install "doxastica[ladybug]"`), and it is not re-exported from `doxastica` itself. This guide's examples do not use it.
 
-Which backend to use is the application's decision. The entity index is separate from both: `SQLiteBeliefIndexStore` keeps it in the log's own SQLite file, so it persists with the log whichever backend holds the beliefs.
+Which backend to use is the application's decision. Pass `durable=False` for `InMemoryBackend` and `durable=True` for `LadybugBackend`. The entity index is separate from both: `SQLiteBeliefIndexStore` keeps it in the log's own SQLite file, so it persists with the log whichever backend holds the beliefs.
 
 ## 4. Write beliefs as events
 
@@ -200,25 +203,13 @@ v1:fisheries:red_line(01a1…,01a1…) = never believed
 
 Always read through `fold.store`, not a reference to the store you passed in: a rebuild replaces it.
 
-## Verify it worked
+## 6. Reopen the log in a new process
 
-Drop the beliefs and fold them again from the log. The same beliefs come back:
+A `MemoryCore(InMemoryBackend())` goes with the process, but the log, kept in a file, does not. Because the fold was built with `durable=False`, it keeps its position on itself rather than in the file, and that position starts at 0 in every process. The first `catch_up()` after opening the file therefore folds the whole log again, and the beliefs come back without any extra step.
 
-```python
-from anagrapheus.beliefs import FOLD_NAME
+The entity index does survive in the file, and the replay writes it again. That is harmless, because each index write is an upsert of the same row.
 
-fresh = MemoryCore(InMemoryBackend())
-projector.rebuild(FOLD_NAME, reset=lambda: fold.reset(fresh), reset_in_transaction=True)
-print(divergence(fold.store, "party:uk:held", "party:uk:stated"))
-# [Disagreement(belief_id='v1:fisheries:position(…)', held='cut 5%', reference='cut 12%')]
-```
-
-`reset_in_transaction=True` is correct here because the entity index shares the log's database, so emptying it and zeroing the fold's position commit together.
-
-!!! warning "An in-memory belief store needs a rebuild when the file is reopened"
-    The fold's position is stored in the SQLite file, but a `MemoryCore(InMemoryBackend())` lives in memory. Reopen the file in a new process and the position says the beliefs are folded while the store is empty. `catch_up()` then folds nothing, and every read, `divergence` included, silently returns nothing.
-
-A long-running application that keeps its log in a file therefore rebuilds the belief fold every time it opens the file, before it reads any belief. Put that in the one function that opens the database, so no code path can skip it. The function reuses `types`, `predicates` and `stated_position` from `beliefs.py`; the output shown comes from a later process reopening the file that steps 3 to 5 wrote, with `SQLiteEventStore(Path("talks.db"))` in place of `":memory:"`:
+The function below reuses `types`, `predicates` and `stated_position` from `beliefs.py`. The output shown comes from a later process reopening the file that steps 3 to 5 wrote, with `SQLiteEventStore(Path("talks.db"))` in place of `":memory:"`:
 
 ```python title="open_beliefs.py"
 from pathlib import Path
@@ -235,20 +226,17 @@ def open_beliefs(path: Path) -> tuple[SQLiteEventStore, BeliefFold, Projector]:
         predicates,
         SQLiteBeliefIndexStore(store.connection),
         types,
+        durable=False,
         interpret={("fisheries", "PositionStated"): stated_position},
     )
     projector = Projector(store, reader, [fold])
-    # The in-memory store starts empty on every open, so fold the whole log again.
-    projector.rebuild(
-        FOLD_NAME,
-        reset=lambda: fold.reset(MemoryCore(InMemoryBackend())),
-        reset_in_transaction=True,
-    )
+    # The fold starts at position 0 in each process, so this folds the whole log.
+    projector.catch_up()
     return store, fold, projector
 
 
 store, fold, projector = open_beliefs(Path("talks.db"))
-print(store.read_position(FOLD_NAME))
+print(projector.position(FOLD_NAME))
 print(divergence(fold.store, "party:uk:held", "party:uk:stated"))
 ```
 
@@ -257,9 +245,27 @@ print(divergence(fold.store, "party:uk:held", "party:uk:stated"))
 [Disagreement(belief_id='v1:fisheries:position(…)', held='cut 5%', reference='cut 12%')]
 ```
 
-The rebuild replays the whole log, so its cost grows with the run. After it, call `projector.catch_up()` after each append as usual. Rebuilding on a fresh file, at position 0, is harmless, so the function does not need to check the position first.
+Read the fold's position with [`projector.position(FOLD_NAME)`][projector-position], not with `store.read_position`: a non-durable fold never writes its position to the file.
 
-With a persistent backend such as `LadybugBackend`, the beliefs survive between processes, and on reopen `catch_up()` folds only what was appended since. The rebuild is then needed only when the belief database and the log no longer match, for example when one file was restored from a backup and the other was not.
+Replaying the whole log costs more as the run grows. With a persistent backend such as `LadybugBackend` and `durable=True`, the position is kept in the log's file, the beliefs survive between processes, and on reopen `catch_up()` folds only what was appended since. A rebuild is then needed only when the belief database and the log no longer match, for example when one file was restored from a backup and the other was not.
+
+!!! warning "Do not pass `durable=True` for an in-memory store"
+    The position would then be stored in the file while the beliefs stay in memory. A reopened file would say the beliefs are folded while the store is empty, `catch_up()` would fold nothing, and every read, `divergence` included, would silently return nothing.
+
+## Verify it worked
+
+Drop the beliefs and fold them again from the log. The same beliefs come back:
+
+```python
+from anagrapheus.beliefs import FOLD_NAME
+
+fresh = MemoryCore(InMemoryBackend())
+projector.rebuild(FOLD_NAME, reset=lambda: fold.reset(fresh), reset_in_transaction=True)
+print(divergence(fold.store, "party:uk:held", "party:uk:stated"))
+# [Disagreement(belief_id='v1:fisheries:position(…)', held='cut 5%', reference='cut 12%')]
+```
+
+`reset_in_transaction=True` is correct here because the entity index shares the log's database, so emptying it runs in the log's own transaction. For a fold built with `durable=True`, zeroing its position in the file commits in that same transaction.
 
 ## Troubleshooting
 
@@ -303,3 +309,4 @@ beliefs.check(*stated_position(None, event))  # raises if the fold would refuse 
 [belief-events]: ../reference/anagrapheus/beliefs/writer.md#anagrapheus.beliefs.writer.BeliefEvents
 [divergence]: ../reference/anagrapheus/beliefs/divergence.md#anagrapheus.beliefs.divergence.divergence
 [projector]: ../reference/anagrapheus/timeline/folds.md#anagrapheus.timeline.folds.Projector
+[projector-position]: ../reference/anagrapheus/timeline/folds.md#anagrapheus.timeline.folds.Projector.position

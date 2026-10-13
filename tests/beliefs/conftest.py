@@ -166,8 +166,15 @@ def build_rig(
     predicates: PredicateRegistry | None = None,
     core: MemoryCore | None = None,
     interpret: Mapping[tuple[str, str], Interpreter] | None = None,
+    durable: bool = False,
 ) -> Rig:
-    """Assemble a rig over ``path``; pass ``types`` to supply a custom vocabulary."""
+    """
+    Assemble a rig over ``path``; pass ``types`` to supply a custom vocabulary.
+
+    ``durable`` is the fold's flag. The rig's core is in memory, so it is ``False``
+    unless a test hands in a ``core`` and stands it in for a store that outlives the
+    process.
+    """
     if types is None:
         types = EventTypeRegistry()
         register_builtin_events(types)
@@ -180,6 +187,7 @@ def build_rig(
         predicates,
         index_store,
         types,
+        durable=durable,
         interpret=interpret,
     )
     return Rig(
