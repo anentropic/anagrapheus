@@ -108,6 +108,13 @@ class OwnsPosition(Protocol):
     Optional. :class:`Projector` checks for it on every read and commit, and a fold
     that answers ``None`` from :meth:`read_position` is positioned in the store as
     usual, which lets one class serve both cases.
+
+    Such a fold's state and position sit outside the store's transactions, so neither
+    can follow an outer transaction's rollback: a catch-up inside one would leave both
+    advanced over events the rollback removed, and the next events appended would reuse
+    those ``seq`` values and be skipped. :meth:`Projector.catch_up` and
+    :meth:`Projector.rebuild` therefore refuse to run such a fold while a transaction is
+    open on the store.
     """
 
     def read_position(self) -> int | None:
@@ -163,6 +170,18 @@ class GenerativeFold(Protocol):
         ...
 
 
+def _refuse_inside_transaction(store: EventStore, folds: Sequence[ProjectionFold]) -> None:
+    """Raise if any of ``folds`` keeps its own position and ``store`` has a transaction open."""
+    if not isinstance(store, TransactionalStore) or not store.in_transaction:
+        return
+    owners = [fold.name for fold in folds if _owner(fold) is not None]
+    if owners:
+        raise TimelineError(
+            f"fold(s) {owners} keep their own position, which an outer transaction's "
+            f"rollback cannot undo; run the projector outside any open transaction"
+        )
+
+
 def _validate_batch_size(batch_size: int) -> None:
     if batch_size < 1:
         raise ValueError(f"batch_size must be >= 1, got {batch_size}")
@@ -197,8 +216,14 @@ class Projector:
         independent position, so the two never interfere. That split is the caller's
         to make, and a fold that declared its own schedule could not be dispatched by
         anything anyway.
+
+        Call it outside any transaction open on the store when a fold keeps its own
+        position (:class:`OwnsPosition`): that position, and the state it guards, cannot
+        roll back with the transaction, so the call raises :class:`TimelineError` before
+        folding anything.
         """
         _validate_batch_size(batch_size)
+        _refuse_inside_transaction(self._store, self._folds)
         return {fold.name: self._run(fold, batch_size=batch_size) for fold in self._folds}
 
     def position(self, name: str) -> int:
@@ -250,7 +275,8 @@ class Projector:
         projection under a high position that catch-up would skip past.
 
         A fold that keeps its own position (:class:`OwnsPosition`) has it set to zero on
-        the fold, in the same order.
+        the fold, in the same order, and is refused while a transaction is open on the
+        store, as :meth:`catch_up` explains.
         """
         fold = next((f for f in self._folds if f.name == name), None)
         if fold is None:
@@ -262,6 +288,7 @@ class Projector:
                 f"across instead, or pass discard_generated=True to accept both."
             )
         _validate_batch_size(batch_size)
+        _refuse_inside_transaction(self._store, [fold])
         if reset_in_transaction:
             if not isinstance(self._store, TransactionalStore):
                 raise TypeError(
