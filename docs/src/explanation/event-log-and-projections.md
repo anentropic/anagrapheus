@@ -82,7 +82,7 @@ The library emits events of its own (promoted pins, identity decisions, belief c
 
 A **fold** is a function applied to events one at a time, in log order, to build up some state. The state it builds is a **projection**: a read model derived from the log, such as "which entity does the name *United Kingdom* refer to?" or "what does the EU believe the UK's red line on fisheries is?".
 
-In anagrapheus a fold is any object implementing the [`ProjectionFold`][projection-fold] protocol: a `name`, an `apply(event, txn)` method, and a declared `fold` grade, explained below. A [`Projector`][projector] drives a list of folds over the log.
+In anagrapheus a fold is any object implementing the [`ProjectionFold`][projection-fold] protocol: a `name`, an `apply(event, txn)` method, and a declared `fold` grade, explained below. A [`Projector`][projector] drives a list of folds over the log. `apply` receives each event as a [`StoredEvent`][stored-event] that the projector's reader has already upcast to the latest schema version, so a fold is written against the current shape only. [How to Evolve Event Schemas with Upcasters](../how-to/evolve-event-schemas.md#3-read-through-an-eventreader-everywhere) shows a minimal application fold.
 
 ### Position: how far a projection has read
 

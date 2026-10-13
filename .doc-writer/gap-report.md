@@ -191,4 +191,3 @@ No narrative docs exist yet (docs/src has only a stub index and changelog); API 
 - `handed_out` (function)
 - `render_labelled` (function)
 - `slices_of` (function)
-

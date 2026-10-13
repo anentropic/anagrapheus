@@ -136,6 +136,13 @@ projector = Projector(store, reader, [fold])
 
 The `interpret` mapping is keyed by `(namespace, type)`. The fold understands the library's own belief events without being told, and skips every event that no interpreter claims.
 
+The beliefs themselves live in the doxastica store you pass in, a `MemoryCore` over a backend. The doxastica release this library depends on (0.2) ships two backends:
+
+- `InMemoryBackend`, used throughout this guide. It needs nothing beyond doxastica, and holds beliefs only for the life of the process.
+- `LadybugBackend`, in `doxastica.backends.ladybug`, which stores beliefs in a LadybugDB graph database file. It needs the optional driver (`pip install "doxastica[ladybug]"`), and it is not re-exported from `doxastica` itself. This guide's examples do not use it.
+
+Which backend to use is the application's decision. The entity index is separate from both: `SQLiteBeliefIndexStore` keeps it in the log's own SQLite file, so it persists with the log whichever backend holds the beliefs.
+
 ## 4. Write beliefs as events
 
 Never write to the belief store directly: a belief written there is not in the log and vanishes on the next rebuild. Build library belief events with [`BeliefEvents`][belief-events], which checks each one against the predicates before you append it:
@@ -156,9 +163,7 @@ store.append(
             stance=Stance.believed,
         ),
         types.pending(
-            PositionStated(
-                party="uk", party_id=uk, clause_id=mackerel, position="cut 12%"
-            )
+            PositionStated(party="uk", party_id=uk, clause_id=mackerel, position="cut 12%")
         ),
     ]
 )
@@ -203,9 +208,7 @@ Drop the beliefs and fold them again from the log. The same beliefs come back:
 from anagrapheus.beliefs import FOLD_NAME
 
 fresh = MemoryCore(InMemoryBackend())
-projector.rebuild(
-    FOLD_NAME, reset=lambda: fold.reset(fresh), reset_in_transaction=True
-)
+projector.rebuild(FOLD_NAME, reset=lambda: fold.reset(fresh), reset_in_transaction=True)
 print(divergence(fold.store, "party:uk:held", "party:uk:stated"))
 # [Disagreement(belief_id='v1:fisheries:position(…)', held='cut 5%', reference='cut 12%')]
 ```
@@ -213,7 +216,50 @@ print(divergence(fold.store, "party:uk:held", "party:uk:stated"))
 `reset_in_transaction=True` is correct here because the entity index shares the log's database, so emptying it and zeroing the fold's position commit together.
 
 !!! warning "An in-memory belief store needs a rebuild when the file is reopened"
-    The fold's position is stored in the SQLite file, but a `MemoryCore(InMemoryBackend())` lives in memory. Reopen the file in a new process and the position says the beliefs are folded while the store is empty. When you reopen a database, check `store.read_position(FOLD_NAME)` and, if it is above zero, rebuild as shown above before reading beliefs.
+    The fold's position is stored in the SQLite file, but a `MemoryCore(InMemoryBackend())` lives in memory. Reopen the file in a new process and the position says the beliefs are folded while the store is empty. `catch_up()` then folds nothing, and every read, `divergence` included, silently returns nothing.
+
+A long-running application that keeps its log in a file therefore rebuilds the belief fold every time it opens the file, before it reads any belief. Put that in the one function that opens the database, so no code path can skip it. The function reuses `types`, `predicates` and `stated_position` from `beliefs.py`; the output shown comes from a later process reopening the file that steps 3 to 5 wrote, with `SQLiteEventStore(Path("talks.db"))` in place of `":memory:"`:
+
+```python title="open_beliefs.py"
+from pathlib import Path
+
+from anagrapheus.beliefs import FOLD_NAME
+
+
+def open_beliefs(path: Path) -> tuple[SQLiteEventStore, BeliefFold, Projector]:
+    """Open the run's database and bring its beliefs back, ready to read."""
+    store = SQLiteEventStore(path)
+    reader = EventReader(store, UpcastRegistry(), types)
+    fold = BeliefFold(
+        MemoryCore(InMemoryBackend()),
+        predicates,
+        SQLiteBeliefIndexStore(store.connection),
+        types,
+        interpret={("fisheries", "PositionStated"): stated_position},
+    )
+    projector = Projector(store, reader, [fold])
+    # The in-memory store starts empty on every open, so fold the whole log again.
+    projector.rebuild(
+        FOLD_NAME,
+        reset=lambda: fold.reset(MemoryCore(InMemoryBackend())),
+        reset_in_transaction=True,
+    )
+    return store, fold, projector
+
+
+store, fold, projector = open_beliefs(Path("talks.db"))
+print(store.read_position(FOLD_NAME))
+print(divergence(fold.store, "party:uk:held", "party:uk:stated"))
+```
+
+```text
+3
+[Disagreement(belief_id='v1:fisheries:position(…)', held='cut 5%', reference='cut 12%')]
+```
+
+The rebuild replays the whole log, so its cost grows with the run. After it, call `projector.catch_up()` after each append as usual. Rebuilding on a fresh file, at position 0, is harmless, so the function does not need to check the position first.
+
+With a persistent backend such as `LadybugBackend`, the beliefs survive between processes, and on reopen `catch_up()` folds only what was appended since. The rebuild is then needed only when the belief database and the log no longer match, for example when one file was restored from a backup and the other was not.
 
 ## Troubleshooting
 

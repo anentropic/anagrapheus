@@ -110,11 +110,7 @@ An [`EventReader`][event-reader] applies the upcasts as it reads. Use it for eve
 ```python title="upcast.py (continued)"
 store = SQLiteEventStore(path)
 store.append(
-    [
-        types.pending(
-            OfferMade(party="Norway", stock="mackerel", cut_percent=5, text="5%.")
-        )
-    ]
+    [types.pending(OfferMade(party="Norway", stock="mackerel", cut_percent=5, text="5%."))]
 )
 reader = EventReader(store, upcasts, types)
 for stored, offer in reader.read():
@@ -130,9 +126,54 @@ print([e.envelope.schema_version for e in store.read()])
 
 The reader returns both events at version 2. The store itself still holds the first one at version 1: nothing was rewritten.
 
+Your own folds get the same treatment. A fold is any object with a `name`, a declared `fold` grade and an `apply(event, txn)` method, and the projector hands `apply` each [`StoredEvent`][stored-event] already upcast through its reader. The fold never sees an old shape, so it needs no version checks of its own:
+
+```python title="upcast.py (continued)"
+import sqlite3
+
+from anagrapheus.timeline import Projector, StoredEvent
+
+
+class OffersByStock:
+    """The application's own projection: how many offers were made on each stock."""
+
+    name = "offers_by_stock"
+    fold = "deterministic"
+
+    def __init__(self, connection: sqlite3.Connection) -> None:
+        connection.execute(
+            "CREATE TABLE IF NOT EXISTS offers_by_stock"
+            " (stock TEXT PRIMARY KEY, offers INTEGER NOT NULL)"
+        )
+        self._connection = connection
+
+    def apply(self, event: StoredEvent, txn: object) -> None:
+        if (event.envelope.namespace, event.envelope.type) != ("fisheries", "OfferMade"):
+            return
+        # The payload is already at the latest version: v1 offers arrive with "stock".
+        self._connection.execute(
+            "INSERT INTO offers_by_stock VALUES (?, 1)"
+            " ON CONFLICT (stock) DO UPDATE SET offers = offers + 1",
+            (event.payload["stock"],),
+        )
+
+    def counts(self) -> dict[str, int]:
+        return dict(self._connection.execute("SELECT stock, offers FROM offers_by_stock"))
+
+
+offers = OffersByStock(store.connection)
+print(Projector(store, reader, [offers]).catch_up(), offers.counts())
+```
+
+```text
+{'offers_by_stock': 2} {'mackerel': 2}
+```
+
+The version 1 offer arrived with `stock` filled in by the upcast, so both offers count towards mackerel. `catch_up()` returns each fold's new position. The fold writes to a table in the log's own SQLite file, so the projector commits those writes and the position in one transaction.
+
 Two places take raw events rather than a reader, and need the upcasts passed explicitly:
 
-- **Recordings.** [`read_recording`][read-recording] returns events as stored, so pass `upcasts=` when replaying one: [`ReplayPins.from_events(recording.events, types, upcasts=upcasts)`][replay-from-events].
+- **Recordings.** [`read_recording`][read-recording] returns events as stored, not upcast. Whether your upcasts matter depends on what the replay decodes. By default, [`ReplayPins.from_events`][replay-from-events] decodes only the library's own pin events and skips everything else in the recording, so a change to `OfferMade` cannot break a replay, even of a recording that holds the whole log. Your upcasts matter only when you promote pins into an event type of your own (`promote_as=` on the [`PinLedger`][pin-ledger], read back with `extract=`), and that type's schema changes. Passing `upcasts=upcasts` every time costs nothing and covers both cases: `ReplayPins.from_events(recording.events, types, upcasts=upcasts)`.
 - **Your own code** that calls `store.read()` directly. Switch it to `reader.read()` (decoded) or `reader.read_raw()` (upcast, not decoded).
 
 ## Verify it worked
@@ -140,7 +181,7 @@ Two places take raw events rather than a reader, and need the upcasts passed exp
 Keep a log or a recording made by the previous release as a fixture, and check in a test that it still reads and folds with the current code:
 
 - `list(reader.read())` decodes every event without raising;
-- a projector over a fresh projection catches up to `store.last_seq()`;
+- a projector over a fresh projection, such as `OffersByStock` above, catches up to `store.last_seq()`, and its state matches what the previous release built;
 - a recorded run still replays with `on_miss="strict"`.
 
 ## Troubleshooting
@@ -170,5 +211,7 @@ This is about the database file, not your events. The SQLite file was last opene
 [event-reader]: ../reference/anagrapheus/timeline/upcast.md#anagrapheus.timeline.upcast.EventReader
 [upcast-decorator]: ../reference/anagrapheus/timeline/upcast.md#anagrapheus.timeline.upcast.UpcastRegistry.upcast
 [projector]: ../reference/anagrapheus/timeline/folds.md#anagrapheus.timeline.folds.Projector
+[stored-event]: ../reference/anagrapheus/timeline/envelope.md#anagrapheus.timeline.envelope.StoredEvent
+[pin-ledger]: ../reference/anagrapheus/timeline/pins.md#anagrapheus.timeline.pins.PinLedger
 [read-recording]: ../reference/anagrapheus/timeline/recording.md#anagrapheus.timeline.recording.read_recording
 [replay-from-events]: ../reference/anagrapheus/timeline/replay.md#anagrapheus.timeline.replay.ReplayPins.from_events

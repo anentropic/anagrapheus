@@ -86,12 +86,9 @@ class RoundSummary:
             if e.envelope.type == "OfferMade"
         ]
         keys: list[str] = []
-        model = PinnedModel(
-            FunctionModel(summariser_model), self._resolver, on_key=keys.append
-        )
+        model = PinnedModel(FunctionModel(summariser_model), self._resolver, on_key=keys.append)
         result = Agent(model).run_sync(
-            "Summarise this round of a fisheries negotiation in one sentence:\n"
-            + "\n".join(lines)
+            "Summarise this round of a fisheries negotiation in one sentence:\n" + "\n".join(lines)
         )
         return Consolidation(prose=result.output, pins=tuple(keys))
 ```
@@ -175,7 +172,7 @@ There are two read surfaces, at two grades:
 
 [`substring_retriever`][substring-retriever] is a deliberately naive case-insensitive search, most recent first. For real retrieval, write your own [`Retriever`][retriever]: any callable taking `(sections, query)` and returning sections.
 
-When the summarised past goes into a prompt, label it as generated. [How to Assemble Prompts from Granted Slices](assemble-prompts.md) shows how [`ChronicleSlice`][chronicle-slice] enforces this.
+`Brief` and `Brief.tail` are for reading the split yourself: inspecting, logging, testing. They are not slices, so nothing they return can go into an assembled prompt. A prompt reads the same split through two slices in one grant: a [`ChronicleSlice`][chronicle-slice] for the sections, labelled as generated, and a [`LogSlice`][log-slice] read from the end of the last section. [Put chronicle prose in a prompt](assemble-prompts.md#put-chronicle-prose-in-a-prompt) continues this script with that grant, budgeted and sent through a pinned model.
 
 ## Verify it worked
 
@@ -270,7 +267,7 @@ through = await asyncio.to_thread(consolidate_in_this_thread, Path("talks.db"))
 
 ## Related
 
-- [How to Assemble Prompts from Granted Slices](assemble-prompts.md): putting sections into a prompt, labelled as generated.
+- [How to Assemble Prompts from Granted Slices](assemble-prompts.md#put-chronicle-prose-in-a-prompt): putting sections and recent events into one prompt, with sections labelled as generated.
 - [How to Pin Model and Tool Calls](pin-model-and-tool-calls.md): the pinned model the summariser draws through.
 - [The Chronicle](../explanation/chronicle.md): why sections cite their range, and why the chronicle is carried rather than rebuilt.
 
@@ -287,6 +284,7 @@ through = await asyncio.to_thread(consolidate_in_this_thread, Path("talks.db"))
 [pinned-model]: ../reference/anagrapheus/provider/model.md#anagrapheus.provider.model.PinnedModel
 [consolidated-through]: ../reference/anagrapheus/chronicle/reading.md#anagrapheus.chronicle.reading.Anchors.consolidated_through
 [chronicle-slice]: ../reference/anagrapheus/assembly/slices.md#anagrapheus.assembly.slices.ChronicleSlice
+[log-slice]: ../reference/anagrapheus/assembly/slices.md#anagrapheus.assembly.slices.LogSlice
 [projector-rebuild]: ../reference/anagrapheus/timeline/folds.md#anagrapheus.timeline.folds.Projector.rebuild
 [replay-pins]: ../reference/anagrapheus/timeline/replay.md#anagrapheus.timeline.replay.ReplayPins
 [brief-tail]: ../reference/anagrapheus/chronicle/reading.md#anagrapheus.chronicle.reading.Brief.tail

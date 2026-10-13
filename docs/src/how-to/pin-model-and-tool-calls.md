@@ -50,9 +50,7 @@ draws = {"model": 0, "tool": 0}
 def negotiator(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
     draws["model"] += 1
     if len(messages) == 1:  # first step: look the quota up
-        return ModelResponse(
-            parts=[ToolCallPart("current_quota", {"stock": "mackerel"})]
-        )
+        return ModelResponse(parts=[ToolCallPart("current_quota", {"stock": "mackerel"})])
     return ModelResponse(parts=[TextPart("Propose 12% below the current quota.")])
 
 
@@ -148,9 +146,7 @@ The **call policy** reduces a model request to the material its key is hashed fr
             parameters: ModelRequestParameters,
             settings: ModelSettings | None,
         ) -> Mapping[str, Json]:
-            material = dict(
-                self._default.material(messages, model_id, parameters, settings)
-            )
+            material = dict(self._default.material(messages, model_id, parameters, settings))
             material["model"] = self._route_name
             return material
 
@@ -273,9 +269,7 @@ from anagrapheus.timeline import (
 opened = 0
 
 
-async def negotiator(
-    messages: list[ModelMessage], info: AgentInfo
-) -> AsyncIterator[str]:
+async def negotiator(messages: list[ModelMessage], info: AgentInfo) -> AsyncIterator[str]:
     global opened
     opened += 1
     for chunk in ["We hold ", "at a ", "5% cut."]:

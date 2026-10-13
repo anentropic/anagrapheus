@@ -109,9 +109,7 @@ uk, mackerel = uuid.uuid7(), uuid.uuid7()
 beliefs = BeliefEvents(types, predicates)
 store.append(
     [
-        beliefs.revise(
-            "party:norway:held", "position", (uk, mackerel), "UK will settle at 8%"
-        ),
+        beliefs.revise("party:norway:held", "position", (uk, mackerel), "UK will settle at 8%"),
         beliefs.revise("party:uk:held", "position", (uk, mackerel), "cut 5%"),
         types.pending(OfferMade(party="UK", text="A 12% cut to the mackerel quota.")),
     ]
@@ -196,9 +194,7 @@ A [`Part`][part]'s content stays structured: a string here, but any JSON value i
 
 ```python title="assemble_prompts.py (continued)"
 budget = Budget(total=120, count=lambda part: len(str(part.content)))
-context = assemble(
-    "norway", norway_assembler, norway_grant(store.last_seq()), budget=budget
-)
+context = assemble("norway", norway_assembler, norway_grant(store.last_seq()), budget=budget)
 prompt = render_labelled(context)
 print(prompt)
 print("shed:", [p.slot for p in context.shed])
@@ -249,29 +245,104 @@ assert all(source.get("scope") != "party:uk:held" for source in read)
 
 ## Put chronicle prose in a prompt
 
-A `ChronicleSlice` returns model-written sections. Any part built from one must be `Register.generated` and must cite the section, so that summarised prose can never pass as canon:
+A long run cannot put its whole log into every prompt. The chronicle exists for this: older rounds are read as summarised sections (depth), and only the events since the last section are read verbatim (recency). In a prompt, both halves come through slices in one grant:
 
-```python
-from anagrapheus.assembly import ChronicleSlice, SectionRef
+- a [`ChronicleSlice`][chronicle-slice], built as `ChronicleSlice(chronicle, upto_seq=...)` over the chronicle store, returns the sections that end at or before its position;
+- a [`LogSlice`][log-slice] returns the recent events, read with `events(since_seq=...)` from the end of the last section, so nothing the chronicle already covers is repeated.
+
+Any part built from a section must be `Register.generated` and must cite the section, so that summarised prose can never pass as canon.
+
+This example continues `chronicle.py` from [How to Consolidate History into Chronicle Sections](chronicle-sections.md), after step 3: round 1 (events 1 to 3) is consolidated as section `1-3`, and the UK's offer at seq 4 is still recent. Norway's prompt reads both:
+
+```python title="chronicle.py (continued)"
+from dataclasses import dataclass
+
+from anagrapheus.assembly import (
+    Budget,
+    ChronicleSlice,
+    EventRef,
+    Given,
+    LogSlice,
+    Part,
+    Register,
+    SectionRef,
+    assemble,
+    render_labelled,
+)
 
 
 @dataclass(frozen=True)
-class HistoryGrant:
+class NegotiatorGrant:
     past: ChronicleSlice
+    room: LogSlice
+    ask: Given[str]
 
 
-def history(grant: HistoryGrant) -> list[Part]:
-    parts = []
+def negotiator_grant(upto_seq: int) -> NegotiatorGrant:
+    return NegotiatorGrant(
+        past=ChronicleSlice(chronicle, upto_seq=upto_seq),
+        room=LogSlice(
+            reader,
+            upto_seq=upto_seq,
+            admit=lambda env: (env.namespace, env.type) == ("fisheries", "OfferMade"),
+        ),
+        ask=Given("ask", "Respond to the latest offer in one sentence."),
+    )
+
+
+def negotiator(grant: NegotiatorGrant) -> list[Part]:
+    parts = [Part("ask", Register.binding, grant.ask.value, sources=(grant.ask.ref,))]
+    # Depth: the consolidated past, as generated prose citing its section.
+    through = 0
     for section in grant.past.sections():
         anchor = section.anchor
         source = SectionRef(anchor.section_id, anchor.from_seq, anchor.to_seq)
+        parts.append(Part("past", Register.generated, section.prose, sources=(source,)))
+        through = max(through, anchor.to_seq)
+    # Recency: only the offers after the last section, verbatim from the log.
+    for stored, offer in grant.room.events(since_seq=through):
         parts.append(
-            Part("past", Register.generated, section.prose, sources=(source,))
+            Part(
+                "offer",
+                Register.considered,
+                f"{offer.party}: {offer.text}",
+                sources=(EventRef(stored.seq, stored.envelope.event_id),),
+            )
         )
     return parts
+
+
+budget = Budget(total=200, count=lambda part: len(str(part.content)))
+context = assemble("norway", negotiator, negotiator_grant(store.last_seq()), budget=budget)
+prompt = render_labelled(context)
+print(prompt)
+print("read:", [type(source).__name__ for source in context.read])
+
+
+def norway_model(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+    return ModelResponse(parts=[TextPart("Norway can accept 6%, no more.")])
+
+
+print(Agent(PinnedModel(FunctionModel(norway_model), ledger)).run_sync(prompt).output)
+ledger.commit()
 ```
 
-`render_labelled` puts generated parts under `SUMMARISED (advisory prose, not canon):`.
+```text
+MUST HOLD:
+Respond to the latest offer in one sentence.
+
+CONSIDER:
+UK: We could move to 10%.
+
+SUMMARISED (advisory prose, not canon):
+The UK opened at 12%; Norway held at 5%.
+read: ['SectionRef', 'EventRef', 'GivenRef']
+Norway can accept 6%, no more.
+```
+
+`context.read` shows one event read from the log: the two round 1 offers reached the prompt only as the section that summarises them. The split point comes from the sections the slice returned, not from a separate query, so the two halves are always read at the same position. If consolidation falls behind, the last section ends earlier and more of the log is read verbatim; nothing is lost or repeated.
+
+`render_labelled` puts generated parts under `SUMMARISED (advisory prose, not canon):`. Under the default shed order, the budget sheds `considered` parts before `generated` ones; pass `order=` to [`Budget`][budget] if old history should go first.
 
 ## Troubleshooting
 

@@ -97,17 +97,13 @@ Put the identity fold first in the list, so identity decisions are folded before
 ```python title="identity.py (continued)"
 # Two names arrive from two transcripts, so they are established separately.
 uk, uk_event = establish(types, "UK delegation", provenance="transcript:day-1")
-britain, britain_event = establish(
-    types, "British delegation", provenance="transcript:day-2"
-)
+britain, britain_event = establish(types, "British delegation", provenance="transcript:day-2")
 mackerel, mackerel_event = establish(types, "mackerel quota", provenance="agenda")
 store.append([uk_event, britain_event, mackerel_event])
 store.append(
     [
         events.revise("party:eu:held", "position", (uk, mackerel), "will accept 8%"),
-        events.revise(
-            "party:norway:held", "position", (britain, mackerel), "wants 12%"
-        ),
+        events.revise("party:norway:held", "position", (britain, mackerel), "wants 12%"),
     ]
 )
 projector.catch_up()
@@ -232,7 +228,79 @@ party:norway:held True wants 12%
 
 ## After a split, choose the successor
 
-A [`split`][split] decision carves new entities out of one, and moves the names you assign to each. A belief about the original then has one candidate successor per new entity, and `plan.sole()` raises `ValueError` rather than pick one. Which product a belief belongs to depends on what the belief says, so the application must choose: inspect `plan.candidates` and the belief's value, re-key to the one you pick, and leave the belief alone, reporting it, if you cannot decide.
+A [`split`][split] decision carves new entities out of one, and moves the names you assign to each. The original entity survives and keeps every name you did not move. A belief about the original then has one candidate successor per new entity, and `plan.sole()` raises `ValueError` rather than pick one. Which product a belief belongs to depends on what the belief says, so the application must choose.
+
+The library does not mint the products' ids: `split` takes ids you supply. Mint each one with [`mint_entity_id`][mint-entity-id], and pass the run's resolver and stable `material` for the same reason as when establishing: a replay then mints the same products. The example below splits the "EU delegation" into the European Commission and the Council, and chooses each belief's successor by what its value mentions:
+
+```python title="identity.py (continued)"
+from anagrapheus.identity import mint_entity_id, split
+from anagrapheus.timeline import PinLedger
+
+eu, eu_event = establish(types, "EU delegation", provenance="transcript:day-1")
+store.append([eu_event])
+store.append(
+    [
+        events.revise("party:uk:held", "position", (eu, mackerel), "the Commission will table 9%"),
+        events.revise("party:norway:held", "position", (eu, mackerel), "the Council wants 5%"),
+    ]
+)
+projector.catch_up()
+before_split = store.last_seq()
+
+# The application mints each product's id, pinned so a replay mints the same ones.
+ledger = PinLedger(store, types)
+commission = mint_entity_id(
+    {"split_of": str(eu), "product": "European Commission"}, resolver=ledger
+)
+council = mint_entity_id({"split_of": str(eu), "product": "Council"}, resolver=ledger)
+store.append([split(types, eu, [(commission, ["European Commission"]), (council, ["Council"])])])
+ledger.commit()
+projector.catch_up()
+
+plans = plan_rekeys(registry.rekeys_since(before_split), BeliefIndex(index_store), predicates)
+products = {commission: "Commission", council: "Council"}  # the application's own map
+scopes = ["party:uk:held", "party:norway:held"]
+for plan in plans:
+    old = predicates.parse(plan.belief_id)
+    for scope in scopes:
+        for state in beliefs.store.query_scope(scope, BeliefFilter()):
+            if state.belief_id != plan.belief_id:
+                continue
+            # The application's judgment: which product does this belief describe?
+            chosen = [
+                candidate
+                for candidate in plan.candidates
+                if products[predicates.parse(candidate).entity_ids[0]] in state.value
+            ]
+            if len(chosen) != 1:
+                print("left on the original:", scope, state.value)
+                continue
+            new = predicates.parse(chosen[0])
+            store.append(
+                [
+                    events.revise(
+                        scope, new.name, new.entity_ids, state.value, stance=state.stance
+                    ),
+                    events.contract(scope, old.name, old.entity_ids),
+                ]
+            )
+projector.catch_up()
+
+for scope in scopes:
+    for state in beliefs.store.query_scope(scope, BeliefFilter()):
+        holder = predicates.parse(state.belief_id).entity_ids[0]
+        if holder in products:
+            print(scope, products[holder], state.value)
+print(registry.resolve("Council").sole() == council)
+```
+
+```text
+party:uk:held Commission the Commission will table 9%
+party:norway:held Council the Council wants 5%
+True
+```
+
+The chooser here, matching a word in the belief's value, stands in for whatever judgment your application can make. When it cannot decide, the loop leaves the belief keyed on the original, which still exists, and reports it. That is a safer default than guessing.
 
 ## Troubleshooting
 
@@ -267,6 +335,7 @@ A belief id in the index cannot be re-minted by this registry: its predicate is 
 [establish]: ../reference/anagrapheus/identity/decisions.md#anagrapheus.identity.decisions.establish
 [merge]: ../reference/anagrapheus/identity/decisions.md#anagrapheus.identity.decisions.merge
 [split]: ../reference/anagrapheus/identity/decisions.md#anagrapheus.identity.decisions.split
+[mint-entity-id]: ../reference/anagrapheus/identity/decisions.md#anagrapheus.identity.decisions.mint_entity_id
 [plan-rekeys]: ../reference/anagrapheus/beliefs/rekey.md#anagrapheus.beliefs.rekey.plan_rekeys
 [resolution-sole]: ../reference/anagrapheus/identity/registry.md#anagrapheus.identity.registry.Resolution.sole
 [ladder]: ../reference/anagrapheus/identity/ladder.md#anagrapheus.identity.ladder.Ladder

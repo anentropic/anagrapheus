@@ -185,6 +185,8 @@ Fresh draws made in record mode are held by the `ReplayPins` object for reuse wi
 
 The registry is missing some library events, here the identity layer's. Register them all with `anagrapheus.register_builtin_events(types)`. The function of the same name in `anagrapheus.timeline` covers only the pin events.
 
+The same gap shows up with a different message depending on when it is hit. Reading a log that already holds the event gives the message above. Creating one gives `UnknownEventType: model not registered: Established`, for example when `establish(...)` builds its event with a registry that lacks the identity events. The fix is the same for both.
+
 ### `PinMiss: replay diverged at key 'p1:model_call:…' (model_call) after 0 hit(s)`
 
 The replaying code asked the model something the recording has no answer for. Typical causes:
