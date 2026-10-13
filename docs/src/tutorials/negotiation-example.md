@@ -70,7 +70,7 @@ A full negotiation ran and then replayed. Here is what each line reports.
 
 - **`lineup`** names the model behind each *role*. There are three roles: `propose` makes an offer, `update` reads what happened and concludes one thing about the other side, and `summarize` writes the chronicle. Each party has its own `propose` and `update` slots.
 - **`tabled`** and **`seeded`** set the scene. The clause becomes an entity, and each party is given what it privately wants: the EU wants a settlement, and the UK is willing to concede but will not say so.
-- **`round N / eu`** and **`round N / uk`** are the two pinned calls each party makes per round. The offer comes from `propose`; the `concluded red_line(...)` part is the belief that `update` wrote about the other side's bottom line.
+- **`round N / eu`** and **`round N / uk`** are each party's turn in a round. A turn makes three pinned model requests: two for `propose`, which makes the offer, and one for `update`, which wrote the `concluded red_line(...)` belief about the other side's bottom line.
 - **`round N / leak`** is a remark one party let slip, and what each party *believes* about who heard it. In round 1 the UK believes nobody heard; the EU believes both sides did. Those beliefs can be wrong, and the UK's is.
 - **`round N / depth 2`** compares two levels of belief: what the EU has concluded about the UK, and what the UK imagines the EU has concluded. After round 1 they differ, because the UK thinks its slip went unheard.
 - **`eu's model of uk`** is what the EU believes the UK wants, rebuilt from the EU's own beliefs at the moment it is asked for and then thrown away. A belief about another party's beliefs is never stored.
