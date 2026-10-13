@@ -184,7 +184,7 @@ class ChronicleFold:
         # What `prepare` drew, waiting for `apply` to write it, keyed by boundary seq.
         # `apply` consumes its own entry, so a batch that fails part-way leaves the
         # entries it never reached behind; a retry draws those units again and
-        # overwrites them.
+        # overwrites them, or drops them if the unit was covered in the meantime.
         self._prepared: dict[int, tuple[int, Consolidation]] = {}
 
     @property
@@ -271,7 +271,9 @@ class ChronicleFold:
         if event.seq < start:
             # Already covered -- the fold contract allows the last batch to be
             # re-applied after a crash, and re-consolidating would spend a model call
-            # to produce a second valid answer for a range that already has one.
+            # to produce a second valid answer for a range that already has one. A draw a
+            # failed batch left here is stale too, and `apply` must not write it.
+            self._prepared.pop(event.seq, None)
             return None
         events = list(self._reader.read_raw(since_seq=start - 1, limit=event.seq - start + 1))
         return (start, events) if events else None

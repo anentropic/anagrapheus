@@ -7,10 +7,10 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from anagrapheus.chronicle.sections import Anchor, Section
+
 if TYPE_CHECKING:
     from collections.abc import Callable
-
-    from anagrapheus.chronicle.sections import Section
 
     from .conftest import Rig
 
@@ -68,3 +68,36 @@ def test_retry_after_apply_failure_keeps_every_unit(
     # Nothing the failed batch drew was written, so every unit is drawn again.
     assert rig.summarizer.calls == [(1, 2), (3, 4), (5, 6)] * 2
     assert all(s.prose.startswith(("[g4]", "[g5]", "[g6]")) for s in rig.chronicle.sections())
+
+
+@pytest.mark.parametrize("mode", ["sync", "async"])
+@pytest.mark.parametrize("failing_boundary", [2, 4])
+def test_retry_drops_a_leftover_draw_for_a_unit_covered_meanwhile(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch, mode: str, failing_boundary: int
+) -> None:
+    rig.append(
+        rig.step("a"),
+        rig.close("one"),
+        rig.step("b"),
+        rig.close("two"),
+        rig.step("c"),
+        rig.close("three"),
+    )
+    fail_once_at(rig, monkeypatch, failing_boundary)
+    run = catch_up(rig, mode)
+
+    with pytest.raises(ApplyFailed):
+        run()  # leaves the draw for 5-6 behind, never applied
+    assert rig.summarizer.calls == [(1, 2), (3, 4), (5, 6)]
+
+    # Before the retry, another writer covers the whole range as one section.
+    rig.chronicle.append_new(
+        Section(Anchor("1-6", 1, 6, 6, None), "written elsewhere: 1-6"),
+    )
+
+    run()
+
+    anchors = [(s.anchor.from_seq, s.anchor.to_seq) for s in rig.chronicle.sections()]
+    assert anchors == [(1, 6)]
+    # Every unit was already covered, so the retry drew nothing and wrote nothing.
+    assert rig.summarizer.calls == [(1, 2), (3, 4), (5, 6)]

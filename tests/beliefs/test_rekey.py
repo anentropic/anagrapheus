@@ -42,7 +42,7 @@ if TYPE_CHECKING:
 
 def test_a_merge_computes_one_successor_per_affected_belief(rig: Rig):
     """
-    §5d's payoff, executed rather than promised.
+    A merge's re-keys are computed outright, not left for the caller to work out.
 
     The absorbed entity yielded to a single survivor, so every belief keyed on it has
     exactly one successor — computed from the id's own components, with nothing
@@ -484,6 +484,41 @@ def test_unmerges_that_nest_in_one_batch_offer_every_entity_given_back(rig: Rig)
     assert [(p.seq, p.from_entity, p.candidates) for p in plans] == [
         (10, c, tuple(rig.predicates.belief_id("location", e) for e in (c, b, a)))
     ]
+
+
+def test_given_back_and_merged_again_many_times_in_one_batch_plans_quickly(rig: Rig):
+    """
+    Thirty entities in C before the batch; the batch gives each back, then merges it again.
+
+    Each unmerge's two sides meet again on C, where the next unmerge splits them once
+    more. Walked afresh at every meeting, that is twice the walking per unmerge, which
+    at this depth would not finish; walked once per plan, it is quick. Every belief on
+    C is offered C alone, since each id given back is absorbed again.
+    """
+    identity, projector = _wired(rig)
+    c, ec = establish(rig.types, "c", provenance="x")
+    given = [establish(rig.types, f"e{i}", provenance="x") for i in range(30)]
+    rig.store.append([ec, *(event for _, event in given), rig.asserted("location", c)])
+    rig.store.append([merge(rig.types, kept=c, absorbed=entity) for entity, _ in given])
+    projector.catch_up()
+    before = rig.store.last_seq()
+
+    rig.store.append(
+        [
+            event
+            for entity, _ in given
+            for event in (
+                rig.types.pending(Unmerged(kept=c, absorbed=entity)),
+                merge(rig.types, kept=c, absorbed=entity),
+            )
+        ]
+    )
+    projector.catch_up()
+
+    plans = plan_rekeys(identity.rekeys_since(before), rig.index, rig.predicates)
+    assert [(p.kind, p.from_entity, p.sole()) for p in plans] == [
+        ("unmerge", c, rig.predicates.belief_id("location", c))
+    ] * len(given)
 
 
 def test_a_second_merge_of_an_absorbed_entity_plans_nothing(rig: Rig):
