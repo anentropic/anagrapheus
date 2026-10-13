@@ -320,16 +320,17 @@ def test_a_provider_service_tier_does_not_change_the_key(name: str, value: str):
         ("openrouter_usage", {"include": True}),
     ],
 )
-def test_a_setting_that_only_reports_on_the_draw_does_not_change_the_key(name: str, value: Json):
+def test_a_setting_that_reports_on_the_draw_still_changes_the_key(name: str, value: Json):
     """
-    Token probabilities and usage accounting describe a draw without changing it.
+    Token probabilities and usage accounting stay keyed.
 
-    The same prompt sampled with them asked for is the same draw.
+    They do not change what is sampled, but they change the response: a pin recorded
+    without them would answer a call that asked for them with nothing to report.
     """
     messages = [ModelRequest(parts=[UserPromptPart(content="hi")])]
     reported = cast("ModelSettings", {name: value, "temperature": 0.2})
 
-    assert material(messages, "m", PARAMS, reported) == material(
+    assert material(messages, "m", PARAMS, reported) != material(
         messages, "m", PARAMS, {"temperature": 0.2}
     )
 

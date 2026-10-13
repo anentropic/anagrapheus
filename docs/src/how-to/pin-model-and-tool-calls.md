@@ -102,7 +102,7 @@ The **call policy** reduces a model request to the material its key is hashed fr
     - the request parameters: tool definitions (sorted by name), output schema and instructions;
     - settings that change the draw, such as `temperature`, `max_tokens`, or reasoning settings sent in `extra_body`.
 
-    It drops what differs between two runs of the same call: timestamps, part and tool-call ids, provider names and details, metadata, delivery settings (`timeout`, `extra_headers`, `service_tier` and its provider-prefixed forms such as `openai_service_tier`, prompt-cache options), settings that only report on the draw (the `logprobs` and `top_logprobs` settings, `openai_continuous_usage_stats`, `openrouter_usage`), and session or user ids: `openai_user`, the `user_id` in `anthropic_metadata`, and inside `extra_body` the `session_id`, `user`, `safety_identifier` and `prompt_cache_key` keys and a `metadata` object's `user_id`. So you can send OpenRouter a per-game `session_id` without every new game missing its pins.
+    It drops what differs between two runs of the same call: timestamps, part and tool-call ids, provider names and details, metadata, delivery settings (`timeout`, `extra_headers`, `service_tier` and its provider-prefixed forms such as `openai_service_tier`, prompt-cache options) and session or user ids: `openai_user`, the `user_id` in `anthropic_metadata`, and inside `extra_body` the `session_id`, `user`, `safety_identifier` and `prompt_cache_key` keys and a `metadata` object's `user_id`. So you can send OpenRouter a per-game `session_id` without every new game missing its pins.
 
     ```python
     PinnedModel(FunctionModel(negotiator), ledger)  # SemanticCallPolicy()

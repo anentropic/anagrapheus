@@ -81,24 +81,6 @@ _DELIVERY = frozenset({"cache"})
 #: :func:`_delivers` as well, so a new one does not need adding here.
 _DELIVERY_SETTINGS = frozenset({"timeout", "extra_headers", "service_tier", "cache"})
 
-#: Settings that ask for more to be reported about the draw, not for a different one.
-#: The ``logprobs`` and ``top_logprobs`` settings return token probabilities alongside
-#: what was sampled; ``openai_continuous_usage_stats`` and ``openrouter_usage`` add usage
-#: accounting to the response. ``openai_store`` stays keyed: on the Responses API, turning
-#: it off leaves earlier image-generation calls out of the history the model is sent.
-_REPORTING_SETTINGS = frozenset(
-    {
-        "openai_logprobs",
-        "openai_top_logprobs",
-        "google_logprobs",
-        "google_top_logprobs",
-        "xai_logprobs",
-        "xai_top_logprobs",
-        "openai_continuous_usage_stats",
-        "openrouter_usage",
-    }
-)
-
 #: Settings that name the end user or session behind a call. ``openai_user`` is OpenAI's
 #: end-user id, sent on the OpenAI and OpenRouter routes alike.
 _IDENTITY_SETTINGS = frozenset({"openai_user"})
@@ -273,12 +255,13 @@ def _delivers(setting: str) -> bool:
     Whether a setting changes only how the call travels — including any cache one.
 
     A service tier counts, whichever provider prefixes it, and so does a setting that
-    only names the user or session behind the call or asks for more to be reported.
+    only names the user or session behind the call. A setting that asks for more to be
+    reported, such as token probabilities or usage accounting, does not: the pinned
+    response would lack what a later call asked for.
     """
     return (
         setting in _DELIVERY_SETTINGS
         or setting in _IDENTITY_SETTINGS
-        or setting in _REPORTING_SETTINGS
         or setting.endswith("service_tier")
         or "cache" in setting.split("_")
     )
