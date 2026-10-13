@@ -9,8 +9,8 @@ authors = [
 requires-python = ">=3.14"
 dependencies = [
     "anyio>=4.0",
-    "doxastica>=0.2,<0.3",
-    "pydantic>=2.11,<3",
+    "doxastica>=0.2",
+    "pydantic>=2.11",
     "pydantic-ai-slim>=2",
 ]
 

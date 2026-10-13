@@ -44,8 +44,8 @@ docs = [
 [package.metadata]
 requires-dist = [
     { name = "anyio", specifier = ">=4.0" },
-    { name = "doxastica", specifier = ">=0.2,<0.3" },
-    { name = "pydantic", specifier = ">=2.11,<3" },
+    { name = "doxastica", specifier = ">=0.2" },
+    { name = "pydantic", specifier = ">=2.11" },
     { name = "pydantic-ai-slim", specifier = ">=2" },
     { name = "pydantic-ai-slim", extras = ["anthropic"], marker = "extra == 'anthropic'", specifier = ">=2" },
     { name = "pydantic-ai-slim", extras = ["openai"], marker = "extra == 'openai'", specifier = ">=2" },
