@@ -5,7 +5,7 @@ description: What anagrapheus is, who it is for, how to install it, and a first 
 
 # anagrapheus
 
-anagrapheus gives a long-running LLM agent one authoritative event log, and builds everything else (beliefs, entity identity, a consolidated history, assembled prompts) as state derived from that log. Every model call and tool call is recorded in the log, so a past run can be replayed exactly, offline, without reaching the model again.
+anagrapheus gives a long-running LLM agent one authoritative event log, and builds everything else (beliefs, entity identity, a consolidated history, assembled prompts) as state derived from that log. Every model call made through `PinnedModel`, and every tool wrapped with `pinned_tool`, is recorded in the log, so a past run can be replayed exactly, offline, without reaching the model again.
 
 It is for Python developers who build agents or simulations that run for many turns, such as negotiations, games with non-player characters, or interactive fiction, where several agents hold private beliefs about each other and where a run is too expensive or too random to repeat by re-running it.
 
