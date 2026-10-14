@@ -45,7 +45,7 @@ The design pays off in three places.
 
 **Replay.** Every nondeterministic effect (a model response, a tool result, a freshly minted id) is recorded in the log under a key. Replaying a run means answering those effects from the log instead of performing them again, so a recorded run can be reproduced offline, in a test, with no model reached at all. If the code now asks something different, the replay fails at the first changed call instead of quietly drawing a new answer.
 
-**Rebuild.** Because projections are disposable, changing how a projection is stored, or fixing a bug in a fold, means dropping the projection and replaying the log. There is no migration of derived data, because derived data is never the source of truth.
+**Rebuild.** Because projections are disposable, fixing a bug in a fold, or moving a projection to a new storage backend, means dropping the projection and replaying the log. Derived data is never the source of truth, so a projection can always be rebuilt from the log. Its tables are still migrated in place when the library's schema changes, so an upgrade does not force you to re-fold a long log.
 
 **Audit.** Every belief records the event it was folded from, and every identity decision is an event with a position in the log, so "why does this agent believe that?" is a question the log can answer. An assembled prompt is not written to the log. Its context lists the events, beliefs and sections it was built from, and assembling again from the same grant at the same log position rebuilds it, so "what was this call shown?" can be answered too.
 

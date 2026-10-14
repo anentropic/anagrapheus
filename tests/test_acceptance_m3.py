@@ -2,12 +2,12 @@
 Milestone-3 acceptance: the belief layer, end to end, one story.
 
 An agent believes things about two contacts, learns they are one person, and finds out
-exactly which beliefs that invalidated — the seam doc 00 §5d promises and §6 pays for.
-Then a second holder disagrees with it, which is §6c.
+exactly which beliefs that invalidated — the re-key seam between identity and belief.
+Then a second holder disagrees with it, which is the divergence query.
 
 Beliefs are folded into a real doxastica core, not a fake: the point of the milestone
-is the integration, and a fake would only prove we agree with ourselves. Since note 03
-§9 they are folded from the log, so the story ends by losing them and getting them back.
+is the integration, and a fake would only prove we agree with ourselves. They are
+folded from the log, so the story ends by losing them and getting them back.
 """
 
 from __future__ import annotations
@@ -205,7 +205,7 @@ def test_milestone_3_acceptance(tmp_path: Path):
 
 def test_the_relational_trap_is_unrepresentable(tmp_path: Path):
     """
-    The failure doc 00 §6a warns about, from both ends.
+    Keying a relation on one side only, ruled out from both ends.
 
     It cannot be minted at the wrong arity, and it cannot be written with the third
     party hidden in the value — so revising a claim about bob can never silently

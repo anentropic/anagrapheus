@@ -1,7 +1,7 @@
 """
 The agent reads a *derived* model of its counterpart, and its offer moves with it.
 
-Since M8 there is no `model-of` scope to read. R28 forbids storing one, so the third
+Since M8 there is no `model-of` scope to read. Nested belief is never stored, so the third
 line of the brief is reconstructed from access-beliefs at assembly time and discarded
 with the brief. What the agent does is unchanged; where the belief comes from is not.
 """
@@ -79,7 +79,7 @@ def test_the_brief_carries_all_three_sources(table: Table):
     the behavioural test would pass for the wrong reason.
 
     Two lines come from stored scopes and one is derived per call. The brief cannot
-    tell them apart, which is the point — R28 changes where the belief lives, not what
+    tell them apart, which is the point — deriving it changes where the belief lives, not what
     an agent can be told.
     """
     _set_up(table, believed="concede")
@@ -262,8 +262,8 @@ def test_the_domain_vocabulary_is_the_one_the_registry_holds():
     """
     The bottom line the model is shown and the words the belief layer accepts are one set.
 
-    Two copies would drift, and the drift would be silent in exactly the way note 06
-    §13 recorded: a value the schema allowed and nothing compared.
+    Two copies would drift, and the drift would be silent in exactly the way it once was
+    in this demo: a value the schema allowed and nothing compared.
     """
     registry = domain.predicates()
     shown = Reading.model_json_schema()["$defs"]["BottomLine"]["enum"]

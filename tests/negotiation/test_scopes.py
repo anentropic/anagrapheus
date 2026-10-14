@@ -1,7 +1,7 @@
 """
 Several holders, believing different things about each other.
 
-Doc 00 §6c calls the divergence query *"the whole multi-agent-disagreement case"*.
+The divergence query exists for *"the whole multi-agent-disagreement case"*.
 Until this example the library's own suite only ever ran it as ``"agent"`` against
 ``"world"`` — one believer measured against ground truth, which is the degenerate case
 of a design built for several. These are the tests that were missing.
@@ -24,9 +24,10 @@ def _positions(table: Table, clause: str = "fisheries") -> tuple[uuid.UUID, uuid
     One clause, and the UK's three positions on it: wanted, said, and assumed.
 
     The first two are stored, first-order and the UK's own. **The third is not stored
-    at all** — since M8 it is derived from what the EU believes the UK let slip, per
-    R28. So the setup that used to be a third `table.believe` is now an event plus an
-    access-belief, which is the whole difference the ruling makes to a consumer.
+    at all** — since M8 it is derived from what the EU believes the UK let slip, because
+    nested belief is never stored. So the setup that used to be a third `table.believe`
+    is now an event plus an access-belief, which is the whole difference that makes to a
+    consumer.
     """
     fisheries = table.table_clause(clause)
     uk = table.seats["uk"]
@@ -54,7 +55,7 @@ def test_three_questions_from_two_stored_scopes_and_one_derived_model(table: Tab
     A design with one believer cannot state any of the three.
 
     Two of the three sides are stored scopes; the third is reconstructed per call and
-    discarded (R28). That the queries read the same afterwards is the point — the
+    discarded. That the queries read the same afterwards is the point — the
     ruling changes where the model lives, not what can be asked of it.
     """
     _positions(table)
@@ -89,8 +90,8 @@ def test_a_belief_id_is_shared_across_scopes_deliberately(table: Table):
     """
     One proposition, one belief id, however many holders.
 
-    §6a: revision history keys on the belief id alone and is cross-scope, and *"for
-    divergence queries that collision is the point."*
+    Revision history keys on the belief id alone and is cross-scope, and for divergence
+    queries that collision is the point.
 
     Worth asserting because it looks like a bug from the outside: three holders, one
     belief id. If the ids differed per scope, every divergence query would return

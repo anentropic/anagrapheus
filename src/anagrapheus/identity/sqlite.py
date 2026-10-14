@@ -13,6 +13,7 @@ import sqlite3
 from typing import TYPE_CHECKING
 from uuid import UUID
 
+from anagrapheus.identity.errors import OutOfOrderDecision
 from anagrapheus.identity.events import normalize_surface_form
 from anagrapheus.identity.ladder import UNGRADED
 from anagrapheus.identity.migrations import COMPONENT, MIGRATIONS
@@ -64,7 +65,8 @@ class SQLiteIdentityStore:
 
     Each decision is applied once. On a re-applied batch the state already reflects
     every decision in it, so a decision that finds its own record at its position has
-    nothing left to do.
+    nothing left to do. One older than the latest decision applied raises
+    :class:`~anagrapheus.identity.errors.OutOfOrderDecision` instead of landing.
     """
 
     def __init__(self, conn: sqlite3.Connection) -> None:
@@ -75,14 +77,14 @@ class SQLiteIdentityStore:
     # ---- writes: one per identity role -------------------------------------------
 
     def established(self, event: Established, seq: int) -> None:
-        if self._applied(seq):
+        if not self._pending(seq):
             return
         self._put_entity(event.entity_id, seq, event.provenance)
         self._record(event.entity_id, event.first_surface_form, event.stance, seq)
         self._decision(seq, event.entity_id, "established", {"form": event.first_surface_form})
 
     def aliased(self, event: Aliased, seq: int) -> None:
-        if self._applied(seq):
+        if not self._pending(seq):
             return
         self._record(event.entity_id, event.surface_form, event.stance, seq)
         self._decision(
@@ -93,7 +95,7 @@ class SQLiteIdentityStore:
         )
 
     def merged(self, event: Merged, seq: int) -> None:
-        if self._applied(seq):
+        if not self._pending(seq):
             return
         detail = {"kept": str(event.kept), "absorbed": str(event.absorbed)}
         absorbed = self.entity(event.absorbed)
@@ -144,7 +146,7 @@ class SQLiteIdentityStore:
         self._decision(seq, event.kept, "merge_ignored", detail)
 
     def unmerged(self, event: Unmerged, seq: int) -> None:
-        if self._applied(seq):
+        if not self._pending(seq):
             return
         detail: dict[str, object] = {"kept": str(event.kept), "absorbed": str(event.absorbed)}
         absorbed = self.entity(event.absorbed)
@@ -173,7 +175,7 @@ class SQLiteIdentityStore:
         self._decision(seq, event.kept, "unmerged", detail)
 
     def split(self, event: Split, seq: int) -> None:
-        if self._applied(seq):
+        if not self._pending(seq):
             return
         origin = self.entity(event.original)
         provenance = origin.provenance if origin is not None else ""
@@ -425,12 +427,26 @@ class SQLiteIdentityStore:
             seq=row["seq"],
         )
 
-    def _applied(self, seq: int) -> bool:
-        """Whether the decision at ``seq`` has already been folded."""
-        row = self._conn.execute(
+    def _pending(self, seq: int) -> bool:
+        """
+        Whether the decision at ``seq`` is still to be applied.
+
+        ``False`` for one already folded, which a re-applied batch meets. Raises
+        :class:`OutOfOrderDecision` for one older than the latest applied: paths are
+        ordered by position alone, so a decision folded out of log order would misrank
+        every claim it moved, and nothing afterwards could tell.
+        """
+        if self._conn.execute(
             "SELECT 1 FROM identity_decisions WHERE seq = ? LIMIT 1", (seq,)
-        ).fetchone()
-        return row is not None
+        ).fetchone():
+            return False
+        latest = self._conn.execute("SELECT MAX(seq) FROM identity_decisions").fetchone()[0]
+        if latest is not None and seq < latest:
+            raise OutOfOrderDecision(
+                f"identity decision at seq {seq} arrived after the one at seq {latest}; "
+                f"decisions must be applied in log order"
+            )
+        return True
 
     def _alias_stance(self, entity_id: UUID, surface_form: str) -> str:
         """

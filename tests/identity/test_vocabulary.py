@@ -44,7 +44,7 @@ if TYPE_CHECKING:
 
 
 class EntityEstablished(DomainEvent, frozen=True):
-    """An application's own establish event — the collision doc 00 §8 warns about."""
+    """An application's own establish event, whose name could collide with the library's."""
 
     ref: UUID
     label: str
@@ -89,7 +89,7 @@ def test_library_events_use_the_reserved_namespace(rig: Rig):
 
 
 def test_an_application_keeps_its_own_event_names(tmp_path: Path):
-    """The whole point of §8: NVM binds EntityEstablished and never sees a library type."""
+    """The point of binding by name: NVM binds EntityEstablished and never sees a library type."""
     types = EventTypeRegistry()
     types.event("nvm", "EntityEstablished")(EntityEstablished)
     types.event("nvm", "NameObserved")(NameObserved)

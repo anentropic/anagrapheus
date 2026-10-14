@@ -127,6 +127,16 @@ anagrapheus/
 - Use pytest for test discovery and execution
 - Fixtures defined in `tests/conftest.py` for reuse
 - Test naming convention: `test_<specific_behavior>`
+- Property tests take their example count from a Hypothesis profile, chosen with the
+  `HYPOTHESIS_PROFILE` environment variable (registered in `tests/conftest.py`):
+  `ci` (the default, 400 examples, what CI runs), `dev` (25, for a quick local pass) and
+  `deep` (2000, for a long hunt after touching identity or re-key logic). Don't set
+  `max_examples` on a test; set `deadline=None` there if it needs one.
+
+```bash
+HYPOTHESIS_PROFILE=dev uv run pytest
+HYPOTHESIS_PROFILE=deep uv run pytest tests/identity tests/beliefs
+```
 
 ## Building and Distribution
 

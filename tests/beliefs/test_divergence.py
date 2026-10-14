@@ -1,4 +1,4 @@
-"""Divergence: doc 00 §6c's payoff, and the condition it rests on."""
+"""Divergence: what per-scope beliefs pay for, and the condition it rests on."""
 
 from __future__ import annotations
 
@@ -51,7 +51,7 @@ def test_something_only_one_holder_has_is_an_absence_not_a_contradiction(
 
 def test_divergence_needs_both_scopes_to_have_minted_through_one_registry(tmp_path: Path):
     """
-    §6c's condition, shown failing rather than asserted.
+    Divergence needs a shared key, shown failing rather than asserted.
 
     Two holders believing contradictory things about the same entity look like perfect
     agreement if their ids were minted under different namespaces — the query cannot

@@ -89,7 +89,7 @@ class Bimodal:
     """
     A `FunctionModel` that answers on **both** transports, counting every draw.
 
-    Needed to exercise the case §4's shared key creates: the same call arriving once
+    Needed to exercise the case a key shared across transports creates: the same call arriving once
     plainly and once streamed. A model that supports only one transport cannot show it.
     """
 

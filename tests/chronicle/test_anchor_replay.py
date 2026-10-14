@@ -1,9 +1,10 @@
 """
 Anchor-replay: the invariant a generative projection actually keeps.
 
-R61 clause 3, stated as a test. Everything the fold derives *from the log* — which
-sections exist, the ranges they cite, where their boundaries fall — is a pure function
-of the log and replays exactly. The prose is regenerated.
+A generative fold replays its anchors exactly, stated as a test. Everything the fold
+derives *from the log* — which sections exist, the ranges they cite, where their
+boundaries fall — is a pure function of the log and replays exactly. The prose is
+regenerated.
 
 Deliberately **no equivalence claim about the prose**: nothing here defines semantic
 equivalence of two consolidations and nothing could enforce it, so the assertion is
@@ -57,7 +58,7 @@ def test_rebuild_regenerates_the_prose(rig: Rig):
 
 def test_rebuild_is_refused_without_acknowledgement(rig: Rig):
     """
-    R61's migration asymmetry, made a runtime fact rather than a docstring.
+    A generative fold cannot be rebuilt for free, made a runtime fact rather than a docstring.
 
     ``rebuild`` is sold everywhere else as cheap and exact — "stand up the adapter,
     replay the log". For this fold it is neither, so the default is refusal.

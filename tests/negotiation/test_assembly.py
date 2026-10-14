@@ -1,11 +1,11 @@
 """
 What each of the demo's model calls is shown, checked by its sources rather than its words.
 
-Since M9 every call assembles its prompt from a grant (note 07), so the context knows
+Since M9 every call assembles its prompt from a grant, so the context knows
 every belief, event and section it was built from. That turns the demo's worst prompt
 defect into an assertion: a private remark reached the speaker's own prompt through the
 chronicle's shared prose, and nothing failed, because the scripted counterpart ignored
-the prose (note 06 §9a). These tests would have failed.
+the prose. These tests would have failed.
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ def _scopes(context: Context) -> set[str]:
 
 @pytest.mark.parametrize("party", PARTIES)
 def test_a_party_is_shown_no_belief_from_another_partys_private_scope(table: Table, party: str):
-    """R29, asserted on what the prompt was built from rather than on what it says."""
+    """A party is shown only what it believes, asserted on what the prompt was built from."""
     other = next(p for p in PARTIES if p != party)
     clause = next(iter(table.clauses))
     for context in (

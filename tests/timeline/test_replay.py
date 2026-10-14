@@ -3,8 +3,7 @@ Tier 2: generation-replay from recorded pin ledgers.
 
 Fixtures are log-format JSONL — StoredEvent rows exactly as the events table holds
 them, containing PinPromoted events — so ReplayPins reads them with zero translation
-and upcasts apply to fixtures for free when pin event schemas evolve. (Provisional
-answer to the fixture-format question in _design/00; recorded there.)
+and upcasts apply to fixtures for free when pin event schemas evolve.
 """
 
 from __future__ import annotations

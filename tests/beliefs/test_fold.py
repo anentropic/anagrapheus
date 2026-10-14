@@ -91,7 +91,7 @@ def test_an_application_event_folds_to_beliefs_without_a_library_event(tmp_path:
     """
     The library ships the shape; the application owns the name.
 
-    Doc 00 §8's rule, applied to belief. An observation event *is* the belief's cause
+    The same rule identity follows, applied to belief. An observation event *is* the belief's cause
     and its content, so the application binds it to an interpreter and never emits a
     ``BeliefRevised`` beside it. This is the shape NVM's belief ingestion has: beliefs
     derived from observation events, the log the only place they live.
@@ -177,7 +177,7 @@ def test_an_edge_survives_a_rebuild(rig: Rig):
     """
     The dependency is in the log, so a rebuilt store still knows what rests on what.
 
-    Laid on the store directly — as the demo did until note 03 §9 — the edge would be
+    Laid on the store directly — as the demo once did — the edge would be
     gone after a rebuild, and retracting the premise would stop reporting the
     conclusion that rests on it.
     """
@@ -265,7 +265,7 @@ _OPS = st.sampled_from(["revise", "expand", "contract"])
 _STANCES = st.sampled_from(list(Stance))
 
 
-@settings(deadline=None, max_examples=40)
+@settings(deadline=None)
 @given(
     plan=st.lists(
         st.tuples(
@@ -290,8 +290,8 @@ def test_straight_through_equals_interrupted_equals_rebuilt(
     Fold-replay is an invariant: same log, same beliefs and same index, however folded.
 
     The M1 and M2 property, applied now to what is *believed* and not only to which ids
-    were minted — the gap note 03 §9 closed. ``state_id`` aside, which doxastica mints,
-    every revision, value, status and stance comes back.
+    were minted — the gap that folding beliefs from the log closed. ``state_id`` aside,
+    which doxastica mints, every revision, value, status and stance comes back.
     """
     predicates = build_predicates()
     # A small pool of entities, so revisions and contractions actually collide.

@@ -2,7 +2,7 @@
 Milestone-6 acceptance: a generative projection, consolidated and replayed.
 
 A log of units is consolidated into chronicle sections by a summarizer that draws
-through the **pinned** provider, so R61 clause 5's payoff is exercised for real: under
+through the **pinned** provider, so the pins' payoff is exercised for real: under
 pin hits a generative projection rebuilds bit-exact, and only where a pin misses does
 the prose change.
 

@@ -1,7 +1,7 @@
 """
 Milestone-7 acceptance: a second consumer, and the case one believer cannot state.
 
-Doc 00 §10 Q4 asks for a demo agent as *"the second consumer that tests whether these
+The design asks for a demo agent as *"the second consumer that tests whether these
 seams are real; the less it resembles NVM, the more it proves."* This is that consumer:
 a multilateral negotiation, with no fiction, no player and no narration anywhere in it.
 
@@ -10,9 +10,9 @@ on what it believes the UK actually wants — which is not what the UK said. The
 delegate name turns out to be the same party under another name, the merge cascades
 across every scope, and the whole run replays from the log with no model reached.
 
-**What no earlier milestone could assert**: §6 keeps beliefs per scope so *"several
+**What no earlier milestone could assert**: beliefs are kept per scope so *"several
 holders can believe contradictory things at once and where they diverge is a query"*,
-and §6c calls that query *"the whole multi-agent-disagreement case"*. Every use of it
+and that query is *"the whole multi-agent-disagreement case"*. Every use of it
 in this repository until now was one believer against ground truth.
 """
 

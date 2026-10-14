@@ -11,9 +11,9 @@ and the exact command is written into the file's header, so a failing test can s
 A committed recording is a regression test on **what the model is asked**. Change a
 prompt — a brief line, the chronicle's render, a tool's description — and every pin
 whose request changed misses on replay, so the test reading the recording fails. That
-is the point, not a nuisance: doc 00 §4c says *"change the prompt assembly and the keys
-miss"*, and this is where that becomes visible in review, as a diff to this directory,
-instead of a silent change in what a deployed agent is told.
+is the point, not a nuisance: change the prompt assembly and the keys miss, and this
+is where that becomes visible in review, as a diff to this directory, instead of a
+silent change in what a deployed agent is told.
 
 So re-recording is deliberate, never automatic. Run it when a prompt changed on purpose,
 read the diff, and commit the two together.

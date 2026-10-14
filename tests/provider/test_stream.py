@@ -112,7 +112,7 @@ def test_a_streamed_pin_replays_through_the_plain_path(rig: Rig):
     """
     Cross-transport: streaming is *how you receive*, not what you ask.
 
-    §4a keys on the semantic identity of the call, so the transport is not in the key.
+    A pin keys on the semantic identity of the call, so the transport is not in the key.
     This is that decision made falsifiable — if the key ever gained a streaming flag,
     this is the test that would fail.
     """
@@ -358,7 +358,7 @@ def test_a_plain_and_a_streamed_call_on_one_key_coalesce(rig: Rig):
     Guarding the plain path and the streamed path independently leaves exactly the gap
     each one closed on its own: a ``request()`` starting while a stream is open misses,
     both draw, and the live ledger's second write hits the scratch primary key. That the
-    key is shared is the *point* of §4 — which is precisely what makes an unshared gate
+    key is shared is the *point* of the design — which is precisely what makes an unshared gate
     a bug rather than a theoretical one.
     """
     model = PinnedModel(Bimodal("Lisbon", delay=0.01).model(), rig.ledger)

@@ -27,7 +27,7 @@ from .conftest import PREDICATES, build_predicates
 
 def test_a_relational_predicate_cannot_be_minted_at_lower_arity():
     """
-    The trap doc 00 §6a names, closed mechanically rather than by documentation.
+    Keying a relation on one side only, closed mechanically rather than by documentation.
 
     Keyed as ``knows(alice)`` with ``bob`` in the value, revising to ``carol`` would
     silently retract the belief about bob. The declaration makes that spelling
@@ -70,7 +70,7 @@ def test_the_id_carries_scheme_and_namespace():
 
 def test_two_namespaces_mint_different_ids_for_the_same_proposition():
     """
-    §6a's namespace warning: revision history keys on the belief id alone, cross-scope.
+    Why a namespace is required: revision history keys on the belief id alone, cross-scope.
 
     For a divergence query between two holders that collision is the mechanism; for two
     tenants it is a leak. The namespace is what separates them, so it is required.

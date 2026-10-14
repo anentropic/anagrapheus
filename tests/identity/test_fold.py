@@ -182,7 +182,7 @@ def opcodes(
     )
 
 
-@settings(max_examples=25, deadline=None)
+@settings(deadline=None)
 @given(
     ops=opcodes(),
     batch_size=st.integers(min_value=1, max_value=5),

@@ -39,6 +39,7 @@ from anagrapheus.identity.errors import (
     IdentityError,
     MergeCycle,
     NotMerged,
+    OutOfOrderDecision,
     UnknownEntity,
 )
 from anagrapheus.identity.events import (
@@ -84,6 +85,7 @@ __all__ = [
     "MergeCycle",
     "Merged",
     "NotMerged",
+    "OutOfOrderDecision",
     "RekeyRow",
     "Resolution",
     "RoleBinding",

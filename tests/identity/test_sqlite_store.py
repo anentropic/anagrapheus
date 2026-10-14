@@ -10,6 +10,8 @@ from uuid import UUID
 import pytest
 
 from anagrapheus.identity import (
+    Merged,
+    OutOfOrderDecision,
     SQLiteIdentityStore,
     alias,
     establish,
@@ -112,6 +114,33 @@ def test_split_of_an_unfolded_original_still_records(rig: Rig):
 
     assert rig.identity_store.entity(carved) is not None
     assert rig.registry.resolve("ghost").sole() == carved
+
+
+def test_a_decision_older_than_the_latest_applied_is_refused(rig: Rig):
+    """
+    Decisions land in log order or not at all; the latest one may land again.
+
+    A merge folded behind a later decision would rank what it carried as newer than
+    what came after it. Re-applying the latest decision, as a batch re-applied after a
+    crash does, changes nothing and does not raise.
+    """
+    kept, first = establish(rig.types, "acme", provenance="crm")
+    absorbed, second = establish(rig.types, "acme-old", provenance="import")
+    other, third = establish(rig.types, "acme-b", provenance="ledger")
+    last = rig.commit(first, second, third)
+    # Written to the store directly, so the positions can be chosen: the merge at
+    # ``last + 2`` lands, and one at ``last + 1`` would land behind it.
+    rig.identity_store.merged(Merged(kept=kept, absorbed=absorbed), last + 2)
+    landed = snapshot(rig.store.connection)
+
+    with pytest.raises(OutOfOrderDecision, match="log order"):
+        rig.identity_store.merged(Merged(kept=kept, absorbed=other), last + 1)
+    rig.identity_store.merged(Merged(kept=kept, absorbed=absorbed), last + 2)
+
+    assert snapshot(rig.store.connection) == landed
+    row = rig.identity_store.entity(other)
+    assert row is not None
+    assert row.merged_into is None
 
 
 # -- a populated v1 projection --------------------------------------------------------

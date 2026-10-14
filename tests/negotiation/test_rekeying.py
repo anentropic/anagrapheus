@@ -165,11 +165,11 @@ def test_a_belief_written_around_the_log_is_invisible_to_the_plan_and_the_rebuil
     table: Table,
 ):
     """
-    The hole note 03 §9 closed, shown from the outside.
+    The hole that folding beliefs from the log closed, shown from the outside.
 
     A belief written straight into the store reads correctly until something asks the
     log. A merge then plans nothing for it, because the entity index is folded from the
-    log; and a rebuild drops it, because the store is too. Before §9 this was the
+    log; and a rebuild drops it, because the store is too. Before that change this was the
     *library's* front door: `BeliefWriter.revise` wrote here and left only a minting
     event behind. Now the store is reachable only as a fold, and this is what reaching
     around it costs.
@@ -293,7 +293,7 @@ def test_a_clause_merge_moves_the_derived_model_too(table: Table):
     Clauses are identity entities as much as parties are, and the derived read must
     canonicalize both.
 
-    Note 06 §2a was written about exactly this -- a merge re-keys stored beliefs but
+    The demo's design notes warned about exactly this -- a merge re-keys stored beliefs but
     cannot reach into an immutable event payload, so a derived model has to resolve
     identity at read time -- and the first implementation applied it to the *party*
     reference only. Review round 2 caught the half. A stored position moves to the

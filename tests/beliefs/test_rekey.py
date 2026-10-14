@@ -808,7 +808,7 @@ def test_the_planner_and_the_identity_layer_agree_on_unmerges_of_a_chain(
     assert planned == {e for e in (a, b, c) if identity.canonical(e) != e}
 
 
-@settings(max_examples=200, deadline=None)
+@settings(deadline=None)
 @given(ops=opcodes(min_size=10, max_size=30, kinds=KINDS), cut=st.integers(0, 30))
 def test_the_planner_and_the_identity_layer_agree_over_generated_histories(
     tmp_path_factory: pytest.TempPathFactory, ops: list[tuple[int, int, int]], cut: int

@@ -99,7 +99,7 @@ def test_a_round_refuses_a_third_party(table: Table):
 
 def test_a_reading_cannot_name_a_nested_predicate():
     """
-    R28 is enforced by the output type, not by the prompt.
+    Nested belief is never stored, enforced by the output type, not by the prompt.
 
     There is no ``believes`` in the ``Literal``, so an update call that tried to record
     what the other party *believes* fails validation before anything is written. A
@@ -347,9 +347,8 @@ def test_a_conclusion_lands_in_the_concluding_party_own_scope(table: Table):
     **Written because that mutant survived the entire suite.** Swapping ``held(party)``
     for ``held(reading.about)`` left 338 tests green, including the M8 acceptance test
     with its four rounds and its second-order assertions. It is the fourth time in this
-    example that a load-bearing claim turned out to have nothing holding it — note 06
-    §2d records the first three, and the shape is always the same: the claim is stated
-    in a docstring and asserted nowhere.
+    example that a load-bearing claim turned out to have nothing holding it, and the shape
+    is always the same: the claim is stated in a docstring and asserted nowhere.
     """
     _opened(table)
     premise = record_offer(
@@ -376,7 +375,7 @@ def test_a_leak_seeds_belief_about_access_and_not_the_truth(table: Table):
     Including itself, which is the case that matters.
 
     Deriving ``believed_by`` from ``overheard_by`` would hand every party the truth and
-    delete the deception R27 calls the engine. The mutant passes every other test here.
+    delete the deception that drives the whole example. The mutant passes every other test here.
     """
     _opened(table)
     ledger = PinLedger(table.store, table.types)
@@ -413,9 +412,9 @@ def test_an_offer_is_said_in_the_room_and_the_belief_cites_it(table: Table):
 
     M7 wrote it against a bare ``uuid7()`` naming nothing, which reads identically and
     leaves the log with no record that anything was said — so a derived model, which
-    can only gate on events, had nothing to gate on. Since note 03 §9 the state's own
-    source is the belief event the fold read it from, and the ``PositionStated`` is that
-    event's cause.
+    can only gate on events, had nothing to gate on. Now that beliefs are folded from the
+    log, the state's own source is the belief event the fold read it from, and the
+    ``PositionStated`` is that event's cause.
     """
     _opened(table)
     state = record_offer(
@@ -437,7 +436,7 @@ def test_a_round_closes_a_chronicle_unit(tmp_path: Path):
     """
     ``RoundClosed`` is the boundary, so one round consolidates to one section.
 
-    M7 defined the event and never emitted it; note 05's fold had no consumer at all.
+    M7 defined the event and never emitted it; the chronicle fold had no consumer at all.
     Both halves of the reopened M7.3 land here.
     """
     summary = RoundSummary(scripted())
@@ -505,9 +504,10 @@ def test_the_chronicle_never_carries_a_private_event_to_a_party(tmp_path: Path):
     eu"* — the exact truth its access-belief denies, and the one thing
     :class:`~examples.negotiation.view.PartyView` raises rather than answer.
 
-    R29 held on the belief path and was broken one layer below it, in the prompt. The
-    scripted counterpart masked it completely: it reads the belief lines and ignores the
-    prose, so every test passed while a live model was being handed the answer.
+    The rule that a party models others only from its own beliefs held on the belief path
+    and was broken one layer below it, in the prompt. The scripted counterpart masked it
+    completely: it reads the belief lines and ignores the prose, so every test passed
+    while a live model was being handed the answer.
 
     The fix is a constraint on what may enter a *shared* generative projection at all.
     There is no vantage point from which one chronicle can summarize a private event

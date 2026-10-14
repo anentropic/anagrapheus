@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
 def test_a_section_cites_the_range_it_covers(rig: Rig):
     """
-    Doc 00 §7's first bullet, and the load-bearing half of the whole layer.
+    Every section cites the events it was written from: the load-bearing half of the layer.
 
     Without the citation a section is an unattributable summary; with it, the log can
     always be consulted for what the prose was written from.
@@ -49,7 +49,7 @@ def test_consecutive_units_partition_the_log(rig: Rig):
 
 def test_an_old_section_is_superseded_never_edited(rig: Rig):
     """
-    §7's second bullet, on supersession rather than correction.
+    A section is superseded rather than corrected.
 
     *"An old section is never wrong, only superseded by time."*
 
@@ -70,7 +70,7 @@ def test_an_old_section_is_superseded_never_edited(rig: Rig):
 
 def test_the_tail_comes_from_the_log_not_the_chronicle(rig: Rig):
     """
-    §7's third bullet, and one of R61 clause 4's by-construction guarantees.
+    Near-term continuity comes from the log, so it never rests on advisory prose.
 
     Near-term continuity never reads generated prose: the tail is the log's own events.
     This is why consolidation lag is invisible rather than a gap — whatever the
@@ -104,7 +104,7 @@ def test_consolidation_lag_self_heals(rig: Rig):
 
 def test_the_anchor_surface_cannot_reach_prose(rig: Rig):
     """
-    R61 clause 4 enforced by the API rather than by a docstring.
+    Model-written prose is advisory, enforced by the API rather than by a docstring.
 
     A caller that needs to settle something takes ``Anchors`` and finds there is simply
     no prose on it to misuse. A rule that lives only in prose is a rule that gets
@@ -133,7 +133,7 @@ def test_the_default_retriever_is_naive_and_says_so(rig: Rig):
     """
     A port with a placeholder behind it, not a search engine.
 
-    §7 calls the real stack commodity that belongs behind a port. The default exists so
+    A real search stack is a commodity that belongs behind a port. The default exists so
     the layer is usable and testable; it ranks by recency and matches by substring, and
     the test asserts exactly that rather than pretending to more.
     """
