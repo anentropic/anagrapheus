@@ -206,9 +206,10 @@ def _group(rekeys: Iterable[RekeyRow]) -> _Grouped:
                 f"{from_entity} itself, so it gives nothing back; identity never "
                 f"writes such rows, so the batch is malformed"
             )
-        if kind == "merge" and len(targets) != 1:
+        # Distinct survivors, not rows: overlapping reads can repeat a row.
+        if kind == "merge" and len(survivors := set(targets)) != 1:
             raise MalformedRekeyBatch(
-                f"merge at seq {seq} from {from_entity} names {len(targets)} survivors; "
+                f"merge at seq {seq} from {from_entity} names {len(survivors)} survivors; "
                 f"a merge has exactly one, so the batch is malformed"
             )
     return grouped

@@ -363,6 +363,21 @@ def test_a_merge_with_more_than_one_survivor_is_refused_clearly(rig: Rig):
         )
 
 
+def test_a_merge_row_read_twice_still_plans_once(rig: Rig):
+    """
+    Joining two overlapping reads can repeat a merge row; it is still one survivor.
+
+    The planner treats the repeat as the same decision, not as a merge naming two.
+    """
+    absorbed, kept = uuid.uuid7(), uuid.uuid7()
+    rig.commit(rig.asserted("location", absorbed))
+    row = RekeyRow(seq=9, kind="merge", from_entity=absorbed, to_entity=kept)
+
+    assert plan_rekeys([row, row], rig.index, rig.predicates) == plan_rekeys(
+        [row], rig.index, rig.predicates
+    )
+
+
 def test_a_merge_withdrawn_later_in_the_batch_plans_nothing(rig: Rig):
     """
     B into A, then that merge withdrawn, in one batch: B is canonical again.
