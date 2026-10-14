@@ -125,7 +125,7 @@ def test_milestone_6_acceptance(tmp_path: Path):
     events = list(store.read())
     assert sum(1 for e in events if e.envelope.type == "PinPromoted") == 2
 
-    # -- rebuild through those pins: bit-exact, R61 clause 5's payoff ----------------
+    # -- rebuild through those pins: bit-exact, what pinning a generative fold buys --
     # Not the warm scratch -- that would only show reuse-under-retry. This replays from
     # the log, which is the claim that matters: a consolidation pinned months ago can
     # be reproduced exactly, without reaching a model.

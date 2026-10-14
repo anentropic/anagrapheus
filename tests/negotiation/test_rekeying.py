@@ -78,9 +78,10 @@ def test_the_queries_still_answer_after_the_merge(table: Table):
     source = uuid.uuid7()
     table.believe(held("uk"), "position", (absorbed, fisheries), "concede", source)
 
-    # The EU's model of the UK is not a scope any more (R28), so what has to survive
-    # the merge is the **access-belief** it is derived from -- and that belief names
-    # the absorbed entity. R27 makes these ordinary first-order beliefs precisely so
+    # The EU's model of the UK is not a scope any more -- higher-order belief is derived,
+    # never stored -- so what has to survive the merge is the **access-belief** it is
+    # derived from, and that belief names the absorbed entity. Access is ordinary
+    # observable content, so these are ordinary first-order beliefs precisely so
     # they ride the normal pipeline, and this is what that buys: they re-key like
     # anything else, with no machinery of their own.
     remark = table.types.pending(

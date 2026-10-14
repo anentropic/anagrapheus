@@ -5,6 +5,10 @@ The API reference is built from docstrings and published with the library, so a
 docstring reads on its own. Where a rule comes from belongs in a comment under the
 module docstring, which the reference never renders. A ruling's status is never
 copied into code at all: it changes in the design repository, and a copy goes stale.
+
+The tests are held to the same rule. A test's docstring is the claim it checks, read by
+whoever is looking at a failure, so it says what is true rather than where that was
+decided.
 """
 
 from __future__ import annotations
@@ -13,7 +17,9 @@ import ast
 import re
 from pathlib import Path
 
-SRC = Path(__file__).resolve().parent.parent / "src" / "anagrapheus"
+ROOT = Path(__file__).resolve().parent.parent
+SRC = ROOT / "src" / "anagrapheus"
+TESTS = ROOT / "tests"
 
 CITATION = re.compile(
     r"\bR\d+\b"  # a ruling number
@@ -61,7 +67,7 @@ def _sites(path: Path) -> list[str]:
     for start, text in _docstrings(tree):
         for offset, line in enumerate(text.splitlines()):
             if matches := [match.group(0) for match in CITATION.finditer(line)]:
-                where = path.relative_to(SRC.parent)
+                where = path.relative_to(ROOT)
                 sites.append(f"{where}:{start + offset}: {', '.join(matches)}: {line.strip()}")
     return sites
 
@@ -69,6 +75,11 @@ def _sites(path: Path) -> list[str]:
 def test_docstrings_carry_no_design_citations():
     sites = [site for path in sorted(SRC.rglob("*.py")) for site in _sites(path)]
     assert not sites, "design citations in docstrings:\n" + "\n".join(sites)
+
+
+def test_test_docstrings_carry_no_design_citations():
+    sites = [site for path in sorted(TESTS.rglob("*.py")) for site in _sites(path)]
+    assert not sites, "design citations in test docstrings:\n" + "\n".join(sites)
 
 
 def test_the_pattern_matches_citations_and_not_prose():

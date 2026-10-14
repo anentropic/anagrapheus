@@ -71,7 +71,8 @@ def test_milestone_8_acceptance(tmp_path: Path):
     # Round one: the EU's model of the UK says `concede`, because the EU believes it
     # overheard the slip. The UK's model of *that model* says `hold_firm`, because the UK
     # believes nobody heard. Both are derived from the same log; they differ because they
-    # are gated by different beliefs about access (R27), and neither was ever stored.
+    # are gated by different beliefs about access -- access is ordinary observable
+    # content -- and neither was ever stored.
     first = run.second_order[0]
     assert (first.truly, first.imagined) == ("concede", "hold_firm")
     assert first.wrong, "the UK is mistaken about what the EU has concluded"
@@ -110,7 +111,9 @@ def test_milestone_8_acceptance(tmp_path: Path):
 
     # -- the chronicle consolidated each round -----------------------------------------
     anchors = list(Anchors(table.chronicle).all())
-    assert len(anchors) == 4, "one section per `RoundClosed` -- note 05's first consumer"
+    assert len(anchors) == 4, (
+        "one section per `RoundClosed` -- the chronicle's first outside consumer"
+    )
     assert all(section.pins for section in table.chronicle.sections()), (
         "each drew through the ledger, so the sections can be shown to replay"
     )

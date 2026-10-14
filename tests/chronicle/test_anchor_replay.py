@@ -84,7 +84,7 @@ def test_a_deterministic_fold_still_rebuilds_freely(rig: Rig):
 
 def test_a_hand_made_reconsolidation_is_outside_the_claim(rig: Rig):
     """
-    The precise edge of clause 3, and a second reason the carry path exists.
+    The precise edge of the anchor-replay claim, and a second reason the carry path exists.
 
     A deliberate re-consolidation is not *fold-derived* — nothing in the log says it
     happened — so it is outside the anchor-replay claim. Rebuilding discards it and

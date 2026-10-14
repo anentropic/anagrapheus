@@ -55,8 +55,8 @@ def test_milestone_7_acceptance(tmp_path: Path):
     table.believe(held("uk"), "position", (hmg, fisheries), "concede", source)
     table.believe(stated("uk"), "position", (hmg, fisheries), "never", source)
 
-    # What the EU thinks the UK wants is **not** a fourth row. R28 forbids storing a
-    # nested belief, so it is an overheard remark plus the EU's belief that the UK let
+    # What the EU thinks the UK wants is **not** a fourth row. Higher-order belief is
+    # derived, never stored, so it is an overheard remark plus the EU's belief that the UK let
     # it slip -- and the model is rebuilt from those every time it is asked for.
     leak = table.types.pending(
         domain.SideRemarkOverheard(
