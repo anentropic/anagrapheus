@@ -8,18 +8,21 @@ copied into code at all: it changes in the design repository, and a copy goes st
 
 The tests are held to the same rule. A test's docstring is the claim it checks, read by
 whoever is looking at a failure, so it says what is true rather than where that was
-decided.
+decided. Their comments and strings, and the CI workflows, follow it too, since nothing
+renders them apart from the code they sit in.
 """
 
 from __future__ import annotations
 
 import ast
 import re
+import tokenize
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "src" / "anagrapheus"
 TESTS = ROOT / "tests"
+WORKFLOWS = ROOT / ".github" / "workflows"
 
 CITATION = re.compile(
     r"\bR\d+\b"  # a ruling number
@@ -80,6 +83,43 @@ def test_docstrings_carry_no_design_citations():
 def test_test_docstrings_carry_no_design_citations():
     sites = [site for path in sorted(TESTS.rglob("*.py")) for site in _sites(path)]
     assert not sites, "design citations in test docstrings:\n" + "\n".join(sites)
+
+
+def _cited(where: Path, number: int, line: str) -> str | None:
+    if matches := [match.group(0) for match in CITATION.finditer(line)]:
+        return f"{where.relative_to(ROOT)}:{number}: {', '.join(matches)}: {line.strip()}"
+    return None
+
+
+def _token_sites(path: Path) -> list[str]:
+    """Citations in a module's comments and string literals, docstrings included."""
+    sites: list[str] = []
+    with path.open("rb") as source:
+        for token in tokenize.tokenize(source.readline):
+            if token.type not in (tokenize.COMMENT, tokenize.STRING, tokenize.FSTRING_MIDDLE):
+                continue
+            for offset, line in enumerate(token.string.splitlines()):
+                if (site := _cited(path, token.start[0] + offset, line)) is not None:
+                    sites.append(site)
+    return sites
+
+
+def test_test_comments_and_strings_carry_no_design_citations():
+    # This module is skipped: its pattern and samples are citations on purpose.
+    here = Path(__file__).resolve()
+    paths = [path for path in sorted(TESTS.rglob("*.py")) if path.resolve() != here]
+    sites = [site for path in paths for site in _token_sites(path)]
+    assert not sites, "design citations in test comments or strings:\n" + "\n".join(sites)
+
+
+def test_workflows_carry_no_design_citations():
+    sites = [
+        site
+        for path in sorted(WORKFLOWS.glob("*.y*ml"))
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
+        if (site := _cited(path, number, line)) is not None
+    ]
+    assert not sites, "design citations in workflows:\n" + "\n".join(sites)
 
 
 def test_the_pattern_matches_citations_and_not_prose():

@@ -21,7 +21,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from anagrapheus.beliefs.errors import BeliefError, MergeCycleInBatch, UnrenderableBelief
+from anagrapheus.beliefs.errors import (
+    BeliefError,
+    MalformedRekeyBatch,
+    MergeCycleInBatch,
+    UnrenderableBelief,
+)
 from anagrapheus.beliefs.predicates import MintedId
 
 if TYPE_CHECKING:
@@ -177,10 +182,22 @@ def plan_rekeys(
 
 
 def _group(rekeys: Iterable[RekeyRow]) -> _Grouped:
-    """Gather the rows of one identity decision, keeping identity's own order."""
+    """
+    Gather the rows of one identity decision, keeping identity's own order.
+
+    Raises:
+        MalformedRekeyBatch: an unmerge's rows name no entity besides its survivor.
+    """
     grouped: _Grouped = {}
     for row in rekeys:
         grouped.setdefault((row.seq, row.kind, row.from_entity), []).append(row.to_entity)
+    for (seq, kind, from_entity), targets in grouped.items():
+        if kind == "unmerge" and all(t == from_entity for t in targets):
+            raise MalformedRekeyBatch(
+                f"unmerge at seq {seq} from {from_entity} names no entity other than "
+                f"{from_entity} itself, so it gives nothing back; identity never "
+                f"writes such rows, so the batch is malformed"
+            )
     return grouped
 
 
@@ -365,14 +382,8 @@ def _scan(entity: UUID, at: int, batch: _Batch, *, branching: bool) -> _Step | N
             and seq > at
             and entity in {from_entity, *batch.holders.get(key, ())}
         ):
-            given_back = next((t for t in targets if t != from_entity), None)
-            if given_back is None:
-                raise BeliefError(
-                    f"unmerge at seq {seq} from {from_entity} names no entity other than "
-                    f"{from_entity} itself, so it gives nothing back; identity never "
-                    f"writes such rows, so the batch is malformed"
-                )
-            step = (seq, kind, given_back)
+            # ``_group`` refused any unmerge that names only its survivor.
+            step = (seq, kind, next(t for t in targets if t != from_entity))
         else:
             continue
         if found is None or step[0] < found[0]:

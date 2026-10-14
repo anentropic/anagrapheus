@@ -35,6 +35,7 @@ from anagrapheus.beliefs.divergence import Disagreement, divergence
 from anagrapheus.beliefs.errors import (
     BeliefError,
     MalformedBeliefId,
+    MalformedRekeyBatch,
     MergeCycleInBatch,
     OutsideVocabulary,
     UnknownPredicate,
@@ -97,6 +98,7 @@ __all__ = [
     "Expand",
     "Interpreter",
     "MalformedBeliefId",
+    "MalformedRekeyBatch",
     "MergeCycleInBatch",
     "MintedId",
     "OutsideVocabulary",

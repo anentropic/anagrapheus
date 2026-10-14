@@ -7,6 +7,7 @@ from __future__ import annotations
 __all__ = [
     "BeliefError",
     "MalformedBeliefId",
+    "MalformedRekeyBatch",
     "MergeCycleInBatch",
     "OutsideVocabulary",
     "UnknownPredicate",
@@ -88,6 +89,16 @@ class MergeCycleInBatch(BeliefError):
     planner refuses for the same reason. A ring has no last element, so there is no
     successor to re-mint to — and picking an arbitrary point in it would hand the
     caller a confident answer to a question the log contradicts itself about.
+    """
+
+
+class MalformedRekeyBatch(BeliefError):
+    """
+    A batch of re-key rows holds a decision identity never writes.
+
+    An unmerge always gives an entity back, so its rows name at least one entity
+    besides its survivor. Rows that name only the survivor have nowhere to lead a
+    belief, and planning around them would quietly drop the decision.
     """
 
 
