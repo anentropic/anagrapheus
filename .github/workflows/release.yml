@@ -14,8 +14,9 @@ jobs:
   quality:
     uses: ./.github/workflows/quality.yml
 
-  # Note 00 §8 asked whether tier 3 gates a release and answered its own objection --
-  # "a nightly that nobody reads is not a smoke test". It gates: `publish` needs it,
+  # Whether tier 3 should gate a release was once an open question, and the objection
+  # to leaving it nightly-only answered it -- "a nightly that nobody reads is not a
+  # smoke test". It gates: `publish` needs it,
   # so a broken provider seam stands between the tag and PyPI rather than sitting in
   # a notification somebody has to remember to read.
   tier3:

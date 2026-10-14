@@ -21,7 +21,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from anagrapheus.beliefs.errors import BeliefError, MergeCycleInBatch, UnrenderableBelief
+from anagrapheus.beliefs.errors import (
+    BeliefError,
+    MalformedRekeyBatch,
+    MergeCycleInBatch,
+    UnrenderableBelief,
+)
 from anagrapheus.beliefs.predicates import MintedId
 
 if TYPE_CHECKING:
@@ -140,6 +145,13 @@ def plan_rekeys(
     scheme it does not know, or a predicate it does not declare — instead of raising.
     Off by default: a belief the caller cannot re-key is a real gap in the cascade, and
     silence about it is the failure mode the whole seam exists to prevent.
+
+    Raises:
+        MalformedRekeyBatch: a decision has a shape identity never writes, such as an
+            unmerge that names only its survivor or a merge with more than one target.
+        MergeCycleInBatch: the batch's merges form a ring.
+        UnrenderableBelief: a belief cannot be re-minted and ``skip_unrenderable`` is
+            off.
     """
     batch = _landed(_group(rekeys))
     plans: list[BeliefRekey] = []
@@ -177,10 +189,29 @@ def plan_rekeys(
 
 
 def _group(rekeys: Iterable[RekeyRow]) -> _Grouped:
-    """Gather the rows of one identity decision, keeping identity's own order."""
+    """
+    Gather the rows of one identity decision, keeping identity's own order.
+
+    Raises:
+        MalformedRekeyBatch: an unmerge's rows name no entity besides its survivor, or
+            a merge's rows name more than one survivor.
+    """
     grouped: _Grouped = {}
     for row in rekeys:
         grouped.setdefault((row.seq, row.kind, row.from_entity), []).append(row.to_entity)
+    for (seq, kind, from_entity), targets in grouped.items():
+        if kind == "unmerge" and all(t == from_entity for t in targets):
+            raise MalformedRekeyBatch(
+                f"unmerge at seq {seq} from {from_entity} names no entity other than "
+                f"{from_entity} itself, so it gives nothing back; identity never "
+                f"writes such rows, so the batch is malformed"
+            )
+        # Distinct survivors, not rows: overlapping reads can repeat a row.
+        if kind == "merge" and len(survivors := set(targets)) != 1:
+            raise MalformedRekeyBatch(
+                f"merge at seq {seq} from {from_entity} names {len(survivors)} survivors; "
+                f"a merge has exactly one, so the batch is malformed"
+            )
     return grouped
 
 
@@ -365,6 +396,7 @@ def _scan(entity: UUID, at: int, batch: _Batch, *, branching: bool) -> _Step | N
             and seq > at
             and entity in {from_entity, *batch.holders.get(key, ())}
         ):
+            # ``_group`` refused any unmerge that names only its survivor.
             step = (seq, kind, next(t for t in targets if t != from_entity))
         else:
             continue

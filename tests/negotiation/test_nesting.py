@@ -59,7 +59,7 @@ def _stated(table: Table, *, party: str, clause: UUID, position: str) -> UUID:
     return event.envelope.event_id
 
 
-# -- the ruling itself ------------------------------------------------------------------
+# -- nested belief is never stored -----------------------------------------------------
 
 
 def test_deriving_a_model_writes_nothing(table: Table):
@@ -89,7 +89,7 @@ def test_deriving_a_model_writes_nothing(table: Table):
 
     reconstruct(table.view("eu"), ("uk",), interpret=_interpret(table))
 
-    assert writes == [], "a derived model is built from reads only (R28, R50)"
+    assert writes == [], "a derived model is built from reads only, and never stored"
 
 
 def test_a_view_cannot_reach_another_partys_private_scope(table: Table):
@@ -127,7 +127,7 @@ def test_a_view_cannot_reach_another_partys_private_scope(table: Table):
     # version asserted only `not hasattr(view, "core")`, which passed while `_query`
     # was `core.query_scope` bound -- so `view._query(held("uk"), ...)` answered, and
     # `view._query.__self__` was the whole MemoryCore. Absence of an attribute is not
-    # absence of a path; see note 06 §2c.
+    # absence of a path.
     with pytest.raises(ScopeNotVisible, match="party:uk:held"):
         view.read(held("uk"))
 
@@ -341,7 +341,7 @@ def test_depth_bottoms_out_at_the_cap(table: Table):
     assert raised.truncated is False, "the cap is raisable per query, not a hard ceiling"
 
 
-# -- U24: nothing caches ------------------------------------------------------------------
+# -- nothing caches a derived model -------------------------------------------------------
 
 
 def test_no_cache_reintroduces_the_staleness_the_no_store_rule_dissolves(table: Table):

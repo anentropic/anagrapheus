@@ -127,7 +127,7 @@ def test_milestone_3_acceptance(tmp_path: Path):
     projector.catch_up()
     merged_at = list(store.read(since_seq=before_merge))[0].envelope.event_id
 
-    # -- and the stack answers the question doc 00 §5d asks --------------------------
+    # -- and the stack answers what a merge does to the beliefs keyed on it ----------
     rekeys = identity.rekeys_since(before_merge)
     plans = plan_rekeys(rekeys, index, predicates)
 

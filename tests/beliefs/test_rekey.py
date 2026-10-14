@@ -15,6 +15,7 @@ from anagrapheus.beliefs import (
     BeliefError,
     BeliefRekey,
     BeliefRow,
+    MalformedRekeyBatch,
     UnknownPredicate,
     UnrenderableBelief,
     plan_rekeys,
@@ -311,6 +312,70 @@ def test_an_unmerge_yields_two_candidates_and_refuses_to_choose(rig: Rig):
     }
     with pytest.raises(ValueError, match="2 candidate successors after an unmerge"):
         plans[0].sole()
+
+
+@pytest.mark.parametrize("after_a_valid_unmerge", [False, True])
+def test_an_unmerge_that_gives_nothing_back_is_refused_clearly(
+    rig: Rig, after_a_valid_unmerge: bool
+):
+    """
+    Hand-built rows for an unmerge that only name the survivor are malformed.
+
+    Identity never writes them: an unmerge always gives an entity back. Such a
+    decision has nowhere to lead, so the planner refuses the batch with
+    ``MalformedRekeyBatch``, whether or not another unmerge's walk would reach it,
+    rather than planning nothing or leaking a bare ``StopIteration``.
+    """
+    kept, absorbed = uuid.uuid7(), uuid.uuid7()
+    rig.commit(rig.asserted("location", kept))
+    valid = [
+        RekeyRow(seq=9, kind="unmerge", from_entity=kept, to_entity=kept),
+        RekeyRow(seq=9, kind="unmerge", from_entity=kept, to_entity=absorbed),
+    ]
+    malformed = [RekeyRow(seq=10, kind="unmerge", from_entity=kept, to_entity=kept)]
+
+    with pytest.raises(MalformedRekeyBatch, match="gives nothing back"):
+        plan_rekeys(
+            (valid if after_a_valid_unmerge else []) + malformed,
+            rig.index,
+            rig.predicates,
+        )
+
+
+def test_a_merge_with_more_than_one_survivor_is_refused_clearly(rig: Rig):
+    """
+    A merge names exactly one survivor; rows naming two are malformed.
+
+    Planning onto the first would guess at a decision the rows never made, so the
+    planner refuses the batch instead.
+    """
+    absorbed, one, other = uuid.uuid7(), uuid.uuid7(), uuid.uuid7()
+    rig.commit(rig.asserted("location", absorbed))
+
+    with pytest.raises(MalformedRekeyBatch, match="names 2 survivors"):
+        plan_rekeys(
+            [
+                RekeyRow(seq=9, kind="merge", from_entity=absorbed, to_entity=one),
+                RekeyRow(seq=9, kind="merge", from_entity=absorbed, to_entity=other),
+            ],
+            rig.index,
+            rig.predicates,
+        )
+
+
+def test_a_merge_row_read_twice_still_plans_once(rig: Rig):
+    """
+    Joining two overlapping reads can repeat a merge row; it is still one survivor.
+
+    The planner treats the repeat as the same decision, not as a merge naming two.
+    """
+    absorbed, kept = uuid.uuid7(), uuid.uuid7()
+    rig.commit(rig.asserted("location", absorbed))
+    row = RekeyRow(seq=9, kind="merge", from_entity=absorbed, to_entity=kept)
+
+    assert plan_rekeys([row, row], rig.index, rig.predicates) == plan_rekeys(
+        [row], rig.index, rig.predicates
+    )
 
 
 def test_a_merge_withdrawn_later_in_the_batch_plans_nothing(rig: Rig):

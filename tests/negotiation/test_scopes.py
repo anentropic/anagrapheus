@@ -56,7 +56,7 @@ def test_three_questions_from_two_stored_scopes_and_one_derived_model(table: Tab
 
     Two of the three sides are stored scopes; the third is reconstructed per call and
     discarded. That the queries read the same afterwards is the point — the
-    ruling changes where the model lives, not what can be asked of it.
+    no-store rule changes where the model lives, not what can be asked of it.
     """
     _positions(table)
 
@@ -117,7 +117,8 @@ def test_a_belief_id_is_shared_across_scopes_deliberately(table: Table):
     assert len(derived) > len(stored), (
         "the derived mind holds more than the proposition asked about: the remark "
         "named who overheard it, so a witness also forms an access-belief about that "
-        "third party (R27). That is what lets the next rung of the tower gate at all."
+        "third party, since access is observable content. That is what lets the next "
+        "rung of the tower gate at all."
     )
 
 

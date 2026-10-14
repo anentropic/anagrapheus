@@ -1,7 +1,7 @@
-# Tier 3 -- the live smoke test. Note 00 §3's fourth tier, and §8's question answered:
-# it gates a release.
+# Tier 3 -- the live smoke test against a real model, the one tier outside the suite
+# (tiers 0-2 need no model). And yes, it gates a release.
 #
-# Deliberately NOT on pull requests. Note 00 §5 records that repository secrets are
+# Deliberately NOT on pull requests. Repository secrets are
 # unavailable to workflows triggered by PRs from forks, so a PR trigger would fail
 # every outside contribution -- which is why free hosted inference was rejected as a
 # CI strategy in the first place.

@@ -66,7 +66,8 @@ def _drawn(tmp_path: Path, types: EventTypeRegistry) -> tuple[list[StoredEvent],
     ledger.commit()
     # A real run does work as well as drawing. Without this the store held nothing but
     # pins, `pin_events` had nothing to drop, and a filter that kept everything passed
-    # every test that mentioned it -- note 06 §2e's shape, in a test written for B.4.
+    # every test that mentioned it: a claim stated correctly, a test asserting something
+    # adjacent that happened to hold, and a mutant that broke the claim passing.
     store.append([types.pending(Noted(what="the round closed"))])
     events = list(store.read())
     store.close()

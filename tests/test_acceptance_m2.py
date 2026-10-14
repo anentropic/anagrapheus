@@ -44,7 +44,8 @@ from anagrapheus.timeline import (
 if TYPE_CHECKING:
     from pathlib import Path
 
-# The consuming application's own stance vocabulary — here, R21's ladder.
+# The consuming application's own stance vocabulary — here, an ordinal ladder of
+# epistemic stances in place of a numeric confidence.
 LADDER = Ladder(("doubted", "suspected", "believed", "certain"))
 
 
