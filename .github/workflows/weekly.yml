@@ -18,6 +18,8 @@ jobs:
     name: Latest deps compatibility
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      HAS_APP: ${{ secrets.BOT_APP_PRIVATE_KEY != '' }}
 
     steps:
       - name: Checkout
@@ -50,10 +52,18 @@ jobs:
         if: always()
         run: uv cache prune --ci
 
+      - name: Get app token
+        id: app-token
+        if: (steps.quality.outcome == 'failure' || steps.tests.outcome == 'failure') && env.HAS_APP == 'true'
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.BOT_APP_ID }}
+          private-key: ${{ secrets.BOT_APP_PRIVATE_KEY }}
+
       - name: Open PR for @copilot to fix
         if: steps.quality.outcome == 'failure' || steps.tests.outcome == 'failure'
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
         run: |
           BRANCH="deps/weekly-compat-$(date +%Y-%m-%d)"
           git config user.name "github-actions[bot]"
