@@ -413,9 +413,8 @@ def test_an_offer_is_said_in_the_room_and_the_belief_cites_it(table: Table):
     M7 wrote it against a bare ``uuid7()`` naming nothing, which reads identically and
     leaves the log with no record that anything was said — so a derived model, which
     can only gate on events, had nothing to gate on. Now that beliefs are folded from the
-    log, the state's own
-    source is the belief event the fold read it from, and the ``PositionStated`` is that
-    event's cause.
+    log, the state's own source is the belief event the fold read it from, and the
+    ``PositionStated`` is that event's cause.
     """
     _opened(table)
     state = record_offer(
@@ -506,9 +505,9 @@ def test_the_chronicle_never_carries_a_private_event_to_a_party(tmp_path: Path):
     :class:`~examples.negotiation.view.PartyView` raises rather than answer.
 
     The rule that a party models others only from its own beliefs held on the belief path
-    and was broken one layer below it, in the prompt. The
-    scripted counterpart masked it completely: it reads the belief lines and ignores the
-    prose, so every test passed while a live model was being handed the answer.
+    and was broken one layer below it, in the prompt. The scripted counterpart masked it
+    completely: it reads the belief lines and ignores the prose, so every test passed
+    while a live model was being handed the answer.
 
     The fix is a constraint on what may enter a *shared* generative projection at all.
     There is no vantage point from which one chronicle can summarize a private event
