@@ -173,7 +173,7 @@ Version is defined in `pyproject.toml` only:
 
 ```toml
 [project]
-version = "0.1.0"
+version = "X.Y.Z"
 ```
 
 Not duplicated in `__init__.py` - maintain single source of truth.
