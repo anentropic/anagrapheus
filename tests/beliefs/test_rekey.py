@@ -313,6 +313,30 @@ def test_an_unmerge_yields_two_candidates_and_refuses_to_choose(rig: Rig):
         plans[0].sole()
 
 
+def test_an_unmerge_that_gives_nothing_back_is_refused_clearly(rig: Rig):
+    """
+    Hand-built rows for an unmerge that both name the survivor are malformed.
+
+    Identity never writes them: an unmerge always gives an entity back. Followed
+    through the batch, such a decision has nowhere to lead, and the planner says so
+    in a ``BeliefError`` rather than leaking a bare ``StopIteration``.
+    """
+    kept, absorbed = uuid.uuid7(), uuid.uuid7()
+    rig.commit(rig.asserted("location", kept))
+
+    with pytest.raises(BeliefError, match="gives nothing back"):
+        plan_rekeys(
+            [
+                RekeyRow(seq=9, kind="unmerge", from_entity=kept, to_entity=kept),
+                RekeyRow(seq=9, kind="unmerge", from_entity=kept, to_entity=absorbed),
+                RekeyRow(seq=10, kind="unmerge", from_entity=kept, to_entity=kept),
+                RekeyRow(seq=10, kind="unmerge", from_entity=kept, to_entity=kept),
+            ],
+            rig.index,
+            rig.predicates,
+        )
+
+
 def test_a_merge_withdrawn_later_in_the_batch_plans_nothing(rig: Rig):
     """
     B into A, then that merge withdrawn, in one batch: B is canonical again.
