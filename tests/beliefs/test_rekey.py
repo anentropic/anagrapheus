@@ -342,6 +342,27 @@ def test_an_unmerge_that_gives_nothing_back_is_refused_clearly(
         )
 
 
+def test_a_merge_with_more_than_one_survivor_is_refused_clearly(rig: Rig):
+    """
+    A merge names exactly one survivor; rows naming two are malformed.
+
+    Planning onto the first would guess at a decision the rows never made, so the
+    planner refuses the batch instead.
+    """
+    absorbed, one, other = uuid.uuid7(), uuid.uuid7(), uuid.uuid7()
+    rig.commit(rig.asserted("location", absorbed))
+
+    with pytest.raises(MalformedRekeyBatch, match="names 2 survivors"):
+        plan_rekeys(
+            [
+                RekeyRow(seq=9, kind="merge", from_entity=absorbed, to_entity=one),
+                RekeyRow(seq=9, kind="merge", from_entity=absorbed, to_entity=other),
+            ],
+            rig.index,
+            rig.predicates,
+        )
+
+
 def test_a_merge_withdrawn_later_in_the_batch_plans_nothing(rig: Rig):
     """
     B into A, then that merge withdrawn, in one batch: B is canonical again.

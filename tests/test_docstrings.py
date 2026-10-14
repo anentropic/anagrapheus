@@ -64,15 +64,20 @@ def _docstrings(tree: ast.Module) -> list[Docstring]:
     return found
 
 
+def _cited(where: Path, number: int, line: str) -> str | None:
+    if matches := [match.group(0) for match in CITATION.finditer(line)]:
+        return f"{where.relative_to(ROOT)}:{number}: {', '.join(matches)}: {line.strip()}"
+    return None
+
+
 def _sites(path: Path) -> list[str]:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    sites: list[str] = []
-    for start, text in _docstrings(tree):
-        for offset, line in enumerate(text.splitlines()):
-            if matches := [match.group(0) for match in CITATION.finditer(line)]:
-                where = path.relative_to(ROOT)
-                sites.append(f"{where}:{start + offset}: {', '.join(matches)}: {line.strip()}")
-    return sites
+    return [
+        site
+        for start, text in _docstrings(tree)
+        for offset, line in enumerate(text.splitlines())
+        if (site := _cited(path, start + offset, line)) is not None
+    ]
 
 
 def test_docstrings_carry_no_design_citations():
@@ -80,15 +85,15 @@ def test_docstrings_carry_no_design_citations():
     assert not sites, "design citations in docstrings:\n" + "\n".join(sites)
 
 
-def test_test_docstrings_carry_no_design_citations():
-    sites = [site for path in sorted(TESTS.rglob("*.py")) for site in _sites(path)]
-    assert not sites, "design citations in test docstrings:\n" + "\n".join(sites)
-
-
-def _cited(where: Path, number: int, line: str) -> str | None:
-    if matches := [match.group(0) for match in CITATION.finditer(line)]:
-        return f"{where.relative_to(ROOT)}:{number}: {', '.join(matches)}: {line.strip()}"
-    return None
+#: Tokens that carry prose: comments, strings, and the literal parts of f- and t-strings.
+_TEXT = frozenset(
+    {
+        tokenize.COMMENT,
+        tokenize.STRING,
+        tokenize.FSTRING_MIDDLE,
+        tokenize.TSTRING_MIDDLE,
+    }
+)
 
 
 def _token_sites(path: Path) -> list[str]:
@@ -96,7 +101,7 @@ def _token_sites(path: Path) -> list[str]:
     sites: list[str] = []
     with path.open("rb") as source:
         for token in tokenize.tokenize(source.readline):
-            if token.type not in (tokenize.COMMENT, tokenize.STRING, tokenize.FSTRING_MIDDLE):
+            if token.type not in _TEXT:
                 continue
             for offset, line in enumerate(token.string.splitlines()):
                 if (site := _cited(path, token.start[0] + offset, line)) is not None:
@@ -105,10 +110,11 @@ def _token_sites(path: Path) -> list[str]:
 
 
 def test_test_comments_and_strings_carry_no_design_citations():
-    # This module is skipped: its pattern and samples are citations on purpose.
+    # This module's own pattern and samples are citations on purpose, so only its
+    # docstrings are checked.
     here = Path(__file__).resolve()
     paths = [path for path in sorted(TESTS.rglob("*.py")) if path.resolve() != here]
-    sites = [site for path in paths for site in _token_sites(path)]
+    sites = [site for path in paths for site in _token_sites(path)] + _sites(here)
     assert not sites, "design citations in test comments or strings:\n" + "\n".join(sites)
 
 

@@ -97,8 +97,9 @@ class MalformedRekeyBatch(BeliefError):
     A batch of re-key rows holds a decision identity never writes.
 
     An unmerge always gives an entity back, so its rows name at least one entity
-    besides its survivor. Rows that name only the survivor have nowhere to lead a
-    belief, and planning around them would quietly drop the decision.
+    besides its survivor, and a merge names exactly one survivor. Rows that break
+    either have no single place to lead a belief, and planning around them would
+    quietly drop or guess at the decision.
     """
 
 

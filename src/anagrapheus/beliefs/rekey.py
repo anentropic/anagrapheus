@@ -145,6 +145,13 @@ def plan_rekeys(
     scheme it does not know, or a predicate it does not declare — instead of raising.
     Off by default: a belief the caller cannot re-key is a real gap in the cascade, and
     silence about it is the failure mode the whole seam exists to prevent.
+
+    Raises:
+        MalformedRekeyBatch: a decision has a shape identity never writes, such as an
+            unmerge that names only its survivor or a merge with more than one target.
+        MergeCycleInBatch: the batch's merges form a ring.
+        UnrenderableBelief: a belief cannot be re-minted and ``skip_unrenderable`` is
+            off.
     """
     batch = _landed(_group(rekeys))
     plans: list[BeliefRekey] = []
@@ -186,7 +193,8 @@ def _group(rekeys: Iterable[RekeyRow]) -> _Grouped:
     Gather the rows of one identity decision, keeping identity's own order.
 
     Raises:
-        MalformedRekeyBatch: an unmerge's rows name no entity besides its survivor.
+        MalformedRekeyBatch: an unmerge's rows name no entity besides its survivor, or
+            a merge's rows name more than one survivor.
     """
     grouped: _Grouped = {}
     for row in rekeys:
@@ -197,6 +205,11 @@ def _group(rekeys: Iterable[RekeyRow]) -> _Grouped:
                 f"unmerge at seq {seq} from {from_entity} names no entity other than "
                 f"{from_entity} itself, so it gives nothing back; identity never "
                 f"writes such rows, so the batch is malformed"
+            )
+        if kind == "merge" and len(targets) != 1:
+            raise MalformedRekeyBatch(
+                f"merge at seq {seq} from {from_entity} names {len(targets)} survivors; "
+                f"a merge has exactly one, so the batch is malformed"
             )
     return grouped
 
