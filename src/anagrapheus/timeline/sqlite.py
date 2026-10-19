@@ -235,6 +235,13 @@ class SQLiteEventStore:
         """Drop every pin in a unit of work."""
         self._conn.execute("DELETE FROM pin_scratch WHERE unit_id = ?", (str(unit_id),))
 
+    def scratch_units(self) -> list[UUID]:
+        """Return every unit of work that has pins in the scratch, oldest first."""
+        rows = self._conn.execute(
+            "SELECT unit_id FROM pin_scratch GROUP BY unit_id ORDER BY MIN(rowid)"
+        ).fetchall()
+        return [UUID(row["unit_id"]) for row in rows]
+
 
 def _stored_event(row: sqlite3.Row) -> StoredEvent:
     envelope = Envelope(

@@ -120,6 +120,16 @@ class PinScratchStore(Protocol):
         """Drop every pin in a unit of work."""
         ...
 
+    def scratch_units(self) -> list[UUID]:
+        """
+        Return every unit of work that has pins in the scratch, oldest first.
+
+        A unit is listed from its first pin until it is committed or abandoned. After a
+        crash these are the units left open, which the application can resume by
+        reopening a ``PinLedger`` with the unit's id, or close.
+        """
+        ...
+
 
 class LedgerStore(EventStore, PinScratchStore, TransactionalStore, Protocol):
     """

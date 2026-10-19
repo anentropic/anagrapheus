@@ -245,6 +245,13 @@ saved_unit_id = ledger.unit_id  # persist this alongside your own state
 ledger = PinLedger(store, types, unit_id=saved_unit_id)
 ```
 
+If the id was not saved, or the process died before saving it, the store can list the units left open. [`scratch_units()`][scratch-units] returns every unit that still has pins in the scratch, oldest first. A unit leaves the list when it is committed or abandoned. On start-up, resume or close each one:
+
+```python
+for unit_id in store.scratch_units():
+    PinLedger(store, types, unit_id=unit_id).abandon(reason="left open by a crash")
+```
+
 ## 5. Stream as usual
 
 Streaming needs no extra wiring. `PinnedModel` pins a streamed response as the response it accumulated to, and replays it as a stream rebuilt from that response:
@@ -346,6 +353,7 @@ This is the audit trail of an abandoned unit of work: its `reason`, and each dis
 [pin-ledger]: ../reference/anagrapheus/timeline/pins.md#anagrapheus.timeline.pins.PinLedger
 [pin-ledger-commit]: ../reference/anagrapheus/timeline/pins.md#anagrapheus.timeline.pins.PinLedger.commit
 [pin-ledger-abandon]: ../reference/anagrapheus/timeline/pins.md#anagrapheus.timeline.pins.PinLedger.abandon
+[scratch-units]: ../reference/anagrapheus/timeline/store.md#anagrapheus.timeline.store.PinScratchStore.scratch_units
 [replay-pins]: ../reference/anagrapheus/timeline/replay.md#anagrapheus.timeline.replay.ReplayPins
 [pin-promoted]: ../reference/anagrapheus/timeline/pins.md#anagrapheus.timeline.pins.PinPromoted
 [pins-abandoned]: ../reference/anagrapheus/timeline/pins.md#anagrapheus.timeline.pins.PinsAbandoned
