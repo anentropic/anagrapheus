@@ -35,6 +35,7 @@ import pytest
 from pydantic_ai.models import infer_model, override_allow_model_requests
 
 from tests.tier3.checks import CHECKS
+from tests.tier3.transient import run_retrying_transient
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -154,4 +155,5 @@ def test_against_a_real_provider(
         f"{route.name} is meant to cover {route.parses_with}; {route.model} parses with "
         f"{type(model).__name__}"
     )
-    check(model, tmp_path)
+    # A 502 or 429 from a shared provider pool is retried; see `transient.py`.
+    run_retrying_transient(lambda directory: check(model, directory), tmp_path)
