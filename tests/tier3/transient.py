@@ -34,6 +34,8 @@ def run_retrying_transient(
     pause: Callable[[float], None] = time.sleep,
 ) -> None:
     """Run ``check``, again after a transient provider error, up to ``attempts`` times."""
+    if attempts < 1:
+        raise ValueError(f"attempts must be at least 1, not {attempts}")
     for attempt in range(1, attempts + 1):
         directory = tmp_path / f"attempt-{attempt}"
         directory.mkdir()

@@ -51,3 +51,12 @@ def test_a_client_error_is_not_retried(tmp_path: Path):
     with pytest.raises(ModelHTTPError):
         run_retrying_transient(check, tmp_path, pause=lambda _: None)
     assert len(check.directories) == 1
+
+
+@pytest.mark.parametrize("attempts", [0, -1])
+def test_no_attempts_is_refused_rather_than_passing(tmp_path: Path, attempts: int):
+    check = Flaky()
+
+    with pytest.raises(ValueError, match="at least 1"):
+        run_retrying_transient(check, tmp_path, attempts=attempts)
+    assert check.directories == []
