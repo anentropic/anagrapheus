@@ -149,6 +149,33 @@ def test_scratch_survives_crash(tmp_path: Path, types: EventTypeRegistry):
     assert list(second.read()) == []  # still nothing canon
 
 
+def test_the_scratch_lists_the_units_left_open(tmp_path: Path, types: EventTypeRegistry):
+    """
+    After a crash, the store lists the units still in the scratch, oldest first.
+
+    A unit appears from its first pin and leaves when it is committed or abandoned, so
+    a restart can find the units it was in the middle of without having saved their ids.
+    """
+    path = tmp_path / "t.db"
+    first = SQLiteEventStore(path)
+    assert first.scratch_units() == []
+
+    ledgers = [PinLedger(first, types) for _ in range(4)]
+    for ledger in ledgers:
+        for which in ("a", "b"):
+            key = pin_key("rng", {"which": which})
+            ledger.resolve(key, kind="rng", effect=lambda: 1, interpret=lambda r: r)
+    # A later pin in an older unit does not move it.
+    key = pin_key("rng", {"which": "c"})
+    ledgers[0].resolve(key, kind="rng", effect=lambda: 1, interpret=lambda r: r)
+    ledgers[1].commit()
+    ledgers[2].abandon(reason="rejected")
+    first.close()  # crash: units 0 and 3 are still open
+
+    second = SQLiteEventStore(path)
+    assert second.scratch_units() == [ledgers[0].unit_id, ledgers[3].unit_id]
+
+
 def test_promote_as_maps_into_app_vocabulary(store: SQLiteEventStore, types: EventTypeRegistry):
     from anagrapheus.timeline.envelope import DomainEvent
 
