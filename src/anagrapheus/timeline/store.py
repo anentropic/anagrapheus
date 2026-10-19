@@ -126,7 +126,8 @@ class PinScratchStore(Protocol):
 
         A unit is listed from its first pin until it is committed or abandoned. After a
         crash these are the units left open, which the application can resume by
-        reopening a ``PinLedger`` with the unit's id, or close.
+        reopening a ``PinLedger`` with the unit's id, or close. The list covers every
+        unit in the store, including any another live process is still working on.
         """
         ...
 

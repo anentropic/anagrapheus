@@ -245,7 +245,7 @@ saved_unit_id = ledger.unit_id  # persist this alongside your own state
 ledger = PinLedger(store, types, unit_id=saved_unit_id)
 ```
 
-If the id was not saved, or the process died before saving it, the store can list the units left open. [`scratch_units()`][scratch-units] returns every unit that still has pins in the scratch, oldest first. A unit leaves the list when it is committed or abandoned. On start-up, resume or close each one:
+If the id was not saved, or the process died before saving it, the store can list the units left open. [`scratch_units()`][scratch-units] returns every unit that still has pins in the scratch, oldest first. A unit leaves the list when it is committed or abandoned. The list covers the whole database file, not only this process's units, so sweep it only when nothing else is using the store, or skip the units another live process still owns. On start-up, resume or close each one:
 
 ```python
 for unit_id in store.scratch_units():
