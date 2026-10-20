@@ -81,19 +81,18 @@ ROUTES = (
     Route(
         name="openrouter",
         key="OPENROUTER_API_KEY",
-        # The cheapest model that passes all four checks: free, at $0 a token. Through
-        # OpenRouter the response shape is the router's whichever model answers, so
-        # what this route covers does not depend on the model routed to.
+        # OpenRouter's free router: $0 a token, and it picks whichever free model is
+        # available, so no single model's withdrawal breaks the gate. Through OpenRouter
+        # the response shape is the router's whichever model answers, so what this
+        # route covers does not depend on the model routed to.
         #
-        # Free models draw on a shared upstream pool, and that is their cost. When this
-        # default was chosen, two other free models (`google/gemma-4-31b-it:free`,
-        # `inclusionai/ling-3.1-flash`) were rate-limited before their first request
-        # completed; this one, on Nvidia's pool, passed. A 429 at release is the pool,
-        # not this library: set TIER3_OPENROUTER_MODEL (a repository variable, in CI)
-        # to a cheap paid model --
-        # `openrouter:mistralai/mistral-nemo` was about $0.03 per million tokens -- and
-        # re-run. The whole tier is a few thousand tokens.
-        default_model="openrouter:nvidia/nemotron-3-super-120b-a12b:free",
+        # A pinned free model was the default until OpenRouter withdrew it
+        # (`nvidia/nemotron-3-super-120b-a12b:free` began answering 404). Free models
+        # also draw on a shared upstream pool: a 429 at release is the pool, not this
+        # library. Set TIER3_OPENROUTER_MODEL (a repository variable, in CI) to a cheap
+        # paid model -- `openrouter:mistralai/mistral-nemo` was about $0.03 per million
+        # tokens -- and re-run. The whole tier is a few thousand tokens.
+        default_model="openrouter:openrouter/free",
         # `OpenRouterModel`, which subclasses `OpenAIChatModel`. An earlier draft said
         # `OpenAIChatModel` -- true of a model built by hand over `OpenRouterProvider`,
         # not of what `infer_model` builds -- and the assertion below caught it.
