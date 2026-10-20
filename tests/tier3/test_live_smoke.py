@@ -87,11 +87,16 @@ ROUTES = (
         # route covers does not depend on the model routed to.
         #
         # A pinned free model was the default until OpenRouter withdrew it
-        # (`nvidia/nemotron-3-super-120b-a12b:free` began answering 404). Free models
-        # also draw on a shared upstream pool: a 429 at release is the pool, not this
-        # library. Set TIER3_OPENROUTER_MODEL (a repository variable, in CI) to a cheap
-        # paid model -- `openrouter:mistralai/mistral-nemo` was about $0.03 per million
-        # tokens -- and re-run. The whole tier is a few thousand tokens.
+        # (`nvidia/nemotron-3-super-120b-a12b:free` began answering 404). The cost of
+        # the router is that each request may reach a different model, so a passing
+        # run says nothing certain about the next one. Free models also draw on a
+        # shared upstream pool. So when this route fails at release -- a 429, or a
+        # check failing on this route alone, such as a routed model refusing the forced
+        # tool choice -- first suspect the model, not this library. Set
+        # TIER3_OPENROUTER_MODEL (a repository variable, in CI) to a cheap paid model --
+        # `openrouter:mistralai/mistral-nemo` was about $0.03 per million tokens -- and
+        # re-run. If it passes there, the router's pick was the cause. The whole tier
+        # is a few thousand tokens.
         default_model="openrouter:openrouter/free",
         # `OpenRouterModel`, which subclasses `OpenAIChatModel`. An earlier draft said
         # `OpenAIChatModel` -- true of a model built by hand over `OpenRouterProvider`,
