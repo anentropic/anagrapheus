@@ -37,11 +37,15 @@ class EventStore(Protocol):
         If ``expected_last_seq`` is given and stale, raise
         :class:`~anagrapheus.timeline.errors.ConcurrencyError` — the ``last_seq + 1``
         tripwire, not a coordination mechanism.
+
+        Each event's hash is :func:`~anagrapheus.timeline.chain.event_hash` of the
+        previous event's hash (the stream's last, for the batch's first) and its own
+        envelope and payload, stored with it.
         """
         ...
 
     def read(self, since_seq: int = 0, limit: int | None = None) -> Iterator[StoredEvent]:
-        """Read events with ``seq > since_seq``, in order. No content filtering."""
+        """Read events with ``seq > since_seq``, in order, each with its stored hash."""
         ...
 
     def last_seq(self) -> int:

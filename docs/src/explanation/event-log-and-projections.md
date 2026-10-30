@@ -58,7 +58,8 @@ store.close()
     "party": "uk",
     "clause": "fisheries",
     "position": "hold_firm"
-  }
+  },
+  "hash": "603ca201b5ec49ef37c5078a5790060d22019eb4c07c1ce5a1b6faac414a455f"
 }
 ```
 
@@ -67,7 +68,21 @@ The envelope's fields are fixed, because they are the wire format the log will c
 - **`namespace`, `type` and `schema_version`** together name the payload's shape. The [`EventTypeRegistry`][registry] maps that triple to a model and back, and it is the only route between raw payloads and typed events.
 - **`event_id`** is a UUIDv7, unique to this event.
 - **`causation_id`** points at the event that directly caused this one, and **`correlation_id`** groups every event of one wider activity. Together they let you reconstruct why something happened without baking that story into payloads.
+- **`hash`** is the event's link in the log's hash chain, described next. Like `seq`, the store sets it on append.
 - **`seq`** is not in the envelope at all. An event awaiting append is a [`PendingEvent`][pending-event]; an event read back is a [`StoredEvent`][stored-event] that also carries its `seq`. Keeping them as separate types means code cannot accidentally treat an unappended event as if it had a position.
+
+### Every event is chained to the one before
+
+Each stored event carries a SHA-256 **`hash`** over its envelope, its payload as stored, and the hash of the event before it. [`event_hash`][event-hash] is the whole definition, so any store computes the same chain. Editing, removing or reordering an event therefore breaks the chain from that point on, and [`verify_chain(store.read())`][verify-chain] finds where: it raises [`ChainBroken`][chain-broken] with the `seq` of the first event whose hash is wrong, or returns the hash of the last event, the log's **head**.
+
+The chain covers the payload before any upcast, so a schema upgrade that changes only how events are read leaves it alone. It does not cover `seq`: an event's place is already fixed by its predecessor's hash. Two logs that hold the same events in the same order therefore hold the same hashes, so a log copied from another can show that its copy is exact.
+
+Two limits are worth knowing:
+
+- **It is tamper-evident, not a signature.** Anyone who can write the file can recompute every hash after an edit.
+- **It cannot see events cut off the end**, since a shorter log is still a valid chain.
+
+Both are answered by keeping a head somewhere else, such as in a later log, a checked-in fixture or a backup, and comparing against it. A log written before the chain existed is chained when the store opens it, exactly as appending would have chained it.
 
 ### Vocabularies are declared in code
 
@@ -167,3 +182,6 @@ The reader is strict about gaps. If the chain stops short of the latest register
 [generative-rebuild]: ../reference/anagrapheus/timeline/folds.md#anagrapheus.timeline.folds.GenerativeRebuild
 [upcast-gap]: ../reference/anagrapheus/timeline/errors.md#anagrapheus.timeline.errors.UpcastGap
 [schema-too-new]: ../reference/anagrapheus/timeline/migrations.md#anagrapheus.timeline.migrations.SchemaTooNew
+[event-hash]: ../reference/anagrapheus/timeline/chain.md#anagrapheus.timeline.chain.event_hash
+[verify-chain]: ../reference/anagrapheus/timeline/chain.md#anagrapheus.timeline.chain.verify_chain
+[chain-broken]: ../reference/anagrapheus/timeline/chain.md#anagrapheus.timeline.chain.ChainBroken

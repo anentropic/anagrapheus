@@ -2,7 +2,9 @@
 Infra-schema migrations, tracked per component in a ``schema_versions`` table.
 
 This governs adapter tables only. Event *payload* evolution is handled by
-upcast-on-read and never touches the schema. Consumers are library users opening a
+upcast-on-read and never touches the schema. A step is a SQL statement, or a function
+of the connection for work SQL cannot do, such as backfilling a column computed in
+Python; either runs inside its migration's transaction. Consumers are library users opening a
 file, not operators running a CLI, so the runner lives inside connect: each pending
 migration applies atomically and bumps its component's row; a fresh database simply
 runs the whole list. Downgrade is unsupported — a file from a newer library version
@@ -16,18 +18,27 @@ express that — it is a single integer per file — so it is deliberately unuse
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Final
+import json
+from collections.abc import Callable
+from datetime import datetime
+from typing import TYPE_CHECKING, Final, cast
+from uuid import UUID
 
+from anagrapheus.timeline.chain import event_hash
+from anagrapheus.timeline.envelope import Envelope
 from anagrapheus.timeline.errors import TimelineError
 
 if TYPE_CHECKING:
     import sqlite3
+
+    from pydantic import JsonValue
 
 __all__ = [
     "COMPONENT",
     "LATEST_VERSION",
     "MIGRATIONS",
     "SchemaTooNew",
+    "Step",
     "component_version",
     "migrate",
 ]
@@ -49,10 +60,36 @@ _BOOTSTRAP: Final = """
     ) STRICT
 """
 
-# Each migration is a tuple of single statements, executed in one transaction with its
+type Step = str | Callable[[sqlite3.Connection], None]
+"""One step of a migration: a single SQL statement, or a function run on the connection."""
+
+
+def _backfill_hashes(conn: sqlite3.Connection) -> None:
+    """Chain every event already in the log, in ``seq`` order, as append would have."""
+    prev: str | None = None
+    rows = conn.execute(
+        "SELECT seq, event_id, namespace, type, schema_version, causation_id,"
+        " correlation_id, created_at, payload FROM events ORDER BY seq"
+    ).fetchall()
+    for seq, event_id, namespace, type_, version, causation, correlation, created, raw in rows:
+        envelope = Envelope(
+            event_id=UUID(event_id),
+            namespace=namespace,
+            type=type_,
+            schema_version=version,
+            causation_id=UUID(causation) if causation else None,
+            correlation_id=UUID(correlation) if correlation else None,
+            created_at=datetime.fromisoformat(created),
+        )
+        payload = cast("dict[str, JsonValue]", json.loads(raw))
+        prev = event_hash(prev, envelope, payload)
+        conn.execute("UPDATE events SET hash = ? WHERE seq = ?", (prev, seq))
+
+
+# Each migration is a tuple of single steps, executed in one transaction with its
 # version bump. `sqlite3.Connection.executescript` is deliberately avoided: its
 # transaction semantics would break per-migration atomicity.
-MIGRATIONS: Final[tuple[tuple[str, ...], ...]] = (
+MIGRATIONS: Final[tuple[tuple[Step, ...], ...]] = (
     # v1 — initial schema: events, positions, pin_scratch.
     (
         """
@@ -88,6 +125,12 @@ MIGRATIONS: Final[tuple[tuple[str, ...], ...]] = (
         ) STRICT
         """,
     ),
+    # v2 — the hash chain: every event's hash covers its predecessor's. Logs written
+    # before it are chained on upgrade, exactly as append would have chained them.
+    (
+        "ALTER TABLE events ADD COLUMN hash TEXT NOT NULL DEFAULT ''",
+        _backfill_hashes,
+    ),
 )
 
 LATEST_VERSION: Final = len(MIGRATIONS)
@@ -105,7 +148,7 @@ def component_version(conn: sqlite3.Connection, component: str) -> int:
 def migrate(
     conn: sqlite3.Connection,
     component: str = COMPONENT,
-    migrations: tuple[tuple[str, ...], ...] = MIGRATIONS,
+    migrations: tuple[tuple[Step, ...], ...] = MIGRATIONS,
 ) -> int:
     """
     Bring one component's schema to the latest version in its list; return it.
@@ -121,11 +164,14 @@ def migrate(
     current = component_version(conn, component)
     if current > latest:
         raise SchemaTooNew(f"{component} schema is v{current}; this library knows up to v{latest}")
-    for version, statements in enumerate(migrations[current:], start=current + 1):
+    for version, steps in enumerate(migrations[current:], start=current + 1):
         conn.execute("BEGIN IMMEDIATE")
         try:
-            for statement in statements:
-                conn.execute(statement)
+            for step in steps:
+                if isinstance(step, str):
+                    conn.execute(step)
+                else:
+                    step(conn)
             conn.execute(
                 """
                 INSERT INTO schema_versions (component, version, updated_at)

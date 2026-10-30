@@ -65,9 +65,12 @@ def test_fresh_equals_migrated_from_every_version(tmp_path: Path):
 
     for start in range(LATEST_VERSION):
         conn = _connect(tmp_path / f"from_v{start}.db")
-        for version, statements in enumerate(MIGRATIONS[:start], start=1):
-            for statement in statements:
-                conn.execute(statement)
+        for version, steps in enumerate(MIGRATIONS[:start], start=1):
+            for step in steps:
+                if isinstance(step, str):
+                    conn.execute(step)
+                else:
+                    step(conn)
             _stamp(conn, COMPONENT, version)
         migrate(conn)
         assert _normalized_schema(conn) == expected, f"divergent schema from v{start}"
