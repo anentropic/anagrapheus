@@ -71,8 +71,14 @@ class StoredEvent(BaseModel, frozen=True):
 
     ``payload`` is raw (pre-upcast); ``EventReader`` upcasts and decodes it into the
     registered model.
+
+    ``hash`` is the event's link in the log's hash chain (see
+    :mod:`anagrapheus.timeline.chain`), set by the store on append. Every event a store
+    reads back has one; it is ``None`` only on an event built some other way, such as a
+    test's, or one read from a recording written before the chain existed.
     """
 
     seq: int = Field(ge=1)
     envelope: Envelope
     payload: dict[str, JsonValue]
+    hash: str | None = None

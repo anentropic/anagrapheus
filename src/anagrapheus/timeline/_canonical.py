@@ -14,7 +14,7 @@ import unicodedata
 from collections.abc import Mapping, Sequence
 from typing import cast
 
-__all__ = ["Json", "canonical_json", "concrete_json", "sha256_hex"]
+__all__ = ["Json", "canonical_json", "concrete_json", "exact_json", "sha256_hex"]
 
 # JSON-serializable data, typed covariantly: pydantic's JsonValue unions invariant
 # dict/list, which rejects concrete returns like dict[str, int] in resolver
@@ -75,6 +75,17 @@ def canonical_json(value: Json) -> str:
         ensure_ascii=False,
         allow_nan=False,
     )
+
+
+def exact_json(value: object) -> str:
+    """
+    Serialize with sorted keys and no whitespace, strings exactly as given.
+
+    The form for content, where :func:`canonical_json` is the form for keys: event
+    hashes and recorded events must keep every byte of a string, so a composed and a
+    decomposed character stay different.
+    """
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
 def sha256_hex(value: Json) -> str:

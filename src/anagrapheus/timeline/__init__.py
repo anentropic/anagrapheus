@@ -7,6 +7,7 @@ run replays or says exactly where it diverged.
 """
 
 from anagrapheus.timeline._canonical import Json, canonical_json, sha256_hex
+from anagrapheus.timeline.chain import CHAIN_SCHEME, ChainBroken, event_hash, verify_chain
 from anagrapheus.timeline.envelope import DomainEvent, Envelope, PendingEvent, StoredEvent
 from anagrapheus.timeline.errors import (
     ConcurrencyError,
@@ -57,8 +58,10 @@ from anagrapheus.timeline.store import (
 from anagrapheus.timeline.upcast import EventReader, Upcast, UpcastRegistry
 
 __all__ = [
+    "CHAIN_SCHEME",
     "RESERVED_NAMESPACE",
     "AsyncGenerativeFold",
+    "ChainBroken",
     "ConcurrencyError",
     "DiscardedPin",
     "Divergence",
@@ -100,11 +103,13 @@ __all__ = [
     "UpcastGap",
     "UpcastRegistry",
     "canonical_json",
+    "event_hash",
     "is_bookkeeping",
     "pin_events",
     "pin_key",
     "read_recording",
     "register_builtin_events",
     "sha256_hex",
+    "verify_chain",
     "write_recording",
 ]

@@ -17,7 +17,9 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, cast
 from uuid import UUID
 
-from anagrapheus.timeline.envelope import Envelope, StoredEvent
+from anagrapheus.timeline._rows import decode_event_row
+from anagrapheus.timeline.chain import event_hash
+from anagrapheus.timeline.envelope import StoredEvent
 from anagrapheus.timeline.errors import ConcurrencyError
 from anagrapheus.timeline.migrations import COMPONENT, MIGRATIONS, migrate
 from anagrapheus.timeline.store import ScratchRow
@@ -123,12 +125,14 @@ class SQLiteEventStore:
                     f"expected last_seq {expected_last_seq}, found {last}: "
                     "a second writer is a broken composition, not contention"
                 )
+            prev = self._head_hash(conn)
             for offset, pending in enumerate(batch, start=1):
                 env = pending.envelope
+                prev = event_hash(prev, env, pending.payload)
                 conn.execute(
                     "INSERT INTO events (seq, event_id, namespace, type, schema_version,"
-                    " causation_id, correlation_id, created_at, payload)"
-                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    " causation_id, correlation_id, created_at, payload, hash)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         last + offset,
                         str(env.event_id),
@@ -139,6 +143,7 @@ class SQLiteEventStore:
                         str(env.correlation_id) if env.correlation_id else None,
                         env.created_at.isoformat(),
                         json.dumps(pending.payload, ensure_ascii=False),
+                        prev,
                     ),
                 )
         # After the `with`, so a batch whose own write failed is never reported. One
@@ -170,6 +175,11 @@ class SQLiteEventStore:
     def _last_seq(conn: sqlite3.Connection) -> int:
         row = conn.execute("SELECT COALESCE(MAX(seq), 0) FROM events").fetchone()
         return int(row[0])
+
+    @staticmethod
+    def _head_hash(conn: sqlite3.Connection) -> str | None:
+        row = conn.execute("SELECT hash FROM events ORDER BY seq DESC LIMIT 1").fetchone()
+        return str(row[0]) if row is not None else None
 
     def read_position(self, projection: str) -> int:
         """Return the last folded ``seq`` for a projection, or 0."""
@@ -244,17 +254,17 @@ class SQLiteEventStore:
 
 
 def _stored_event(row: sqlite3.Row) -> StoredEvent:
-    envelope = Envelope(
-        event_id=UUID(row["event_id"]),
-        namespace=row["namespace"],
-        type=row["type"],
-        schema_version=row["schema_version"],
-        causation_id=UUID(row["causation_id"]) if row["causation_id"] else None,
-        correlation_id=UUID(row["correlation_id"]) if row["correlation_id"] else None,
-        created_at=datetime.fromisoformat(row["created_at"]),
+    envelope, payload = decode_event_row(
+        row["event_id"],
+        row["namespace"],
+        row["type"],
+        row["schema_version"],
+        row["causation_id"],
+        row["correlation_id"],
+        row["created_at"],
+        row["payload"],
     )
-    payload = cast("dict[str, JsonValue]", json.loads(row["payload"]))
-    return StoredEvent(seq=row["seq"], envelope=envelope, payload=payload)
+    return StoredEvent(seq=row["seq"], envelope=envelope, payload=payload, hash=row["hash"])
 
 
 def _scratch_row(row: sqlite3.Row) -> ScratchRow:
