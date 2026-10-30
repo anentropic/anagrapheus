@@ -99,3 +99,14 @@ def test_stored_payload_never_rewritten(
     raw = list(store.read())  # then look underneath
     assert raw[0].envelope.schema_version == 1
     assert raw[0].payload == {"n": 7}
+
+
+def test_an_upcast_copy_drops_the_stored_hash(
+    tmp_path: Path, types: EventTypeRegistry, upcasts: UpcastRegistry
+):
+    """The stored hash covers the stored payload, so an upcast copy carries none."""
+    store = SQLiteEventStore(tmp_path / "t.db")
+    store.append([types.pending(StepV1(n=1)), types.pending(StepV3(n=2, label="x", source="y"))])
+    upcast, current = EventReader(store, upcasts, types).read_raw()
+    assert upcast.hash is None
+    assert current.hash is not None

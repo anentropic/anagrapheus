@@ -119,10 +119,13 @@ class EventReader:
             if version == env.schema_version:
                 yield event
             else:
+                # The stored hash covers the stored payload, not this one, so the copy
+                # drops it rather than carry a hash its content does not match.
                 yield event.model_copy(
                     update={
                         "payload": payload,
                         "envelope": env.model_copy(update={"schema_version": version}),
+                        "hash": None,
                     }
                 )
 

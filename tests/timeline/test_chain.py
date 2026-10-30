@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 from anagrapheus.timeline.chain import ChainBroken, event_hash, verify_chain
 from anagrapheus.timeline.envelope import DomainEvent, Envelope, PendingEvent, StoredEvent
 from anagrapheus.timeline.migrations import COMPONENT, MIGRATIONS
+from anagrapheus.timeline.recording import read_recording, write_recording
 from anagrapheus.timeline.registry import EventTypeRegistry
 from anagrapheus.timeline.sqlite import SQLiteEventStore
 
@@ -231,3 +232,16 @@ class TestUpgrade:
         assert [e.hash for e in upgraded.read()] == expected
         upgraded.append([types.pending(StepTaken(n=3))])
         assert verify_chain(upgraded.read()) is not None
+
+
+class TestRecording:
+    def test_a_recording_verifies(
+        self, store: SQLiteEventStore, types: EventTypeRegistry, tmp_path: Path
+    ):
+        """Recorded events keep every byte, so a decomposed é still matches its hash."""
+        store.append([types.pending(Said(text="caf" + "é")), types.pending(StepTaken(n=1))])
+        path = tmp_path / "run.jsonl"
+        write_recording(path, store.read(), header={})
+        recorded = read_recording(path).events
+        assert recorded[0].payload == {"text": "café"}
+        assert verify_chain(recorded) == verify_chain(store.read())

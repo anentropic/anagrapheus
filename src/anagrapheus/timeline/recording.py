@@ -20,9 +20,11 @@ matters more than it looks: a pin key includes the model's id, so the same story
 recorded through a different provider route is a different corpus, and a replay against
 the wrong one misses on every draw. The header is where a reader finds out which.
 
-**Canonical JSON throughout**, sorted keys and no whitespace, so re-recording an
-unchanged run changes only what genuinely differs — ids, timestamps, the responses — and
-a recording's diff is reviewable rather than reshuffled.
+**Sorted keys and no whitespace throughout**, so re-recording an unchanged run changes
+only what genuinely differs — ids, timestamps, the responses — and a recording's diff is
+reviewable rather than reshuffled. Event lines keep every string exactly as stored (no
+NFC normalization, which is for keys), so a recorded event still matches its hash and a
+recording verifies with :func:`~anagrapheus.timeline.verify_chain`.
 """
 
 # Design: note 00 §8.
@@ -32,7 +34,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, NamedTuple, cast
 
-from anagrapheus.timeline._canonical import canonical_json, concrete_json
+from anagrapheus.timeline._canonical import canonical_json, concrete_json, exact_json
 from anagrapheus.timeline.envelope import StoredEvent
 from anagrapheus.timeline.errors import TimelineError
 from anagrapheus.timeline.registry import RESERVED_NAMESPACE
@@ -95,7 +97,7 @@ def write_recording(
     if RECORDING_FORMAT in header:
         raise RecordingError(f"{RECORDING_FORMAT!r} is the format marker, not header content")
     lines = [canonical_json(cast("Json", {RECORDING_FORMAT: _VERSION, **header}))]
-    lines.extend(canonical_json(concrete_json(stored.model_dump(mode="json"))) for stored in events)
+    lines.extend(exact_json(concrete_json(stored.model_dump(mode="json"))) for stored in events)
     # LF on every platform: text mode would write CRLF on Windows, and a re-recording
     # there would rewrite every line of the fixture.
     path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")

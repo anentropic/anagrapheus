@@ -23,9 +23,9 @@ same order (a copy, a fork's prefix) hold the same hashes.
 from __future__ import annotations
 
 import hashlib
-import json
 from typing import TYPE_CHECKING, Final
 
+from anagrapheus.timeline._canonical import exact_json
 from anagrapheus.timeline.errors import TimelineError
 
 if TYPE_CHECKING:
@@ -79,18 +79,20 @@ def event_hash(prev: str | None, envelope: Envelope, payload: Mapping[str, JsonV
         "created_at": envelope.created_at.isoformat(),
         "payload": payload,
     }
-    text = json.dumps(material, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+    return hashlib.sha256(exact_json(material).encode("utf-8")).hexdigest()
 
 
 def verify_chain(events: Iterable[StoredEvent], *, prev: str | None = None) -> str | None:
     """
     Check every event's hash in order; return the last one, the log's head.
 
-    Pass events as the store reads them (raw, not upcast). ``prev`` is the hash of the
-    event before the first one passed, for checking a log from part-way through;
-    leave it out to check from the start. Returns ``prev`` unchanged when there are no
-    events, so an empty log's head is ``None``.
+    Pass events as the store reads them, or as a recording holds them: raw, not upcast.
+    An upcast event carries no hash, since its payload is no longer the one stored, so
+    it fails here rather than verifying against content it does not have.
+
+    ``prev`` is the hash of the event before the first one passed, for checking a log
+    from part-way through; leave it out to check from the start. Returns ``prev``
+    unchanged when there are no events, so an empty log's head is ``None``.
 
     Raises :class:`ChainBroken` at the first event whose stored hash is wrong.
     """

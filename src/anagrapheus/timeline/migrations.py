@@ -18,20 +18,15 @@ express that — it is a single integer per file — so it is deliberately unuse
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable
-from datetime import datetime
-from typing import TYPE_CHECKING, Final, cast
-from uuid import UUID
+from typing import TYPE_CHECKING, Final
 
+from anagrapheus.timeline._rows import EVENT_COLUMNS, decode_event_row
 from anagrapheus.timeline.chain import event_hash
-from anagrapheus.timeline.envelope import Envelope
 from anagrapheus.timeline.errors import TimelineError
 
 if TYPE_CHECKING:
     import sqlite3
-
-    from pydantic import JsonValue
 
 __all__ = [
     "COMPONENT",
@@ -67,21 +62,9 @@ type Step = str | Callable[[sqlite3.Connection], None]
 def _backfill_hashes(conn: sqlite3.Connection) -> None:
     """Chain every event already in the log, in ``seq`` order, as append would have."""
     prev: str | None = None
-    rows = conn.execute(
-        "SELECT seq, event_id, namespace, type, schema_version, causation_id,"
-        " correlation_id, created_at, payload FROM events ORDER BY seq"
-    ).fetchall()
-    for seq, event_id, namespace, type_, version, causation, correlation, created, raw in rows:
-        envelope = Envelope(
-            event_id=UUID(event_id),
-            namespace=namespace,
-            type=type_,
-            schema_version=version,
-            causation_id=UUID(causation) if causation else None,
-            correlation_id=UUID(correlation) if correlation else None,
-            created_at=datetime.fromisoformat(created),
-        )
-        payload = cast("dict[str, JsonValue]", json.loads(raw))
+    rows = conn.execute(f"SELECT {EVENT_COLUMNS} FROM events ORDER BY seq").fetchall()
+    for seq, *columns in rows:
+        envelope, payload = decode_event_row(*columns)
         prev = event_hash(prev, envelope, payload)
         conn.execute("UPDATE events SET hash = ? WHERE seq = ?", (prev, seq))
 

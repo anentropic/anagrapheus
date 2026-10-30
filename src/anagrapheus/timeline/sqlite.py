@@ -17,8 +17,9 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, cast
 from uuid import UUID
 
+from anagrapheus.timeline._rows import decode_event_row
 from anagrapheus.timeline.chain import event_hash
-from anagrapheus.timeline.envelope import Envelope, StoredEvent
+from anagrapheus.timeline.envelope import StoredEvent
 from anagrapheus.timeline.errors import ConcurrencyError
 from anagrapheus.timeline.migrations import COMPONENT, MIGRATIONS, migrate
 from anagrapheus.timeline.store import ScratchRow
@@ -253,16 +254,16 @@ class SQLiteEventStore:
 
 
 def _stored_event(row: sqlite3.Row) -> StoredEvent:
-    envelope = Envelope(
-        event_id=UUID(row["event_id"]),
-        namespace=row["namespace"],
-        type=row["type"],
-        schema_version=row["schema_version"],
-        causation_id=UUID(row["causation_id"]) if row["causation_id"] else None,
-        correlation_id=UUID(row["correlation_id"]) if row["correlation_id"] else None,
-        created_at=datetime.fromisoformat(row["created_at"]),
+    envelope, payload = decode_event_row(
+        row["event_id"],
+        row["namespace"],
+        row["type"],
+        row["schema_version"],
+        row["causation_id"],
+        row["correlation_id"],
+        row["created_at"],
+        row["payload"],
     )
-    payload = cast("dict[str, JsonValue]", json.loads(row["payload"]))
     return StoredEvent(seq=row["seq"], envelope=envelope, payload=payload, hash=row["hash"])
 
 

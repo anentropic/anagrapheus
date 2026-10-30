@@ -198,7 +198,7 @@ The same `(namespace, type, version)` was registered twice, or one model class w
 
 Your events cannot use the library's namespace. Pick your own, such as `"fisheries"`.
 
-### `SchemaTooNew: timeline schema is v99; this library knows up to v1`
+### `SchemaTooNew: timeline schema is v99; this library knows up to v2`
 
 This is about the database file, not your events. The SQLite file was last opened by a newer version of anagrapheus, which upgraded its tables, and older versions cannot open it. Upgrade the library. Opening a file with a newer library upgrades it automatically; there is no downgrade.
 
