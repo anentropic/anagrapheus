@@ -40,6 +40,7 @@ from pydantic_ai import RunContext
 from pydantic_core import to_jsonable_python
 
 from anagrapheus.timeline.pins import pin_key
+from anagrapheus.timeline.replay import PinMiss
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine, Mapping
@@ -160,6 +161,10 @@ def pinned_tool[**P, R](
                 key, kind=kind, effect=draw, interpret=lambda raw: raw
             )
         except Exception as error:
+            if isinstance(error, PinMiss) and not drawn:
+                # The replay logged the miss itself; the tool was never run.
+                _log.info("tool %s(%s) not called: %s", tool_name, asked["arguments"], error)
+                raise
             _log.warning(
                 "tool %s(%s) failed after %.2fs: %s %s",
                 tool_name,

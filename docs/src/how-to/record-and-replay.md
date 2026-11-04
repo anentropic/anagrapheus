@@ -223,6 +223,8 @@ The file is not a recording, or its header line was removed. [`read_recording`][
 !!! info "Logging"
     The library logs every model call (drawn or reused from a pin) under the `anagrapheus` logger and never configures logging itself. Turn it up with `logging.getLogger("anagrapheus").setLevel(logging.INFO)` and a handler of your choice.
 
+    A miss is logged at `INFO` in record mode, because there it is how a fresh draw is made. In strict mode it fails the call and is a `WARNING`. The call a strict miss stopped is logged as `not called`, at `INFO`, not as a provider failure.
+
 ## Related
 
 - [How to Pin Model and Tool Calls](pin-model-and-tool-calls.md): tools, retries, streaming and custom call policies.

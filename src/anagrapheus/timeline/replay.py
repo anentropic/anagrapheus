@@ -320,7 +320,15 @@ class ReplayPins:
         Returns the ledger to draw through, which record mode always has.
         """
         miss = Divergence(missed_key=key, kind=kind, after_hits=self._hits)
-        _log.warning("replay missed %s after %d hit(s) (%s)", key, self._hits, self._on_miss)
+        # A record-mode miss is the designed path to a fresh draw, not a fault; only a
+        # strict miss, which fails the call, is a warning.
+        _log.log(
+            logging.WARNING if self._on_miss == "strict" else logging.INFO,
+            "replay missed %s after %d hit(s) (%s)",
+            key,
+            self._hits,
+            self._on_miss,
+        )
         if self._on_miss == "strict" or self._into is None:
             if self._divergence is None:
                 self._divergence = miss
