@@ -268,9 +268,9 @@ class _Call:
         )
 
     def failed(self, error: Exception) -> None:
-        if isinstance(error, PinMiss):
+        if isinstance(error, PinMiss) and not self.drawn:
             # The replay logged the miss itself. The provider was never asked, so this
-            # is not a provider failure.
+            # is not a provider failure. A miss raised after the draw began is one.
             _log.info("%s %s not called: %s", self.model.model_id, self.model._kind, error)
             return
         _log.warning(

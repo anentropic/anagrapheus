@@ -11,7 +11,7 @@ from pydantic_ai import Agent
 
 from anagrapheus.provider import PinnedModel, pinned_tool
 from anagrapheus.timeline import ReplayPins
-from anagrapheus.timeline.replay import PinMiss
+from anagrapheus.timeline.replay import Divergence, PinMiss
 
 from .conftest import Counted, CountedStream, Rig, says
 
@@ -184,3 +184,17 @@ def test_a_tool_a_strict_replay_missed_is_not_a_failure(rig: Rig, caplog: LogCap
     (record,) = [r for r in caplog.records if r.name == "anagrapheus.provider.tools"]
     assert record.levelno == logging.INFO
     assert "not called" in record.getMessage()
+
+
+def test_a_tool_whose_own_body_missed_is_a_failure(rig: Rig, caplog: LogCaptureFixture):
+    """Review finding: a miss from inside the tool means the tool ran, so it failed."""
+
+    def fetch(url: str) -> str:
+        raise PinMiss(Divergence(missed_key="inner", kind="tool:inner", after_hits=0))
+
+    with caplog.at_level(logging.INFO, logger="anagrapheus"), pytest.raises(PinMiss):
+        asyncio.run(pinned_tool(rig.ledger, fetch)("http://example.test"))
+
+    (record,) = [r for r in caplog.records if r.name == "anagrapheus.provider.tools"]
+    assert record.levelno == logging.WARNING
+    assert "failed after" in record.getMessage()

@@ -160,11 +160,11 @@ def pinned_tool[**P, R](
             result = await resolver.resolve_async(
                 key, kind=kind, effect=draw, interpret=lambda raw: raw
             )
-        except PinMiss as error:
-            # The replay logged the miss itself; the tool was never run.
-            _log.info("tool %s(%s) not called: %s", tool_name, asked["arguments"], error)
-            raise
         except Exception as error:
+            if isinstance(error, PinMiss) and not drawn:
+                # The replay logged the miss itself; the tool was never run.
+                _log.info("tool %s(%s) not called: %s", tool_name, asked["arguments"], error)
+                raise
             _log.warning(
                 "tool %s(%s) failed after %.2fs: %s %s",
                 tool_name,
