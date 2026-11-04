@@ -29,6 +29,7 @@ from pydantic_core import to_jsonable_python
 from anagrapheus.provider.policy import SemanticCallPolicy
 from anagrapheus.provider.stream import PinnedStreamedResponse
 from anagrapheus.timeline.pins import pin_key
+from anagrapheus.timeline.replay import PinMiss
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable
@@ -267,6 +268,11 @@ class _Call:
         )
 
     def failed(self, error: Exception) -> None:
+        if isinstance(error, PinMiss):
+            # The replay logged the miss itself. The provider was never asked, so this
+            # is not a provider failure.
+            _log.info("%s %s not called: %s", self.model.model_id, self.model._kind, error)
+            return
         _log.warning(
             "%s %s failed after %.2fs: %s",
             self.model.model_id,

@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from pytest import LogCaptureFixture
 
 MODEL_LOGGER = "anagrapheus.provider.model"
+REPLAY_LOGGER = "anagrapheus.timeline.replay"
 
 
 def _calls(caplog: LogCaptureFixture) -> list[logging.LogRecord]:
@@ -109,12 +110,13 @@ def test_a_streamed_call_is_logged_once_it_has_closed(rig: Rig, caplog: LogCaptu
     assert " drawn " in record.getMessage()
 
 
-def test_a_stream_that_fails_to_open_is_a_warning(rig: Rig, caplog: LogCaptureFixture):
+def test_a_stream_that_fails_to_open_is_logged(rig: Rig, caplog: LogCaptureFixture):
     """
     Review finding: only the caller's use of an open stream was covered.
 
     A strict replay that misses raises while the stream is being *opened*, before there
-    is anything to use -- and that call left no record at all.
+    is anything to use -- and that call left no record at all. The provider was never
+    asked, so the record is not a provider failure.
     """
     replay = ReplayPins.from_events([], rig.types, on_miss="strict")
     agent = Agent(model=PinnedModel(CountedStream(["Lisbon"]).model(), replay))
@@ -123,8 +125,37 @@ def test_a_stream_that_fails_to_open_is_a_warning(rig: Rig, caplog: LogCaptureFi
         asyncio.run(_streamed(agent, "where?"))
 
     (record,) = _calls(caplog)
-    assert record.levelno == logging.WARNING
-    assert "failed" in record.getMessage()
+    assert record.levelno == logging.INFO
+    assert "not called" in record.getMessage()
+
+
+def test_a_strict_miss_is_one_warning_from_the_replay(rig: Rig, caplog: LogCaptureFixture):
+    """The replay warns about the miss; the model call it failed is not a second warning."""
+    replay = ReplayPins.from_events([], rig.types, on_miss="strict")
+    agent = Agent(model=PinnedModel(Counted(says("Lisbon")).model(), replay))
+
+    with caplog.at_level(logging.INFO, logger="anagrapheus"), pytest.raises(PinMiss):
+        agent.run_sync("where?")
+
+    warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert [r.name for r in warnings] == [REPLAY_LOGGER]
+    (record,) = _calls(caplog)
+    assert record.levelno == logging.INFO
+    assert "not called" in record.getMessage()
+
+
+def test_a_record_mode_miss_is_not_a_warning(rig: Rig, caplog: LogCaptureFixture):
+    """In record mode a miss is how a fresh draw is made, so it is logged at INFO."""
+    replay = ReplayPins.from_events([], rig.types, on_miss="record", into=rig.ledger)
+    agent = Agent(model=PinnedModel(Counted(says("Lisbon")).model(), replay))
+
+    with caplog.at_level(logging.INFO, logger="anagrapheus"):
+        agent.run_sync("where?")
+
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+    (miss,) = [r for r in caplog.records if r.name == REPLAY_LOGGER]
+    assert miss.levelno == logging.INFO
+    assert "replay missed" in miss.getMessage()
 
 
 def test_a_failed_tool_is_a_warning(rig: Rig, caplog: LogCaptureFixture):
@@ -139,3 +170,17 @@ def test_a_failed_tool_is_a_warning(rig: Rig, caplog: LogCaptureFixture):
     (record,) = [r for r in caplog.records if r.name == "anagrapheus.provider.tools"]
     assert record.levelno == logging.WARNING
     assert "archive unreachable" in record.getMessage()
+
+
+def test_a_tool_a_strict_replay_missed_is_not_a_failure(rig: Rig, caplog: LogCaptureFixture):
+    def fetch(url: str) -> str:
+        return "page"
+
+    replay = ReplayPins.from_events([], rig.types, on_miss="strict")
+
+    with caplog.at_level(logging.INFO, logger="anagrapheus"), pytest.raises(PinMiss):
+        asyncio.run(pinned_tool(replay, fetch)("http://example.test"))
+
+    (record,) = [r for r in caplog.records if r.name == "anagrapheus.provider.tools"]
+    assert record.levelno == logging.INFO
+    assert "not called" in record.getMessage()
