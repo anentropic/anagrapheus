@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 from pydantic_ai import Agent
+from pydantic_ai.messages import ModelRequest
+from pydantic_ai.models import ModelRequestParameters
 
 from anagrapheus.provider import PinnedModel, pinned_tool
 from anagrapheus.timeline import ReplayPins
@@ -127,6 +129,28 @@ def test_a_stream_that_fails_to_open_is_logged(rig: Rig, caplog: LogCaptureFixtu
     (record,) = _calls(caplog)
     assert record.levelno == logging.INFO
     assert "not called" in record.getMessage()
+
+
+def test_a_miss_raised_while_a_drawn_stream_is_open_is_a_failure(
+    rig: Rig, caplog: LogCaptureFixture
+):
+    """Review finding: the stream was drawn, so a miss raised in its body is a failure."""
+    model = PinnedModel(CountedStream(["Lisbon"]).model(), rig.ledger)
+    inner = PinMiss(Divergence(missed_key="inner", kind="tool:inner", after_hits=0))
+
+    async def use() -> None:
+        asked: list[ModelMessage] = [ModelRequest.user_text_prompt("where?")]
+        async with model.request_stream(asked, None, ModelRequestParameters()) as stream:
+            async for _ in stream:
+                pass
+            raise inner
+
+    with caplog.at_level(logging.INFO, logger="anagrapheus"), pytest.raises(PinMiss):
+        asyncio.run(use())
+
+    (record,) = _calls(caplog)
+    assert record.levelno == logging.WARNING
+    assert "failed after" in record.getMessage()
 
 
 def test_a_strict_miss_is_one_warning_from_the_replay(rig: Rig, caplog: LogCaptureFixture):
