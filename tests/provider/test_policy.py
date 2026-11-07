@@ -209,6 +209,35 @@ def test_a_field_added_at_its_default_does_not_change_the_key():
     assert before == after
 
 
+def test_a_private_field_stays_out_of_the_key_whatever_it_holds():
+    """Private bookkeeping (pydantic-ai's telemetry fields) is never keyed, set or not."""
+    quiet = material([ModelRequest(parts=[cast("UserPromptPart", _After("hi"))])], "m", PARAMS)
+    traced = material(
+        [ModelRequest(parts=[cast("UserPromptPart", _After("hi", _telemetry="trace-123"))])],
+        "m",
+        PARAMS,
+    )
+
+    assert quiet == traced
+
+
+@dataclass
+class _Tagged:
+    """A part holding a set, whose dumped order would otherwise be its hash order."""
+
+    tags: set[str]
+    part_kind: str = "tagged"
+
+
+def test_a_set_is_keyed_in_sorted_order():
+    """A set dumps in hash order, which differs between processes, so it is sorted."""
+    tags = {f"tag-{n}" for n in range(32)}
+    keyed = material([ModelRequest(parts=[cast("UserPromptPart", _Tagged(tags))])], "m", PARAMS)
+    messages = cast("list[dict[str, list[dict[str, Json]]]]", keyed["messages"])
+
+    assert messages[0]["parts"][0]["tags"] == sorted(tags)
+
+
 def test_a_field_set_away_from_its_default_changes_the_key():
     """What was chosen is keyed: a new field set to anything but its default counts."""
     plain = material([ModelRequest(parts=[cast("UserPromptPart", _After("hi"))])], "m", PARAMS)
@@ -604,3 +633,25 @@ def test_a_call_keys_as_the_model_prepares_it(rig: Rig):
 
     assert resolved.output_mode != "auto"
     assert keys[0] == keys[1]
+
+
+def test_a_request_the_model_refuses_to_prepare_is_logged(
+    rig: Rig, caplog: pytest.LogCaptureFixture
+):
+    """Preparing runs before the call is tracked, so its failure is logged where it happens."""
+
+    class Refuses(FunctionModel):
+        def prepare_request(
+            self,
+            model_settings: ModelSettings | None,
+            model_request_parameters: ModelRequestParameters,
+        ) -> tuple[ModelSettings | None, ModelRequestParameters]:
+            raise ValueError("this model takes no such output")
+
+    inner = Refuses(lambda _messages, _info: ModelResponse(parts=[TextPart("ok")]))
+    messages: list[ModelMessage] = [ModelRequest(parts=[UserPromptPart(content="hi")])]
+
+    with pytest.raises(ValueError, match="no such output"):
+        asyncio.run(PinnedModel(inner, rig.ledger).request(messages, None, PARAMS))
+
+    assert "failed before it was sent: this model takes no such output" in caplog.text
