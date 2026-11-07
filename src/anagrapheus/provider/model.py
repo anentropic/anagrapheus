@@ -183,9 +183,24 @@ class PinnedModel(WrapperModel):
         settings: ModelSettings | None,
         parameters: ModelRequestParameters,
     ) -> PinKey:
-        """Build this call's key, and report it to ``on_key`` if one was given."""
+        """
+        Build this call's key, and report it to ``on_key`` if one was given.
+
+        The key is built from the request as the wrapped model prepares it, which is what
+        it sends: an ``"auto"`` output mode resolved to the model's own, its settings
+        merged in. Releases of pydantic-ai move that resolution between the agent and the
+        model, so a key built before it would change with the release, not the call.
+        """
         effective = merge_model_settings(self.settings, settings)
-        material = self._policy.material(messages, self.model_id, parameters, effective)
+        try:
+            effective, prepared = self.wrapped.prepare_request(effective, parameters)
+        except Exception as error:
+            # Preparing validates too (an output mode or tool the model can't take), and
+            # it runs before the call is tracked, so it is logged here as a draw's
+            # failure would be.
+            _log.warning("%s %s failed before it was sent: %s", self.model_id, self._kind, error)
+            raise
+        material = self._policy.material(messages, self.model_id, prepared, effective)
         key = pin_key(self._kind, material)
         if self._on_key is not None:
             self._on_key(key)

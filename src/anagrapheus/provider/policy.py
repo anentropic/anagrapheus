@@ -44,18 +44,38 @@ caller sends inside ``extra_body`` (OpenRouter's ``session_id``, OpenAI's ``user
 object) are dropped. The rest of ``extra_body`` stays in the key, because draw-changing
 settings ride there too: OpenRouter reasoning, Anthropic ``thinking``, a sampling
 parameter the provider's typed settings do not cover yet.
+
+**A library upgrade alone changes no key.** pydantic-ai adds fields to its parts and
+request parameters between releases, nearly always at a default that keeps the old
+behaviour, and a private bookkeeping field now and then. Dumped whole, each one would
+change the key of every call, so every recorded run would miss on replay after an
+upgrade that changed nothing about what the model is asked. So a field whose name
+starts with ``_`` is dropped, and so is a field at its declared default: a key records
+what was *chosen*, not what was left alone. A field set to anything else stays, and a
+new one set away from its default changes the key, as it should. The discriminators
+(``kind`` and the ``*_kind`` fields that have a value by default, such as ``part_kind``)
+are kept even at their default, since they are what tells one part type from another.
+
+The price is narrow and named: if pydantic-ai changes a field's default, a call made at
+the old default and one made at the new default key alike across that upgrade. Within
+one installed version a default is fixed, so the ledger never confuses two calls; only a
+replay across the upgrade can return an answer drawn under the old default.
 """
 
 # Design: note 04; upstream agent-core doc 00 §4a, §4c.
 
 from __future__ import annotations
 
+import dataclasses
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Protocol, cast
 
 from pydantic_core import to_jsonable_python
 
+from anagrapheus.timeline._canonical import canonical_json
+
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Sequence
 
     from pydantic_ai.messages import ModelMessage
     from pydantic_ai.models import ModelRequestParameters
@@ -79,7 +99,19 @@ _DELIVERY = frozenset({"cache"})
 #: prompt-cache settings (``anthropic_cache_messages`` and the like) and service tiers
 #: (``openai_service_tier``, ``anthropic_service_tier`` and the like) are dropped by
 #: :func:`_delivers` as well, so a new one does not need adding here.
-_DELIVERY_SETTINGS = frozenset({"timeout", "extra_headers", "service_tier", "cache"})
+#: ``request_timeout`` and ``first_event_timeout`` are deadlines and ``max_retries`` how
+#: often the provider's client tries again: none of them changes what one attempt draws.
+_DELIVERY_SETTINGS = frozenset(
+    {
+        "timeout",
+        "request_timeout",
+        "first_event_timeout",
+        "max_retries",
+        "extra_headers",
+        "service_tier",
+        "cache",
+    }
+)
 
 #: Settings that name the end user or session behind a call. ``openai_user`` is OpenAI's
 #: end-user id, sent on the OpenAI and OpenRouter routes alike.
@@ -130,8 +162,8 @@ class SemanticCallPolicy:
     Keeps the conversation's semantic content, the model's identity, the shape the
     answer is required to take, and the settings that change the draw — because each
     of those changes what is drawn. Drops everything in :data:`_VOLATILE`, which
-    changes between two runs of an identical call, and the settings that only change
-    how it is delivered.
+    changes between two runs of an identical call, the settings that only change how
+    it is delivered, and the fields nobody set: private ones and those at their default.
 
     The **output shape is included** deliberately, and it is the one inclusion that
     looks like it might break the rule "never how you intend to parse the response". It
@@ -174,7 +206,7 @@ class SemanticCallPolicy:
         allow-listed them would silently drop a new one's content from the key —
         making two different calls collide, which is the worse of the two failures.
         """
-        dumped = cast("Json", to_jsonable_python(part))
+        dumped = _chosen(part, cast("Json", to_jsonable_python(part)))
         if not isinstance(dumped, dict):
             return dumped
         return {key: value for key, value in dumped.items() if key not in _VOLATILE}
@@ -196,7 +228,7 @@ class SemanticCallPolicy:
         The fields in :data:`_DELIVERY` are dropped: they change how the request travels,
         not what is drawn.
         """
-        dumped = cast("Json", to_jsonable_python(parameters, fallback=repr))
+        dumped = _chosen(parameters, cast("Json", to_jsonable_python(parameters, fallback=repr)))
         if not isinstance(dumped, dict):
             return dumped
         return {
@@ -265,6 +297,73 @@ def _delivers(setting: str) -> bool:
         or setting.endswith("service_tier")
         or "cache" in setting.split("_")
     )
+
+
+def _chosen(value: object, dumped: Json) -> Json:
+    """
+    ``dumped`` less what nobody chose: private fields, and fields at their default.
+
+    Walks the object beside its dump, so the dump stays pydantic's own serialization and
+    only whole fields leave it. A key in the dump that is not a dataclass field (a
+    computed one, say) is kept. Sets are sorted, since their dumped order is the order
+    of their hashes and so differs between two processes.
+    """
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        if not isinstance(dumped, dict):
+            return dumped
+        declared = {field.name: field for field in dataclasses.fields(value)}
+        kept: dict[str, Json] = {}
+        for key, item in dumped.items():
+            field = declared.get(key)
+            if field is None:
+                kept[key] = item
+                continue
+            if key.startswith("_"):
+                continue
+            own = getattr(value, key)
+            if not _discriminates(field) and _at_default(field, own):
+                continue
+            kept[key] = _chosen(own, item)
+        return kept
+    if isinstance(value, Mapping) and isinstance(dumped, dict):
+        held = cast("Mapping[object, object]", value)
+        by_key = {str(key): item for key, item in held.items()}
+        return {
+            key: _chosen(by_key[key], item) if key in by_key else item
+            for key, item in dumped.items()
+        }
+    if isinstance(value, (set, frozenset)) and isinstance(dumped, list):
+        return sorted(dumped, key=canonical_json)
+    if isinstance(value, (list, tuple)) and isinstance(dumped, list):
+        items = cast("list[object] | tuple[object, ...]", value)
+        if len(items) == len(dumped):
+            return [_chosen(own, item) for own, item in zip(items, dumped, strict=True)]
+    return dumped
+
+
+def _discriminates(field: dataclasses.Field[object]) -> bool:
+    """
+    Whether a field names what kind of thing this is, so it stays at its default.
+
+    A discriminator always has a value (``part_kind="user-prompt"``), so a ``*_kind``
+    field that defaults to ``None`` is an option like any other and goes when unset.
+    """
+    named = field.name == "kind" or field.name.endswith("_kind")
+    return named and field.default is not None
+
+
+def _at_default(field: dataclasses.Field[object], value: object) -> bool:
+    """Whether a field holds its declared default, or what its default factory makes."""
+    if field.default is not dataclasses.MISSING:
+        default = field.default
+    elif field.default_factory is not dataclasses.MISSING:
+        default = field.default_factory()
+    else:
+        return False
+    try:
+        return bool(value == default)
+    except Exception:  # noqa: BLE001 - a value that can't be compared is kept, not dropped
+        return False
 
 
 def _without_identity(value: Json, keys: frozenset[str]) -> Json:

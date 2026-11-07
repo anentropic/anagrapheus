@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, cast
 
 import pytest
@@ -11,6 +12,7 @@ from pydantic_ai import Agent
 from pydantic_ai.messages import (
     ModelRequest,
     ModelResponse,
+    SystemPromptPart,
     TextPart,
     ToolCallPart,
     ToolReturnPart,
@@ -173,6 +175,111 @@ def test_an_unknown_part_kind_keeps_its_content():
     assert text != other
 
 
+@dataclass
+class _Before:
+    """A part as one release of the library shapes it."""
+
+    content: str
+    part_kind: str = "probe"
+
+
+@dataclass
+class _After:
+    """The same part a release later: a new field at its default, and a private one."""
+
+    content: str
+    style: str = "plain"
+    marks: list[str] = field(default_factory=lambda: list[str]())
+    _telemetry: str = "anything"
+    part_kind: str = "probe"
+
+
+def test_a_field_added_at_its_default_does_not_change_the_key():
+    """
+    A library upgrade that changes nothing about the call changes no key.
+
+    pydantic-ai adds fields to its parts and request parameters between releases, at a
+    default that keeps the old behaviour, and private bookkeeping fields now and then.
+    Dumped whole, each would re-key every call, and every recorded run would miss on
+    replay after an upgrade that changed nothing the model is asked.
+    """
+    before = material([ModelRequest(parts=[cast("UserPromptPart", _Before("hi"))])], "m", PARAMS)
+    after = material([ModelRequest(parts=[cast("UserPromptPart", _After("hi"))])], "m", PARAMS)
+
+    assert before == after
+
+
+def test_a_private_field_stays_out_of_the_key_whatever_it_holds():
+    """Private bookkeeping (pydantic-ai's telemetry fields) is never keyed, set or not."""
+    quiet = material([ModelRequest(parts=[cast("UserPromptPart", _After("hi"))])], "m", PARAMS)
+    traced = material(
+        [ModelRequest(parts=[cast("UserPromptPart", _After("hi", _telemetry="trace-123"))])],
+        "m",
+        PARAMS,
+    )
+
+    assert quiet == traced
+
+
+@dataclass
+class _Tagged:
+    """A part holding a set, whose dumped order would otherwise be its hash order."""
+
+    tags: set[str]
+    part_kind: str = "tagged"
+
+
+def test_a_set_is_keyed_in_sorted_order():
+    """A set dumps in hash order, which differs between processes, so it is sorted."""
+    tags = {f"tag-{n}" for n in range(32)}
+    keyed = material([ModelRequest(parts=[cast("UserPromptPart", _Tagged(tags))])], "m", PARAMS)
+    messages = cast("list[dict[str, list[dict[str, Json]]]]", keyed["messages"])
+
+    assert messages[0]["parts"][0]["tags"] == sorted(tags)
+
+
+def test_a_field_set_away_from_its_default_changes_the_key():
+    """What was chosen is keyed: a new field set to anything but its default counts."""
+    plain = material([ModelRequest(parts=[cast("UserPromptPart", _After("hi"))])], "m", PARAMS)
+    styled = material(
+        [ModelRequest(parts=[cast("UserPromptPart", _After("hi", style="terse"))])], "m", PARAMS
+    )
+    marked = material(
+        [ModelRequest(parts=[cast("UserPromptPart", _After("hi", marks=["x"]))])], "m", PARAMS
+    )
+
+    assert len({str(plain), str(styled), str(marked)}) == 3
+
+
+def test_a_part_kind_is_kept_at_its_default():
+    """
+    A part's kind is what tells one part type from another, so it stays in the key.
+
+    Every part's ``part_kind`` is its default. Dropped like any other default field, a
+    system prompt and a user prompt with the same words would be the same call.
+    """
+    said = material([ModelRequest(parts=[UserPromptPart(content="hi")])], "m", PARAMS)
+    told = material([ModelRequest(parts=[SystemPromptPart(content="hi")])], "m", PARAMS)
+
+    assert said != told
+
+
+def test_a_tool_keys_on_the_options_set_on_it():
+    """A tool's options at their default stay out of its key; one set away comes in."""
+    plain = ToolDefinition(name="look", parameters_json_schema={"type": "object"})
+    strict = ToolDefinition(name="look", parameters_json_schema={"type": "object"}, strict=True)
+
+    def keyed(tool: ToolDefinition) -> dict[str, Json]:
+        parameters = material([], "m", ModelRequestParameters(function_tools=[tool]))["parameters"]
+        tools = cast("dict[str, list[dict[str, Json]]]", parameters)["function_tools"]
+        return tools[0]
+
+    assert "strict" not in keyed(plain)
+    assert "sequential" not in keyed(plain)
+    assert keyed(plain)["name"] == "look"
+    assert keyed(strict)["strict"] is True
+
+
 def test_a_tool_that_keeps_its_name_but_changes_contract_is_a_different_call():
     """
     Keying tools by name alone replays an answer produced under a different contract.
@@ -271,14 +378,18 @@ def test_a_setting_about_delivery_does_not():
     """
     Settings about how the call travels stay out of the key.
 
-    A timeout, headers, a service tier and cache configuration change nothing about
-    what is drawn, and neither does a provider's own prefixed cache setting.
+    A timeout or a deadline, how often the client retries, headers, a service tier and
+    cache configuration change nothing about what is drawn, and neither does a
+    provider's own prefixed cache setting.
     """
     messages = [ModelRequest(parts=[UserPromptPart(content="hi")])]
     delivered = cast(
         "ModelSettings",
         {
             "timeout": 30,
+            "request_timeout": 120.0,
+            "first_event_timeout": 20.0,
+            "max_retries": 0,
             "extra_headers": {"x-trace": "1"},
             "service_tier": "flex",
             "cache": True,
@@ -499,3 +610,48 @@ def test_an_extra_body_holding_only_a_session_id_keys_as_none():
 
     assert material(messages, "m", PARAMS, with_session) == material(messages, "m", PARAMS)
     assert material(messages, "m", PARAMS, with_user) == material(messages, "m", PARAMS)
+
+
+def test_a_call_keys_as_the_model_prepares_it(rig: Rig):
+    """
+    An ``"auto"`` output mode keys as the mode the model resolves it to.
+
+    pydantic-ai resolves it in the model on one release and in the agent on a later one,
+    so the wrapper sees ``"auto"`` on the first and the resolved mode on the second. The
+    model is sent the same request either way, so it is one call.
+    """
+    keys: list[PinKey] = []
+    inner = FunctionModel(lambda _messages, _info: ModelResponse(parts=[TextPart("ok")]))
+    pinned = PinnedModel(inner, rig.ledger, on_key=keys.append)
+    output = ToolDefinition(name="final", parameters_json_schema={"type": "object"}, kind="output")
+    auto = ModelRequestParameters(output_mode="auto", output_tools=[output])
+    _, resolved = inner.prepare_request(None, auto)
+    messages: list[ModelMessage] = [ModelRequest(parts=[UserPromptPart(content="hi")])]
+
+    for parameters in (auto, resolved):
+        asyncio.run(pinned.request(messages, None, parameters))
+
+    assert resolved.output_mode != "auto"
+    assert keys[0] == keys[1]
+
+
+def test_a_request_the_model_refuses_to_prepare_is_logged(
+    rig: Rig, caplog: pytest.LogCaptureFixture
+):
+    """Preparing runs before the call is tracked, so its failure is logged where it happens."""
+
+    class Refuses(FunctionModel):
+        def prepare_request(
+            self,
+            model_settings: ModelSettings | None,
+            model_request_parameters: ModelRequestParameters,
+        ) -> tuple[ModelSettings | None, ModelRequestParameters]:
+            raise ValueError("this model takes no such output")
+
+    inner = Refuses(lambda _messages, _info: ModelResponse(parts=[TextPart("ok")]))
+    messages: list[ModelMessage] = [ModelRequest(parts=[UserPromptPart(content="hi")])]
+
+    with pytest.raises(ValueError, match="no such output"):
+        asyncio.run(PinnedModel(inner, rig.ledger).request(messages, None, PARAMS))
+
+    assert "failed before it was sent: this model takes no such output" in caplog.text
