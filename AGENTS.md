@@ -100,6 +100,10 @@ uv build
 - Update __all__ in __init__.py when adding public APIs
 - Write tests for new features (prefer TDD when appropriate)
 
+## GitHub Actions lockfile
+
+`.github/workflows/actions.lock` pins every action the workflows use, including the actions those actions use, to an exact commit. After adding a workflow or changing any `uses:` line, run `gh actions-lock --no-interactive` and commit the lockfile with the workflow change, or the "Verify lockfile" check fails. Install the extension with `gh extension install github/gh-actions-lock --pin v0.4.1`. Never edit the lockfile by hand. Dependabot updates it in its own PRs.
+
 ## Opening pull requests
 
 When you open a pull request, ask the user whether it needs a review. If they say yes:
