@@ -23,10 +23,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@v7.6.0
         with:
           enable-cache: true
           cache-dependency-glob: "pyproject.toml"
@@ -55,7 +55,7 @@ jobs:
       - name: Get app token
         id: app-token
         if: (steps.quality.outcome == 'failure' || steps.tests.outcome == 'failure') && env.HAS_APP == 'true'
-        uses: actions/create-github-app-token@v3
+        uses: actions/create-github-app-token@v3.3.0
         with:
           app-id: ${{ secrets.BOT_APP_ID }}
           private-key: ${{ secrets.BOT_APP_PRIVATE_KEY }}
