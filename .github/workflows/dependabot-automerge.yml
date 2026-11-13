@@ -27,6 +27,7 @@ on:
       - "CI"
       - "PR Coverage Report"
       - "Claude Review"
+      - "Docs"
       - "Verify lockfile"
     types: [completed]
 

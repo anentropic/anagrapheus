@@ -7,12 +7,14 @@ on:
   push:
     branches:
       - main
+  # Build (without deploying) on every PR, so a change that breaks the docs build
+  # fails a check on the PR instead of on main after merging. Dependabot auto-merge
+  # waits for this workflow too.
+  pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 concurrency:
   group: docs-${{ github.ref }}
   cancel-in-progress: true
@@ -51,7 +53,13 @@ jobs:
 
   deploy:
     name: Deploy to GitHub Pages
+    # Deploy only from main. PR runs (ref refs/pull/<n>/merge) and workflow_dispatch
+    # runs on other branches build the site without publishing it.
+    if: github.ref == 'refs/heads/main'
     needs: build
+    permissions:
+      pages: write
+      id-token: write
     runs-on: ubuntu-latest
     timeout-minutes: 5
     environment:
